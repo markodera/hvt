@@ -9,9 +9,10 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-
+import os
 from pathlib import Path
-
+from dotenv import load_dotenv
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,12 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 
 # Application definition
@@ -37,12 +38,28 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sites",
+
+    # Third-Party
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.github",
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
+
+
+    # Local apps
     "hvt.apps.authentication",
     "hvt.apps.organizations",
     "hvt.apps.users",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -50,6 +67,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = "hvt.urls"
@@ -77,12 +95,25 @@ WSGI_APPLICATION = "hvt.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST"),
+        "PORT": os.getenv("DB_PORT")
     }
 }
 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
 
+# Custom User model
+AUTH_USER_MODEL = "users.User"
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+
+# Frontend URL 
+FRONTEND_URL = "http://localhost:3000/"
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -107,7 +138,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Africa/Lagos"
 
 USE_I18N = True
 
@@ -123,3 +154,130 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+SITE_ID = 1
+
+# Django Rest Framework
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "hvt.apps.authentication.backends.APIKeyAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "hvt.apps.authentication.throttling.BurstRateThrottle",
+        "hvt.apps.authentication.throttling.OrganizationRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "burst": "20/second",
+        "organization": "1000/hour",
+        "api_key": "100/minute",
+        "anon": "10/min",
+    },
+    
+}
+
+# Simple JWT
+from datetime import timedelta
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKEN": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
+
+ACCOUNT_LOGIN_METHODS = {"email"} 
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"] 
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_UNIQUE_EMAIL = True
+
+# dj-rest-auth
+
+REST_AUTH = {
+    "USE_JWT": True,
+    "JWT_AUTH_COOKIE": "auth-token",
+    "JWT_AUTH_REFRESH_COOKIE": "refresh-token",
+    "TOKEN_MODEL": None,
+    "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
+    "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
+    "PASSWORD_RESET_USE_SITES_DOMAIN": False,
+}
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"
+# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# EMAIL_HOST = "smtp.gmail.com"
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+# EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+# DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# SOCIAL AUTHENTICATION(Google & Github)
+SOCIALACCOUNT_AUTO_SIGNUP =True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION =True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
+
+# Custom adapter for email-only users
+SOCIALACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.CustomSocialAccountAdapter"
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": ["profile", "email"],
+        "AUTH_PARAMS": {"access_type": "online"},
+        "APP": {
+            "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+            "secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+        },
+    },
+    "github": {
+        "SCOPE": ["user:email"],
+        "APP": {
+            "client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+            "secret": os.getenv("GITHUB_CLIENT_SECRET", ""),
+
+        }
+    }
+}
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com")
+
+# allauth - Comment out to use console email backend for testing
+# ACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.ResendAccountAdapter"
+
+# LOGGING Configuration
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "hvt.apps.authentication": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": True,
+        },
+        "hvt.apps.users": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": True,
+        },
+    },
+}
+
