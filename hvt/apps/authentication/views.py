@@ -2,6 +2,7 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiExample
 import hmac
 import hashlib
 import os
@@ -11,11 +12,29 @@ from hvt.apps.users.models import User
 from hvt.api.v1.serializers.users import UserSerializer
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Auth"],
+        summary="Get current user profile",
+        description="Returns the authenticated user's profile information.",
+    ),
+    put=extend_schema(
+        tags=["Auth"],
+        summary="Update current user profile (full)",
+        description="Replace all editable fields on the current user's profile.",
+    ),
+    patch=extend_schema(
+        tags=["Auth"],
+        summary="Update current user profile (partial)",
+        description="Partially update the current user's profile.",
+    ),
+)
 class CurrentUserView(generics.RetrieveUpdateAPIView):
     """
     GET /api/v1/auth/me - Get current authenticated user
-    UPDATE /api/v1/auth/me - Update current user profile
+    PUT/PATCH /api/v1/auth/me - Update current user profile
     """
+
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -27,7 +46,7 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
 def resend_webhook(request):
     """
     Handle Resend webhook events for email delivery status tracking.
-    
+
     Verifies the webhook signature and processes events like:
     - email.delivered
     - email.bounced
@@ -37,14 +56,14 @@ def resend_webhook(request):
     """
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    
+
     # Verify signature header
     raw = request.body
     sig = request.headers.get("Resend-Signature", "")
     secret = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
-    
+
     if secret:
-        expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+        expected = hmac.HMAC(secret.encode(), raw, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return JsonResponse({"error": "Invalid signature"}, status=403)
 
@@ -52,9 +71,9 @@ def resend_webhook(request):
         payload = json.loads(raw)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
-    
+
     event_type = payload.get("type", "")
-    
+
     # Process events - extend this based on your needs
     # You can log to audit trail, update email status, trigger alerts, etc.
     if event_type == "email.bounced":
@@ -66,5 +85,5 @@ def resend_webhook(request):
     elif event_type == "email.complained":
         # Handle spam complaint
         pass
-    
+
     return JsonResponse({"ok": True})

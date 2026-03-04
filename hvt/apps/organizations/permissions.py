@@ -1,5 +1,7 @@
 from rest_framework import permissions
 from hvt.apps.organizations.models import APIKey
+
+
 class IsOrganizationOwner(permissions.BasePermission):
     """
     Allow access only to the owner of the organization.
@@ -10,4 +12,3 @@ class IsOrganizationOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         # Check if user is the owner of the organization
         return obj.owner == request.user
- 

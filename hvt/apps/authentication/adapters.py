@@ -8,11 +8,11 @@ from .email import ResendEmailService
 class ResendAccountAdapter(DefaultAccountAdapter):
     """
     Custom account adapter that uses Resend for sending emails.
-    
+
     Leverages allauth's existing email templates while routing
     the actual email delivery through the Resend API.
     """
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.email_service = ResendEmailService()
@@ -20,10 +20,10 @@ class ResendAccountAdapter(DefaultAccountAdapter):
     def send_mail(self, template_prefix, email, context):
         """
         Override the default send_mail method to use Resend.
-        
+
         Uses allauth's template system for email content while
         sending via Resend API.
-        
+
         Args:
             template_prefix: The template prefix (e.g., 'account/email/email_confirmation')
             email: The recipient email address
@@ -37,7 +37,7 @@ class ResendAccountAdapter(DefaultAccountAdapter):
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
     """
     Custom adapter for social login with email-only User model.
-    - No username required 
+    - No username required
     - Auto-verifies required (provider already verified)
     - Populates first_name/last_name from provider data
     """
@@ -48,14 +48,14 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         """
         user = super().populate_user(request, sociallogin, data)
 
-        # Set email 
+        # Set email
         user.email = data.get("email", "")
 
         # Set name fields from provider data
         user.first_name = data.get("first_name", "")
         user.last_name = data.get("last_name", "")
 
-        # If provider gives full name but not first/last split it 
+        # If provider gives full name but not first/last split it
         if not user.first_name and not user.last_name:
             full_name = data.get("name", "")
             if full_name:
@@ -64,7 +64,7 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
                 user.last_name = parts[1] if len(parts) > 1 else ""
 
         return user
-    
+
     def save_user(self, request, sociallogin, form=None):
         user = super().save_user(request, sociallogin, form)
         user.is_active = True

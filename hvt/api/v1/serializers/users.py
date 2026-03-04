@@ -1,13 +1,17 @@
 from rest_framework import serializers
+from hvt.apps.authentication.models import AuditLog
 from hvt.apps.users.models import User
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.serializers import LoginSerializer
+from drf_spectacular.utils import extend_schema_field
+
 
 class CustomRegisterSerializer(RegisterSerializer):
     """Custom registration serializer without username"""
+
     username = None
 
-    class Meta: 
+    class Meta:
         model = User
         fields = ["email", "password1", "password2", "first_name", "last_name"]
 
@@ -18,7 +22,40 @@ class CustomRegisterSerializer(RegisterSerializer):
             "first_name": self.validated_data.get("first_name", ""),
             "last_name": self.validated_data.get("last_name", ""),
         }
-    
+
+    def save(self, request):
+        """Override to add audit logging and webhook trigger for self-registration."""
+        user = super().save(request)
+
+        # Log registration event
+        AuditLog.log(
+            event_type=AuditLog.EventType.USER_REGISTER,
+            request=request,
+            user=user,
+            organization=user.organization,
+            event_data={
+                "email": user.email,
+                "has_organization": user.organization is not None,
+            },
+            success=True,
+        )
+
+        # Trigger webhook for self-registration
+        if user.organization:
+            from hvt.apps.organizations.webhooks import trigger_webhook_event
+
+            trigger_webhook_event(
+                organization=user.organization,
+                event_type="user.registered",
+                payload={
+                    "user_id": str(user.id),
+                    "email": user.email,
+                    "registration_method": "email",
+                },
+            )
+
+        return user
+
 
 class CustomLoginSerializer(LoginSerializer):
     """
@@ -31,9 +68,11 @@ class CustomLoginSerializer(LoginSerializer):
         fields = super().get_fields()
         fields.pop("username", None)
         return fields
-    
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
+
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source="get_role_display", read_only=True)
 
@@ -52,19 +91,29 @@ class UserSerializer(serializers.ModelSerializer):
             "is_test",
             "created_at",
         ]
-        read_only_fields = ["id", "email","organization", "is_test", "created_at"]
+        read_only_fields = ["id", "email", "organization", "is_test", "created_at"]
+
 
 class UserCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating users (Admin only)."""
+
     password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
         model = User
-        fields = ["email", "password", "first_name", "last_name", "organization", "role"]
+        fields = [
+            "email",
+            "password",
+            "first_name",
+            "last_name",
+            "organization",
+            "role",
+        ]
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
-    
+
+
 class UserRoleUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating user role only."""
 
@@ -74,11 +123,15 @@ class UserRoleUpdateSerializer(serializers.ModelSerializer):
 
         def validate_role(self, value):
             if value not in [choice[0] for choice in User.Role.choices]:
-                raise serializers.ValidationError(f"Invalid role must be one of: {', '.join([c[0] for c in User.Role.choices])}")
+                raise serializers.ValidationError(
+                    f"Invalid role must be one of: {', '.join([c[0] for c in User.Role.choices])}"
+                )
             return value
-        
+
+
 class OrganizationMemberSerializer(serializers.ModelSerializer):
     """Serializer for listing organization members when role with info."""
+
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     can_be_promoted = serializers.SerializerMethodField()
@@ -104,9 +157,12 @@ class OrganizationMemberSerializer(serializers.ModelSerializer):
 
         read_only_fields = fields
 
-    def get_can_be_promoted(self, obj):
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_be_promoted(self, obj) -> bool:
         """Check if a user can be promoted to a higher role."""
         return obj.role in ["member", "admin"]
-    def get_can_be_demoted(self, obj):
+    
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_be_demoted(self, obj) -> bool:
         """Check if a user can be demoted to a lower role."""
         return obj.role in ["owner", "admin"]

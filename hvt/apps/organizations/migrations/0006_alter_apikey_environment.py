@@ -4,15 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations', '0005_apikey_environment'),
+        ("organizations", "0005_apikey_environment"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='apikey',
-            name='environment',
-            field=models.CharField(choices=[('test', 'Test'), ('live', 'Live')], default='test', help_text='Test keys only access test data, live keys access production data', max_length=4),
+            model_name="apikey",
+            name="environment",
+            field=models.CharField(
+                choices=[("test", "Test"), ("live", "Live")],
+                default="test",
+                help_text="Test keys only access test data, live keys access production data",
+                max_length=4,
+            ),
         ),
     ]

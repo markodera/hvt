@@ -43,7 +43,7 @@ Authorization: Bearer <access_token>
 
 ### 3. Generate API Key
 ```bash
-POST /api/v1/organizations/<org_id>/api-keys/
+POST /api/v1/organizations/current/keys/
 Authorization: Bearer <access_token>
 
 {

@@ -232,12 +232,37 @@ POST   /api/v1/auth/email/resend            → Resend verification
 
 ### Organization & API Keys (Platform)
 ```
-POST   /api/v1/organizations               → Create organization
-GET    /api/v1/organizations               → List organizations
-GET    /api/v1/organizations/:id           → Get organization details
-POST   /api/v1/organizations/:id/keys      → Generate API key
-GET    /api/v1/organizations/:id/keys      → List API keys
-DELETE /api/v1/organizations/:id/keys/:key → Revoke API key
+GET    /api/v1/organizations                → List organizations (admin)
+POST   /api/v1/organizations                → Create organization
+GET    /api/v1/organizations/<id>           → Get organization details (admin)
+GET    /api/v1/organizations/current        → Get current organization
+PATCH  /api/v1/organizations/current        → Update current organization
+GET    /api/v1/organizations/current/members → List organization members
+POST   /api/v1/organizations/current/keys   → Generate API key
+GET    /api/v1/organizations/current/keys   → List API keys
+GET    /api/v1/organizations/current/keys/<id>         → Get API key details
+DELETE /api/v1/organizations/current/keys/<id>         → Revoke (delete) API key
+PATCH  /api/v1/organizations/current/keys/<id>/revoke  → Deactivate API key
+```
+
+### Webhooks
+```
+GET    /api/v1/organizations/current/webhooks              → List webhooks
+POST   /api/v1/organizations/current/webhooks              → Create webhook
+GET    /api/v1/organizations/current/webhooks/<id>         → Get webhook details
+PATCH  /api/v1/organizations/current/webhooks/<id>         → Update webhook
+DELETE /api/v1/organizations/current/webhooks/<id>         → Delete webhook
+GET    /api/v1/organizations/current/webhooks/<id>/deliveries → Delivery history
+```
+
+### User Management
+```
+GET    /api/v1/users              → List org users
+POST   /api/v1/users              → Create user (admin)
+GET    /api/v1/users/<id>         → Get user details
+PATCH  /api/v1/users/<id>         → Update user (admin)
+DELETE /api/v1/users/<id>         → Delete user (admin)
+PATCH  /api/v1/users/<id>/role    → Change user role (admin)
 ```
 
 All endpoints use **JWT token-based authentication** or **API key authentication**.
@@ -274,6 +299,8 @@ We use Django **internally**, but expose a **pure REST API**. Your app never dep
 * ✅ Email verification enforcement
 * ✅ HTTPS-only in production
 * ✅ CORS configuration per organization
+* ✅ Webhook HMAC-SHA256 signatures
+* ✅ Audit logging for all auth events
 
 **No shortcuts. Security is non-negotiable.**
 
@@ -289,15 +316,18 @@ We use Django **internally**, but expose a **pure REST API**. Your app never dep
 - [x] Email verification flow
 - [x] Password reset flow
 
-### Phase 2: Platform Infrastructure
+### Phase 2: Platform Infrastructure ✅
 - [x] API key generation & management
 - [x] Rate limiting per organization
 - [x] Organization roles & permissions
-- [ ] Webhooks system
-- [ ] Audit logging
+- [x] Webhooks system
+- [x] Audit logging
 
-### Phase 3: Developer Experience
-- [ ] API documentation (OpenAPI/Swagger)
+### Phase 3: Developer Experience ✅
+- [x] API documentation (OpenAPI/Swagger)
+- [x] Standardized error responses
+- [x] Pagination & filtering
+- [x] Developer quickstart guide
 - [ ] JavaScript SDK
 - [ ] Python SDK
 - [ ] Example integrations (Next.js, Express, Django)
@@ -372,9 +402,11 @@ Visit http://localhost:8000/admin to access the admin panel.
 
 ## Documentation
 
-* **API Docs:** [Coming Soon]
-* **Integration Guides:** [Coming Soon]
-* **Self-Hosting Guide:** [Coming Soon]
+* **Developer Quickstart:** [docs/QUICKSTART.md](docs/QUICKSTART.md)
+* **API Key Guide:** [API_KEY_GUIDE.md](API_KEY_GUIDE.md)
+* **Browser Auth:** [docs/BROWSER_AUTHENTICATION.md](docs/BROWSER_AUTHENTICATION.md)
+* **Webhooks:** [docs/WEBHOOKS.md](docs/WEBHOOKS.md)
+* **API Docs (Swagger):** `/api/docs/` (when running locally)
 
 ---
 

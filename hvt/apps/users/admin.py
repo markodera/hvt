@@ -5,7 +5,14 @@ from .models import User
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ["email", "first_name", "last_name", "organization", "is_active", "is_staff"]
+    list_display = [
+        "email",
+        "first_name",
+        "last_name",
+        "organization",
+        "is_active",
+        "is_staff",
+    ]
     list_filter = ["is_active", "is_staff", "organization"]
     search_fields = ["email", "first_name", "last_name"]
     ordering = ["-created_at"]
@@ -20,8 +27,9 @@ class UserAdmin(BaseUserAdmin):
     readonly_fields = ["created_at", "updated_at"]
 
     add_fieldsets = (
-        (None, {
+        None,
+        {
             "classes": ("wide",),
-            "fields": ("email", "password1", "password2", "organization")
-        })
+            "fields": ("email", "password1", "password2", "organization"),
+        },
     )

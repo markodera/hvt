@@ -1,0 +1,271 @@
+﻿python : Creating test database for alias 'default'...
+At line:1 char:1
++ python manage.py test hvt.apps.organizations.tests_webhooks hvt.apps. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Creating test d...as 'default'... 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+C:\Users\MARK\.virtualenvs\Shopping-Angel-54bVX0mS\Lib\site-packages\dj_rest_au
+th\registration\serializers.py:228: UserWarning: 
+app_settings.USERNAME_REQUIRED is deprecated, use: 
+app_settings.SIGNUP_FIELDS['username']['required']
+  required=allauth_account_settings.USERNAME_REQUIRED,
+C:\Users\MARK\.virtualenvs\Shopping-Angel-54bVX0mS\Lib\site-packages\dj_rest_au
+th\registration\serializers.py:230: UserWarning: app_settings.EMAIL_REQUIRED 
+is deprecated, use: app_settings.SIGNUP_FIELDS['email']['required']
+  email = 
+serializers.EmailField(required=allauth_account_settings.EMAIL_REQUIRED)
+C:\Users\MARK\.virtualenvs\Shopping-Angel-54bVX0mS\Lib\site-packages\dj_rest_au
+th\registration\serializers.py:288: UserWarning: app_settings.EMAIL_REQUIRED 
+is deprecated, use: app_settings.SIGNUP_FIELDS['email']['required']
+  email = 
+serializers.EmailField(required=allauth_account_settings.EMAIL_REQUIRED)
+......Webhook delivery got 500: webhook=fe934fe8-4cae-4301-8c65-a248081e5112 
+event=user.created attempt=1
+Webhook delivery got 500: webhook=fe934fe8-4cae-4301-8c65-a248081e5112 
+event=user.created attempt=2
+Webhook delivery got 500: webhook=fe934fe8-4cae-4301-8c65-a248081e5112 
+event=user.created attempt=3
+Webhook auto-disabled after 10 consecutive failures: 
+webhook=fe934fe8-4cae-4301-8c65-a248081e5112 url=https://example.com/hook
+..Webhook delivery got 500: webhook=d952c242-75df-4847-bb59-037406930351 
+event=user.created attempt=1
+Webhook delivery got 500: webhook=d952c242-75df-4847-bb59-037406930351 
+event=user.created attempt=2
+Webhook delivery got 500: webhook=d952c242-75df-4847-bb59-037406930351 
+event=user.created attempt=3
+.Webhook delivery failed: webhook=7428713f-53bf-465d-9d04-d35d7f2ac0fb 
+event=user.created attempt=1 error=Connection refused
+Webhook delivery failed: webhook=7428713f-53bf-465d-9d04-d35d7f2ac0fb 
+event=user.created attempt=2 error=Connection refused
+Webhook delivery failed: webhook=7428713f-53bf-465d-9d04-d35d7f2ac0fb 
+event=user.created attempt=3 error=Connection refused
+.......[INFO] 2026-03-04 07:26:58,017 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:02,158 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:03,518 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:04,863 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:06,137 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:07,365 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:08,637 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:11,138 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User other@example.com is member, denying access
+.[INFO] 2026-03-04 07:27:12,751 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+..[INFO] 2026-03-04 07:27:15,299 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:16,686 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:27:18,063 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.............[INFO] 2026-03-04 07:27:28,763 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 4148df88, env: live
+[INFO] 2026-03-04 07:27:28,772 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: 4148df88 (live)
+.[INFO] 2026-03-04 07:27:30,061 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: d979c3ce, env: test
+[INFO] 2026-03-04 07:27:30,066 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: d979c3ce (test)
+.[INFO] 2026-03-04 07:27:31,420 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 489bd43f, env: live
+[WARNING] 2026-03-04 07:27:31,423 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key inactive/expired: 489bd43f
+.[INFO] 2026-03-04 07:27:32,706 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 80393b15, env: test
+[WARNING] 2026-03-04 07:27:32,708 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key inactive/expired: 80393b15
+.[WARNING] 2026-03-04 07:27:33,952 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Invalid key format
+.[INFO] 2026-03-04 07:27:35,268 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 60fc1b49, env: live
+[WARNING] 2026-03-04 07:27:35,270 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key not found: 60fc1b49
+............[WARNING] 2026-03-04 07:28:11,839 
+hvt.apps.authentication.permissions: [CanChangeRole] Only owners can change 
+owner role
+.....[WARNING] 2026-03-04 07:28:32,301 hvt.apps.authentication.permissions: 
+[CanChangeRole] Owner owner@example.com cannot demote themselves
+.[INFO] 2026-03-04 07:28:36,299 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User admin@example.com is admin, granting access
+.[INFO] 2026-03-04 07:28:40,097 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] API key detected for read-only request
+.[INFO] 2026-03-04 07:28:43,840 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User member@example.com is member, denying access
+.[INFO] 2026-03-04 07:28:47,583 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:28:50,507 hvt.apps.authentication.permissions: 
+[IsOrgMemberOrAPIKey] API key detected for read-only request
+.[INFO] 2026-03-04 07:28:52,980 hvt.apps.authentication.permissions: 
+[IsOrgMemberOrAPIKey] User member@example.com is org member, granting access
+.[INFO] 2026-03-04 07:28:55,544 hvt.apps.authentication.permissions: 
+[IsOrgMemberOrAPIKey] User noorg@example.com has no organization
+.[INFO] 2026-03-04 07:28:59,371 hvt.apps.authentication.permissions: 
+[IsOrgOwnerOrAPIKey] User admin@example.com is admin, denying access
+.[INFO] 2026-03-04 07:29:03,378 hvt.apps.authentication.permissions: 
+[IsOrgOwnerOrAPIKey] API key detected for read-only request
+.[INFO] 2026-03-04 07:29:07,378 hvt.apps.authentication.permissions: 
+[IsOrgOwnerOrAPIKey] User member@example.com is member, denying access
+.[INFO] 2026-03-04 07:29:11,111 hvt.apps.authentication.permissions: 
+[IsOrgOwnerOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:29:16,390 hvt.apps.authentication.permissions: 
+[IsSelfOrOrgAdmin] Admin admin@example.com editing member1@example.com
+..[INFO] 2026-03-04 07:29:26,387 hvt.apps.authentication.permissions: 
+[IsSelfOrOrgAdmin] Admin owner@example.com editing member1@example.com
+[INFO] 2026-03-04 07:29:26,387 hvt.apps.authentication.permissions: 
+[IsSelfOrOrgAdmin] Admin owner@example.com editing admin@example.com
+.[INFO] 2026-03-04 07:29:31,409 hvt.apps.authentication.permissions: 
+[IsSelfOrOrgAdmin] User member1@example.com editing self
+.[INFO] 2026-03-04 07:29:35,497 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User admin@example.com is admin, granting access
+F[INFO] 2026-03-04 07:29:39,950 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: bda04602, env: test
+[INFO] 2026-03-04 07:29:39,958 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: bda04602 (test)
+[WARNING] 2026-03-04 07:29:39,958 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] API key denied for write request: PATCH
+.[INFO] 2026-03-04 07:29:43,748 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User member@example.com is member, denying access
+.[INFO] 2026-03-04 07:29:47,472 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+.[INFO] 2026-03-04 07:29:51,185 hvt.apps.authentication.permissions: 
+[IsOrgAdminOrAPIKey] User owner@example.com is owner, granting access
+F......[INFO] 2026-03-04 07:30:16,322 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 1ff6b464, env: live
+[WARNING] 2026-03-04 07:30:16,330 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key inactive/expired: 1ff6b464
+.[INFO] 2026-03-04 07:30:17,552 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: ee6357bd, env: live
+[WARNING] 2026-03-04 07:30:17,555 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key inactive/expired: ee6357bd
+.[WARNING] 2026-03-04 07:30:18,842 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Invalid key format
+.[INFO] 2026-03-04 07:30:20,067 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 459cf5bf, env: live
+[WARNING] 2026-03-04 07:30:20,069 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Hash mismatch for: 459cf5bf
+.[INFO] 2026-03-04 07:30:21,316 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: deadbeef, env: live
+[WARNING] 2026-03-04 07:30:21,318 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key not found: deadbeef
+..[INFO] 2026-03-04 07:30:23,761 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 28d90e55, env: live
+[INFO] 2026-03-04 07:30:23,764 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: 28d90e55 (live)
+.[INFO] 2026-03-04 07:30:25,043 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: d0fdc800, env: live
+[INFO] 2026-03-04 07:30:25,046 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: d0fdc800 (live)
+.C:\Users\MARK\.virtualenvs\Shopping-Angel-54bVX0mS\Lib\site-packages\dj_rest_a
+uth\serializers.py:62: UserWarning: app_settings.AUTHENTICATION_METHOD is 
+deprecated, use: app_settings.LOGIN_METHODS
+  if allauth_account_settings.AUTHENTICATION_METHOD == 
+allauth_account_settings.AuthenticationMethod.EMAIL:
+[INFO] 2026-03-04 07:30:28,197 hvt.apps.authentication.permissions: 
+[IsOrgOwnerOrAPIKey] User test@example.com is owner, granting access
+[INFO] 2026-03-04 07:30:28,209 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: 5e243301, env: test
+[INFO] 2026-03-04 07:30:28,216 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Success: 5e243301 (test)
+[INFO] 2026-03-04 07:30:28,216 hvt.apps.authentication.permissions: 
+[IsOrgMemberOrAPIKey] API key detected for read-only request
+.[INFO] 2026-03-04 07:30:29,539 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Looking for prefix: invalid, env: live
+[WARNING] 2026-03-04 07:30:29,542 hvt.apps.authentication.backends: 
+[APIKeyAuthentication] Key not found: invalid
+.......[INFO] 2026-03-04 07:30:41,138 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.user: admin@example.com
+[INFO] 2026-03-04 07:30:41,138 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth: None
+[INFO] 2026-03-04 07:30:41,138 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth type: <class 'NoneType'>
+[INFO] 2026-03-04 07:30:41,138 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] User is admin, granting access
+.[INFO] 2026-03-04 07:30:43,668 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.user: None
+[INFO] 2026-03-04 07:30:43,668 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth: Test Key (ab2e3e74...)
+[INFO] 2026-03-04 07:30:43,668 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth type: <class 
+'hvt.apps.organizations.models.APIKey'>
+[INFO] 2026-03-04 07:30:43,668 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] API key detected for read-only request
+.[INFO] 2026-03-04 07:30:46,225 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.user: test@example.com
+[INFO] 2026-03-04 07:30:46,225 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth: None
+[INFO] 2026-03-04 07:30:46,225 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth type: <class 'NoneType'>
+[INFO] 2026-03-04 07:30:46,225 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] No valid auth found, denying access
+.[INFO] 2026-03-04 07:30:48,846 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.user: AnonymousUser
+[INFO] 2026-03-04 07:30:48,846 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth: None
+[INFO] 2026-03-04 07:30:48,846 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] request.auth type: <class 'NoneType'>
+[INFO] 2026-03-04 07:30:48,846 hvt.apps.authentication.permissions: 
+[IsAdminOrAPIKey] No valid auth found, denying access
+.[INFO] 2026-03-04 07:30:51,340 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.user: None
+[INFO] 2026-03-04 07:30:51,340 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth: Test Key (be446b5f...)
+[INFO] 2026-03-04 07:30:51,341 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth type: <class 
+'hvt.apps.organizations.models.APIKey'>
+[INFO] 2026-03-04 07:30:51,341 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] API Key detected, granting access
+.[INFO] 2026-03-04 07:30:53,813 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.user: test@example.com
+[INFO] 2026-03-04 07:30:53,813 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth: None
+[INFO] 2026-03-04 07:30:53,813 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth type: <class 'NoneType'>
+[INFO] 2026-03-04 07:30:53,813 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] User is authenticated via JWT
+.[INFO] 2026-03-04 07:30:56,301 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.user: AnonymousUser
+[INFO] 2026-03-04 07:30:56,302 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth: None
+[INFO] 2026-03-04 07:30:56,302 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] request.auth type: <class 'NoneType'>
+[INFO] 2026-03-04 07:30:56,302 hvt.apps.authentication.permissions: 
+[IsAuthenticatedOrAPIKey] No valid auth found, denying access
+.
+======================================================================
+FAIL: test_admin_cannot_promote_to_owner (hvt.apps.users.tests.RoleUpdateEndpoi
+ntTest.test_admin_cannot_promote_to_owner)
+Admin should NOT be able to promote member to owner via endpoint
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\MARK\Documents\GitHub\hvt\hvt\apps\users\tests.py", line 516, 
+in test_admin_cannot_promote_to_owner
+    self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+AssertionError: 200 != 403
+
+======================================================================
+FAIL: test_owner_demote_admin_to_member 
+(hvt.apps.users.tests.RoleUpdateEndpointTest.test_owner_demote_admin_to_member)
+Owner should be able to demote admin to member
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\MARK\Documents\GitHub\hvt\hvt\apps\users\tests.py", line 538, 
+in test_owner_demote_admin_to_member
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+AssertionError: 400 != 200
+
+----------------------------------------------------------------------
+Ran 113 tests in 264.546s
+
+FAILED (failures=2)
+Destroying test database for alias 'default'...
+
+Found 113 test(s).
+System check identified no issues (0 silenced).

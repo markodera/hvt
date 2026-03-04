@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,7 +22,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+")
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
@@ -39,7 +42,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
-
     # Third-Party
     "rest_framework",
     "rest_framework_simplejwt",
@@ -50,8 +52,8 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.github",
     "dj_rest_auth",
     "dj_rest_auth.registration",
-
-
+    "drf_spectacular",
+    "django_filters",
     # Local apps
     "hvt.apps.authentication",
     "hvt.apps.organizations",
@@ -100,7 +102,7 @@ DATABASES = {
         "USER": os.getenv("DB_USER"),
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": os.getenv("DB_HOST"),
-        "PORT": os.getenv("DB_PORT")
+        "PORT": os.getenv("DB_PORT"),
     }
 }
 
@@ -112,7 +114,7 @@ CORS_ALLOWED_ORIGINS = [
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 
-# Frontend URL 
+# Frontend URL
 FRONTEND_URL = "http://localhost:3000/"
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -177,11 +179,74 @@ REST_FRAMEWORK = {
         "api_key": "100/minute",
         "anon": "10/min",
     },
-    
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Standardized error envelope for all API errors
+    "EXCEPTION_HANDLER": "hvt.exceptions.hvt_exception_handler",
+    # Pagination
+    "DEFAULT_PAGINATION_CLASS": "hvt.pagination.StandardPagination",
+    "PAGE_SIZE": 25,
+    # Filtering
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
+}
+
+# drf-spectacular (OpenAPI / Swagger)
+SPECTACULAR_SETTINGS = {
+    "TITLE": "HVT Authentication API",
+    "DESCRIPTION": (
+        "HVT is a REST-first authentication service that serves as an identity provider "
+        "and single source of truth for authentication. It handles user lifecycle management, "
+        "JWT + refresh token auth, social OAuth (Google/GitHub), per-org API keys, "
+        "role-based access control, webhooks, and audit logging."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SCHEMA_PATH_PREFIX": r"/api/v1/",
+    "TAGS": [
+        {"name": "Auth", "description": "Login, registration, password reset, social OAuth, and token management"},
+        {"name": "Users", "description": "User CRUD, role management, and organization membership"},
+        {"name": "Organizations", "description": "Organization lifecycle and configuration"},
+        {"name": "API Keys", "description": "Create, list, and revoke API keys for server-to-server auth"},
+        {"name": "Webhooks", "description": "Configure webhooks for auth event notifications"},
+    ],
+    "SECURITY": [
+        {"BearerAuth": []},
+        {"APIKeyAuth": []},
+    ],
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {  # <-- MUST be plural "securitySchemes"
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",  # <-- "scheme" not "schema"
+                "bearerFormat": "JWT",
+                "description": "JWT access token. Obtain via POST /api/v1/auth/login/",
+            },
+            "APIKeyAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": "Organization API key (hvt_live_* or hvt_test_*)",
+            },
+        },
+    },
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,
+        "displayOperationId": False,
+        "filter": True,
+    },
+    "FIELD_TYPE_MAPPING": {
+        "rest_framework.fields.ReadOnlyField": "str",
+    }
 }
 
 # Simple JWT
 from datetime import timedelta
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -189,8 +254,8 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
-ACCOUNT_LOGIN_METHODS = {"email"} 
-ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"] 
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_UNIQUE_EMAIL = True
 
@@ -217,8 +282,8 @@ PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"
 # DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # SOCIAL AUTHENTICATION(Google & Github)
-SOCIALACCOUNT_AUTO_SIGNUP =True
-SOCIALACCOUNT_EMAIL_AUTHENTICATION =True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 
@@ -239,19 +304,20 @@ SOCIALACCOUNT_PROVIDERS = {
         "APP": {
             "client_id": os.getenv("GITHUB_CLIENT_ID", ""),
             "secret": os.getenv("GITHUB_CLIENT_SECRET", ""),
-
-        }
-    }
+        },
+    },
 }
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
 
 # allauth - Comment out to use console email backend for testing
 # ACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.ResendAccountAdapter"
 
 # LOGGING Configuration
+APP_LOG_LEVEL = "INFO" if DEBUG else "WARNING"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -270,14 +336,13 @@ LOGGING = {
     "loggers": {
         "hvt.apps.authentication": {
             "handlers": ["console"],
-            "level": "DEBUG",
+            "level": APP_LOG_LEVEL,
             "propagate": True,
         },
         "hvt.apps.users": {
             "handlers": ["console"],
-            "level": "DEBUG",
+            "level": APP_LOG_LEVEL,
             "propagate": True,
         },
     },
 }
-
