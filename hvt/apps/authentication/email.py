@@ -1,6 +1,6 @@
 from typing import Optional, Any
 import resend
-import os
+from django.conf import settings
 
 
 class ResendEmailService:
@@ -10,12 +10,12 @@ class ResendEmailService:
     """
 
     def __init__(self, api_key: Optional[str] = None):
-        resend.api_key = api_key or os.getenv("RESEND_API_KEY", "")
+        resend.api_key = api_key or getattr(settings, "RESEND_API_KEY", "")
 
     def send(
         self,
         *,
-        to: str,
+        to: "str | list[str]",
         subject: str,
         html: str,
         from_email: Optional[str] = None,
@@ -25,7 +25,7 @@ class ResendEmailService:
         Send an email using the Resend API.
 
         Args:
-            to: Recipient email address
+            to: Recipient email address or list of addresses
             subject: Email subject line
             html: HTML content of the email
             from_email: Sender email address (uses DEFAULT_FROM_EMAIL if not provided)
@@ -36,8 +36,8 @@ class ResendEmailService:
         """
         params = {
             "from_": from_email
-            or os.getenv("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com"),
-            "to": [to],
+            or getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"),
+            "to": [to] if isinstance(to, str) else to,
             "subject": subject,
             "html": html,
         }
@@ -75,12 +75,14 @@ class ResendEmailBackend(BaseEmailBackend):
 
         try:
             # Prepare from_email
-            from_email = email_message.from_email or os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
-            
+            from_email = email_message.from_email or getattr(
+                settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"
+            )
+
             # Use html if message is multipart, otherwise use body
             html_content = ""
             text_content = ""
-            
+
             alternatives = getattr(email_message, 'alternatives', [])
             if alternatives:
                 for alt_content, mimetype in alternatives:
@@ -92,18 +94,16 @@ class ResendEmailBackend(BaseEmailBackend):
                     html_content = email_message.body
                 else:
                     text_content = email_message.body
-                    # If we only have text, maybe we should also send it as html or Resend will accept it?
-                    # The ResendEmailService expects html, so we can wrap text in <p> if html is empty.
                     if not html_content:
                         html_content = f"<p>{text_content}</p>"
 
             self.service.send(
-                to=email_message.recipients()[0], # Resend expects string for single or list for multiple; our service expects str 'to', wait, our service wraps it in [to]. Let's modify our service or just pass the first one. Actually service takes a string `to`.
-                subject=email_message.subject,
-                html=html_content,
-                text=text_content if text_content else None,
-                from_email=from_email,
-            )
+                    to=email_message.recipients(),
+                    subject=email_message.subject,
+                    html=html_content,
+                    text=text_content if text_content else None,
+                    from_email=from_email,
+                )
             return True
         except Exception as e:
             if not self.fail_silently:

@@ -1,6 +1,7 @@
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.account.adapter import DefaultAccountAdapter
 from django.template.loader import render_to_string
+from django.template.exceptions import TemplateDoesNotExist
 from django.conf import settings
 
 from .email import ResendEmailService
@@ -36,7 +37,9 @@ class ResendAccountAdapter(FrontendAccountAdapter):
         Override the default send_mail method to use Resend.
 
         Uses allauth's template system for email content while
-        sending via Resend API.
+        sending via Resend API.  Tries an HTML template first and
+        falls back to the plain-text template that allauth ships by
+        default.
 
         Args:
             template_prefix: The template prefix (e.g., 'account/email/email_confirmation')
@@ -44,8 +47,21 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             context: Context dictionary for the email template
         """
         subject = render_to_string(f"{template_prefix}_subject.txt", context).strip()
-        html = render_to_string(f"{template_prefix}_message.html", context)
-        self.email_service.send(to=email, subject=subject, html=html)
+
+        # Try HTML template first; fall back to plain-text (allauth only ships .txt)
+        try:
+            html_body = render_to_string(f"{template_prefix}_message.html", context)
+        except TemplateDoesNotExist:
+            html_body = None
+
+        text_body = render_to_string(f"{template_prefix}_message.txt", context)
+
+        self.email_service.send(
+            to=email,
+            subject=subject,
+            html=html_body or f"<pre>{text_body}</pre>",
+            text=text_body,
+        )
 
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
