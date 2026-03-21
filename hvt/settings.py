@@ -348,7 +348,7 @@ SOCIALACCOUNT_PROVIDERS = {
     },
 }
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_5EB3Xudw_BD2ZrzLcNwCimsQnCZGMsjqi")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
 
