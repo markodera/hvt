@@ -44,8 +44,14 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             context: Context dictionary for the email template
         """
         subject = render_to_string(f"{template_prefix}_subject.txt", context).strip()
-        html = render_to_string(f"{template_prefix}_message.html", context)
-        self.email_service.send(to=email, subject=subject, html=html)
+        text_body = render_to_string(f"{template_prefix}_message.txt", context)
+        html_body = text_body.replace("\n", "<br>")
+        self.email_service.send(
+            to=email,
+            subject=subject,
+            html=html_body,
+            text=text_body,
+        )
 
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
