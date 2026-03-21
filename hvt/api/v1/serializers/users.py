@@ -1,7 +1,11 @@
 from rest_framework import serializers
+from allauth.socialaccount.models import SocialApp
+from allauth.socialaccount.providers.oauth2.client import OAuth2Error
+from django.core.exceptions import ImproperlyConfigured, MultipleObjectsReturned
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.users.models import User
 from dj_rest_auth.registration.serializers import RegisterSerializer
+from dj_rest_auth.registration.serializers import SocialLoginSerializer
 from dj_rest_auth.serializers import LoginSerializer
 from drf_spectacular.utils import extend_schema_field
 
@@ -68,6 +72,18 @@ class CustomLoginSerializer(LoginSerializer):
         fields = super().get_fields()
         fields.pop("username", None)
         return fields
+
+
+class CustomSocialLoginSerializer(SocialLoginSerializer):
+    """Normalize provider/setup errors into 400 responses for social login."""
+
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except (OAuth2Error, SocialApp.DoesNotExist, ImproperlyConfigured, MultipleObjectsReturned, TypeError) as exc:
+            raise serializers.ValidationError(
+                "Social login is not available right now. Check provider configuration and token."
+            ) from exc
 
 
 class UserSerializer(serializers.ModelSerializer):

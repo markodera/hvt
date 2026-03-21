@@ -13,6 +13,7 @@ from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from django.conf import settings
+from hvt.api.v1.serializers.users import CustomSocialLoginSerializer
 from . import views
 
 
@@ -21,11 +22,14 @@ class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
     callback_url = settings.FRONTEND_URL + "/auth/google/callback"
     client_class = OAuth2Client
+    serializer_class = CustomSocialLoginSerializer
 
 
 class GithubLogin(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = settings.FRONTEND_URL + "/auth/github/callback"
+    client_class = OAuth2Client
+    serializer_class = CustomSocialLoginSerializer
 
 
 urlpatterns = [
