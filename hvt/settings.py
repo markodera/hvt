@@ -281,15 +281,20 @@ ACCOUNT_UNIQUE_EMAIL = True
 
 # dj-rest-auth
 
+# Cookie defaults that work for cross-origin frontends in production while still
+# keeping local http development simple.
+jwt_cookie_secure_default = not DEBUG
+jwt_cookie_samesite_default = "None" if jwt_cookie_secure_default else "Lax"
+
 REST_AUTH = {
     "USE_JWT": True,
     "JWT_AUTH_COOKIE": "auth-token",
     "JWT_AUTH_REFRESH_COOKIE": "refresh-token",
-    # Frontends on another origin (for example localhost:5173) must opt into
-    # credentialed requests or the browser will not store/send these cookies.
+    # Frontends on another origin must use credentialed requests and require
+    # SameSite=None; Secure cookies for browser XHR/fetch to include them.
     "JWT_AUTH_HTTPONLY": True,
-    "JWT_AUTH_SAMESITE": os.getenv("JWT_AUTH_SAMESITE", "Lax"),
-    "JWT_AUTH_SECURE": os.getenv("JWT_AUTH_SECURE", "False").lower() == "true",
+    "JWT_AUTH_SAMESITE": os.getenv("JWT_AUTH_SAMESITE", jwt_cookie_samesite_default),
+    "JWT_AUTH_SECURE": os.getenv("JWT_AUTH_SECURE", str(jwt_cookie_secure_default)).lower() == "true",
     "TOKEN_MODEL": None,
     "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
     "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
