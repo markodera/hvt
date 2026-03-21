@@ -1,7 +1,7 @@
-import os
 from unittest.mock import patch
 from django.test import TestCase
 from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.test.utils import override_settings
 
 from hvt.apps.authentication.email import ResendEmailBackend, ResendEmailService
 
@@ -108,3 +108,38 @@ class ResendEmailBackendTest(TestCase):
         
         # Should return 0 messages sent instead of throwing
         self.assertEqual(num_sent, 0)
+
+    @patch('resend.Emails.send')
+    def test_send_to_all_recipients(self, mock_send):
+        """Ensure backend forwards all recipients to Resend."""
+        mock_send.return_value = {"id": "re_all_recipients"}
+
+        email = EmailMessage(
+            subject="Group notice",
+            body="Sent to many",
+            to=["user1@example.com", "user2@example.com"],
+        )
+
+        num_sent = self.backend.send_messages([email])
+        self.assertEqual(num_sent, 1)
+
+        call_args = mock_send.call_args[0][0]
+        self.assertEqual(call_args["to"], ["user1@example.com", "user2@example.com"])
+
+    @patch('resend.Emails.send')
+    @override_settings(DEFAULT_FROM_EMAIL="fallback@example.com")
+    def test_default_from_email_comes_from_settings(self, mock_send):
+        """DEFAULT_FROM_EMAIL should come from Django settings when missing."""
+        mock_send.return_value = {"id": "re_default_from"}
+
+        email = EmailMessage(
+            subject="Fallback sender",
+            body="No explicit sender",
+            to=["user@example.com"],
+        )
+
+        num_sent = self.backend.send_messages([email])
+        self.assertEqual(num_sent, 1)
+
+        call_args = mock_send.call_args[0][0]
+        self.assertEqual(call_args["from_"], "fallback@example.com")
