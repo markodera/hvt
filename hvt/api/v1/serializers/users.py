@@ -2,6 +2,7 @@ from rest_framework import serializers
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.oauth2.client import OAuth2Error
 from django.core.exceptions import ImproperlyConfigured, MultipleObjectsReturned
+from requests.exceptions import RequestException
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.users.models import User
 from dj_rest_auth.registration.serializers import RegisterSerializer
@@ -80,9 +81,25 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
     def validate(self, attrs):
         try:
             return super().validate(attrs)
-        except (OAuth2Error, SocialApp.DoesNotExist, ImproperlyConfigured, MultipleObjectsReturned, TypeError) as exc:
+        except SocialApp.DoesNotExist as exc:
             raise serializers.ValidationError(
-                "Social login is not available right now. Check provider configuration and token."
+                "Social login provider is not configured."
+            ) from exc
+        except MultipleObjectsReturned as exc:
+            raise serializers.ValidationError(
+                "Social login provider configuration is ambiguous."
+            ) from exc
+        except ImproperlyConfigured as exc:
+            raise serializers.ValidationError(
+                "Social login provider is misconfigured."
+            ) from exc
+        except OAuth2Error as exc:
+            raise serializers.ValidationError(
+                "Social login failed. Please try again."
+            ) from exc
+        except RequestException as exc:
+            raise serializers.ValidationError(
+                "Social login failed. Please try again."
             ) from exc
 
 

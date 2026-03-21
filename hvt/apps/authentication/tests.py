@@ -459,7 +459,7 @@ class SocialLoginErrorHandlingTest(APITestCase):
             defaults={"domain": "testserver", "name": "testserver"},
         )
 
-    def test_google_social_login_returns_400_when_provider_not_configured(self):
+    def test_google_social_login_returns_400_on_failure(self):
         response = self.client.post(
             "/api/v1/auth/social/google/",
             {"code": "dummy-code"},
@@ -467,8 +467,12 @@ class SocialLoginErrorHandlingTest(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Social login failed. Please try again.",
+        )
 
-    def test_github_social_login_returns_400_when_provider_not_configured(self):
+    def test_github_social_login_returns_400_on_failure(self):
         response = self.client.post(
             "/api/v1/auth/social/github/",
             {"code": "dummy-code"},
@@ -476,3 +480,7 @@ class SocialLoginErrorHandlingTest(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Failed to exchange code for access token",
+        )
