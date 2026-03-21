@@ -298,6 +298,7 @@ REST_AUTH = {
     "TOKEN_MODEL": None,
     "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
     "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
+    "SOCIAL_LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomSocialLoginSerializer",
     "PASSWORD_RESET_USE_SITES_DOMAIN": False,
 }
 

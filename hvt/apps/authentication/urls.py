@@ -13,19 +13,61 @@ from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from django.conf import settings
+from hvt.api.v1.serializers.users import CustomSocialLoginSerializer
 from . import views
 
 
 # Social login views
+class CompatOAuth2Client(OAuth2Client):
+    """
+    Backward-compatible OAuth2 client for dj-rest-auth social serializer.
+
+    dj-rest-auth's SocialLoginSerializer passes a positional `scope` argument
+    when constructing the client, while allauth's OAuth2Client constructor in
+    this codebase version does not accept that positional parameter. This shim
+    accepts both signatures and forwards only supported arguments.
+    The dropped `scope` argument is not required by allauth's OAuth2Client in
+    this version because provider scopes come from provider settings/request.
+    """
+
+    def __init__(
+        self,
+        request,
+        consumer_key,
+        consumer_secret,
+        access_token_method,
+        access_token_url,
+        callback_url,
+        scope=None,
+        scope_delimiter=" ",
+        headers=None,
+        basic_auth=False,
+    ):
+        super().__init__(
+            request,
+            consumer_key,
+            consumer_secret,
+            access_token_method,
+            access_token_url,
+            callback_url,
+            scope_delimiter=scope_delimiter,
+            headers=headers,
+            basic_auth=basic_auth,
+        )
+
+
 class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
     callback_url = settings.FRONTEND_URL + "/auth/google/callback"
-    client_class = OAuth2Client
+    client_class = CompatOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
 
 
 class GithubLogin(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = settings.FRONTEND_URL + "/auth/github/callback"
+    client_class = CompatOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
 
 
 urlpatterns = [

@@ -1,7 +1,7 @@
 import json
 from datetime import timedelta
 from django.conf import settings as django_settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase, APIRequestFactory
@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from hvt.apps.organizations.models import Organization, APIKey
 from hvt.apps.authentication.backends import APIKeyAuthentication
 from hvt.apps.authentication.permissions import IsAuthenticatedOrAPIKey, IsAdminOrAPIKey
+from django.contrib.sites.models import Site
 
 User = get_user_model()
 
@@ -446,3 +447,40 @@ class JWTCookieAuthFlowTest(APITestCase):
         self.assertIn("access", response.data)
         self.assertIn("auth-token", response.cookies)
         self.assertIn("refresh-token", response.cookies)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class SocialLoginErrorHandlingTest(APITestCase):
+    """Regression tests for social login error handling."""
+
+    def setUp(self):
+        Site.objects.update_or_create(
+            id=1,
+            defaults={"domain": "testserver", "name": "testserver"},
+        )
+
+    def test_google_social_login_returns_400_on_failure(self):
+        response = self.client.post(
+            "/api/v1/auth/social/google/",
+            {"code": "dummy-code"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Social login failed. Please try again.",
+        )
+
+    def test_github_social_login_returns_400_on_failure(self):
+        response = self.client.post(
+            "/api/v1/auth/social/github/",
+            {"code": "dummy-code"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Failed to exchange code for access token",
+        )
