@@ -15,7 +15,7 @@ class ResendEmailService:
     def send(
         self,
         *,
-        to: "str | list[str]",
+        to: str | list[str],
         subject: str,
         html: str,
         from_email: Optional[str] = None,
@@ -35,9 +35,8 @@ class ResendEmailService:
             Response from Resend API
         """
         params = {
-            "from_": from_email
-            or getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"),
-            "to": [to] if isinstance(to, str) else to,
+            "from_": from_email or getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"),
+            "to": to if isinstance(to, list) else [to],
             "subject": subject,
             "html": html,
         }
@@ -70,7 +69,8 @@ class ResendEmailBackend(BaseEmailBackend):
         return num_sent
 
     def _send(self, email_message: EmailMessage) -> bool:
-        if not email_message.recipients():
+        recipients = email_message.recipients()
+        if not recipients:
             return False
 
         try:
@@ -78,6 +78,7 @@ class ResendEmailBackend(BaseEmailBackend):
             from_email = email_message.from_email or getattr(
                 settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"
             )
+
 
             # Use html if message is multipart, otherwise use body
             html_content = ""
@@ -98,12 +99,12 @@ class ResendEmailBackend(BaseEmailBackend):
                         html_content = f"<p>{text_content}</p>"
 
             self.service.send(
-                    to=email_message.recipients(),
-                    subject=email_message.subject,
-                    html=html_content,
-                    text=text_content if text_content else None,
-                    from_email=from_email,
-                )
+                to=recipients,
+                subject=email_message.subject,
+                html=html_content,
+                text=text_content if text_content else None,
+                from_email=from_email,
+            )
             return True
         except Exception as e:
             if not self.fail_silently:
