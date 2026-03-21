@@ -1,0 +1,110 @@
+import os
+from unittest.mock import patch
+from django.test import TestCase
+from django.core.mail import EmailMessage, EmailMultiAlternatives
+
+from hvt.apps.authentication.email import ResendEmailBackend, ResendEmailService
+
+
+class ResendEmailBackendTest(TestCase):
+    """
+    Test suite for ResendEmailBackend and ResendEmailService
+    Provides small, isolated tests so we don't have to run the whole test suite.
+    """
+
+    def setUp(self):
+        self.backend = ResendEmailBackend()
+        
+    @patch('resend.Emails.send')
+    def test_send_basic_text_email(self, mock_send):
+        """Test sending a simple text email"""
+        # Mock the resend API response
+        mock_send.return_value = {"id": "re_12345"}
+        
+        email = EmailMessage(
+            subject='Hello from HVT',
+            body='This is a basic text email.',
+            from_email='noreply@test.hvt.dev',
+            to=['user@example.com']
+        )
+        
+        # Send using our Resend backend
+        num_sent = self.backend.send_messages([email])
+        
+        self.assertEqual(num_sent, 1)
+        mock_send.assert_called_once()
+        
+        # Verify payload sent to resend
+        call_args = mock_send.call_args[0][0]  # dict passed to resend.Emails.send
+        
+        self.assertEqual(call_args['to'], ['user@example.com'])
+        self.assertEqual(call_args['subject'], 'Hello from HVT')
+        self.assertEqual(call_args['from_'], 'noreply@test.hvt.dev')
+        self.assertEqual(call_args['text'], 'This is a basic text email.')
+        self.assertEqual(call_args['html'], '<p>This is a basic text email.</p>')
+
+    @patch('resend.Emails.send')
+    def test_send_html_email(self, mock_send):
+        """Test sending an email with just HTML content"""
+        mock_send.return_value = {"id": "re_67890"}
+        
+        email = EmailMessage(
+            subject='Hello HTML',
+            body='<h1>This is HTML</h1>',
+            from_email='noreply@test.hvt.dev',
+            to=['user@example.com']
+        )
+        # Indicate this is an HTML email
+        email.content_subtype = "html"
+        
+        num_sent = self.backend.send_messages([email])
+        self.assertEqual(num_sent, 1)
+        
+        call_args = mock_send.call_args[0][0]
+        self.assertEqual(call_args['html'], '<h1>This is HTML</h1>')
+        self.assertNotIn('text', call_args)
+
+    @patch('resend.Emails.send')
+    def test_send_multipart_email(self, mock_send):
+        """Test sending a multipart email (Text + HTML)"""
+        mock_send.return_value = {"id": "re_multipart"}
+        
+        email = EmailMultiAlternatives(
+            subject='Hello Multipart',
+            body='This is the plain text version.',
+            from_email='noreply@test.hvt.dev',
+            to=['user@example.com']
+        )
+        email.attach_alternative("<p>This is the HTML version.</p>", "text/html")
+        
+        num_sent = self.backend.send_messages([email])
+        self.assertEqual(num_sent, 1)
+        
+        call_args = mock_send.call_args[0][0]
+        self.assertEqual(call_args['text'], 'This is the plain text version.')
+        self.assertEqual(call_args['html'], '<p>This is the HTML version.</p>')
+        
+    @patch('resend.Emails.send')
+    def test_fail_silently_behavior(self, mock_send):
+        """Test that exceptions are properly handled based on fail_silently"""
+        # Force the mock to raise an exception
+        mock_send.side_effect = Exception("Resend API Error")
+        
+        email = EmailMessage(
+            subject='Will Fail',
+            body='Error trigger',
+            to=['user@example.com']
+        )
+        
+        # Test loud (fail_silently=False)
+        backend_loud = ResendEmailBackend(fail_silently=False)
+        with self.assertRaises(Exception) as context:
+            backend_loud.send_messages([email])
+        self.assertTrue("Resend API Error" in str(context.exception))
+        
+        # Test silent (fail_silently=True)
+        backend_silent = ResendEmailBackend(fail_silently=True)
+        num_sent = backend_silent.send_messages([email])
+        
+        # Should return 0 messages sent instead of throwing
+        self.assertEqual(num_sent, 0)

@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from django.conf import settings as django_settings
 from django.test import TestCase
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -376,3 +377,72 @@ class APIKeyEndToEndTest(APITestCase):
         """Test that requests without auth are rejected"""
         response = self.client.get("/api/v1/users/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class JWTCookieAuthFlowTest(APITestCase):
+    """Regression tests for browser-style JWT cookie authentication."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        self.user = User.objects.create_user(
+            email="cookie-user@example.com",
+            password="testpass123",
+            first_name="Cookie",
+            last_name="User",
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        self.org = Organization.objects.create(name="Cookie Org", owner=self.user)
+        self.user.organization = self.org
+        self.user.role = User.Role.OWNER
+        self.user.save()
+
+    def _login(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.user.email, "password": "testpass123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response
+
+    def test_login_sets_jwt_cookies(self):
+        response = self._login()
+
+        self.assertIn("auth-token", response.cookies)
+        self.assertIn("refresh-token", response.cookies)
+        self.assertIn("auth-token", self.client.cookies)
+        self.assertIn("refresh-token", self.client.cookies)
+        self.assertEqual(
+            response.cookies["auth-token"]["samesite"],
+            django_settings.REST_AUTH["JWT_AUTH_SAMESITE"],
+        )
+        self.assertTrue(bool(response.cookies["auth-token"]["httponly"]))
+        self.assertEqual(
+            bool(response.cookies["auth-token"]["secure"]),
+            django_settings.REST_AUTH["JWT_AUTH_SECURE"],
+        )
+
+    def test_me_endpoint_accepts_cookie_auth(self):
+        self._login()
+
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], self.user.email)
+
+    def test_refresh_endpoint_accepts_refresh_cookie(self):
+        self._login()
+        del self.client.cookies["auth-token"]
+
+        response = self.client.post("/api/v1/auth/token/refresh/", {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("auth-token", response.cookies)
+        self.assertIn("refresh-token", response.cookies)

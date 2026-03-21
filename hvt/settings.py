@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import dj_database_url
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -64,6 +65,8 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -94,28 +97,42 @@ WSGI_APPLICATION = "hvt.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# Supports DATABASE_URL (production/Docker) with fallback to individual env vars (local dev)
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv("DB_HOST"),
-        "PORT": os.getenv("DB_PORT"),
-    }
+    "default": dj_database_url.config(
+        default=(
+            f"postgres://{os.getenv('DB_USER', '')}:{os.getenv('DB_PASSWORD', '')}"
+            f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
+            f"/{os.getenv('DB_NAME', '')}"
+        ),
+        conn_max_age=600,
+    )
 }
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:5173",
 ]
-
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
 # Custom User model
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 
+# Ensure headless mode is enabled for django-allauth
+HEADLESS_ONLY = True
+
+# Define where the email links should point to on your frontend
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": "http://localhost:5173/auth/verify-email/{key}",
+    
+    # You might also want to set these up for password resets if you haven't already:
+    "account_reset_password_from_key": "http://localhost:5173/auth/password-reset/{key}",
+}
+
 # Frontend URL
-FRONTEND_URL = "http://localhost:3000/"
+FRONTEND_URL = "http://localhost:5173"
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -150,7 +167,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATIC_URL = "static/"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -163,6 +182,7 @@ SITE_ID = 1
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "dj_rest_auth.jwt_auth.JWTCookieAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "hvt.apps.authentication.backends.APIKeyAuthentication",
     ],
@@ -265,12 +285,27 @@ REST_AUTH = {
     "USE_JWT": True,
     "JWT_AUTH_COOKIE": "auth-token",
     "JWT_AUTH_REFRESH_COOKIE": "refresh-token",
+    # Frontends on another origin (for example localhost:5173) must opt into
+    # credentialed requests or the browser will not store/send these cookies.
+    "JWT_AUTH_HTTPONLY": True,
+    "JWT_AUTH_SAMESITE": os.getenv("JWT_AUTH_SAMESITE", "Lax"),
+    "JWT_AUTH_SECURE": os.getenv("JWT_AUTH_SECURE", "False").lower() == "true",
     "TOKEN_MODEL": None,
     "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
     "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
     "PASSWORD_RESET_USE_SITES_DOMAIN": False,
 }
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+# dj-rest-auth 7.0.1 still reads several legacy top-level settings from its
+# cookie auth code paths. Mirror the REST_AUTH values here so login, /me, and
+# refresh all resolve the same cookie names and flags.
+REST_USE_JWT = REST_AUTH["USE_JWT"]
+JWT_AUTH_COOKIE = REST_AUTH["JWT_AUTH_COOKIE"]
+JWT_AUTH_REFRESH_COOKIE = REST_AUTH["JWT_AUTH_REFRESH_COOKIE"]
+JWT_AUTH_HTTPONLY = REST_AUTH["JWT_AUTH_HTTPONLY"]
+JWT_AUTH_SECURE = REST_AUTH["JWT_AUTH_SECURE"]
+JWT_AUTH_SAMESITE = REST_AUTH["JWT_AUTH_SAMESITE"]
+EMAIL_BACKEND = "hvt.apps.authentication.email.ResendEmailBackend"
 
 PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"
 # EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
@@ -308,12 +343,12 @@ SOCIALACCOUNT_PROVIDERS = {
     },
 }
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_5EB3Xudw_BD2ZrzLcNwCimsQnCZGMsjqi")
 RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
 
-# allauth - Comment out to use console email backend for testing
-# ACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.ResendAccountAdapter"
+# allauth - Use the custom adapter to point links to the frontend
+ACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.ResendAccountAdapter"
 
 # LOGGING Configuration
 APP_LOG_LEVEL = "INFO" if DEBUG else "WARNING"

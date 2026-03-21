@@ -1,5 +1,5 @@
 from django.urls import path, include
-from rest_framework_simplejwt.views import TokenRefreshView
+from dj_rest_auth.jwt_auth import get_refresh_view
 from dj_rest_auth.views import (
     LoginView,
     LogoutView,
@@ -19,13 +19,13 @@ from . import views
 # Social login views
 class GoogleLogin(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
-    callback_url = settings.FRONTEND_URL + "auth/google/callback"
+    callback_url = settings.FRONTEND_URL + "/auth/google/callback"
     client_class = OAuth2Client
 
 
 class GithubLogin(SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
-    callback_url = settings.FRONTEND_URL + "auth/github/callback"
+    callback_url = settings.FRONTEND_URL + "/auth/github/callback"
 
 
 urlpatterns = [
@@ -44,7 +44,7 @@ urlpatterns = [
     # Registration with email verification
     path("register/", include("dj_rest_auth.registration.urls")),
     # JWT token refresh
-    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("token/refresh/", get_refresh_view().as_view(), name="token_refresh"),
     # Social login endpoint
     path("social/google/", GoogleLogin.as_view(), name="google_login"),
     path("social/github/", GithubLogin.as_view(), name="github_login"),

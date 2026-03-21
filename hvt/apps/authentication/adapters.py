@@ -1,11 +1,25 @@
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.account.adapter import DefaultAccountAdapter
 from django.template.loader import render_to_string
+from django.conf import settings
 
 from .email import ResendEmailService
 
 
-class ResendAccountAdapter(DefaultAccountAdapter):
+class FrontendAccountAdapter(DefaultAccountAdapter):
+    """
+    Custom account adapter to ensure email verification links 
+    point to the frontend instead of the backend API.
+    """
+    def get_email_confirmation_url(self, request, emailconfirmation):
+        """
+        Constructs the email confirmation URL pointing to the frontend app.
+        """
+        # settings.FRONTEND_URL should be set in settings.py (e.g., http://localhost:5173)
+        return f"{settings.FRONTEND_URL}/auth/verify-email/{emailconfirmation.key}"
+
+
+class ResendAccountAdapter(FrontendAccountAdapter):
     """
     Custom account adapter that uses Resend for sending emails.
 
