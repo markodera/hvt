@@ -9,9 +9,12 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+import dj_database_url
 
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,12 +23,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 
 # Application definition
@@ -37,19 +42,37 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sites",
+    # Third-Party
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.github",
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
+    "drf_spectacular",
+    "django_filters",
+    # Local apps
     "hvt.apps.authentication",
     "hvt.apps.organizations",
     "hvt.apps.users",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = "hvt.urls"
@@ -74,15 +97,42 @@ WSGI_APPLICATION = "hvt.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# Supports DATABASE_URL (production/Docker) with fallback to individual env vars (local dev)
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": dj_database_url.config(
+        default=(
+            f"postgres://{os.getenv('DB_USER', '')}:{os.getenv('DB_PASSWORD', '')}"
+            f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
+            f"/{os.getenv('DB_NAME', '')}"
+        ),
+        conn_max_age=600,
+    )
 }
 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+# Custom User model
+AUTH_USER_MODEL = "users.User"
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 
+# Ensure headless mode is enabled for django-allauth
+HEADLESS_ONLY = True
+
+# Define where the email links should point to on your frontend
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": "http://localhost:5173/auth/verify-email/{key}",
+    
+    # You might also want to set these up for password resets if you haven't already:
+    "account_reset_password_from_key": "http://localhost:5173/auth/password-reset/{key}",
+}
+
+# Frontend URL
+FRONTEND_URL = "http://localhost:5173"
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -107,7 +157,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Africa/Lagos"
 
 USE_I18N = True
 
@@ -117,9 +167,222 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATIC_URL = "static/"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+SITE_ID = 1
+
+# Django Rest Framework
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "dj_rest_auth.jwt_auth.JWTCookieAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "hvt.apps.authentication.backends.APIKeyAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "hvt.apps.authentication.throttling.BurstRateThrottle",
+        "hvt.apps.authentication.throttling.OrganizationRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "burst": "20/second",
+        "organization": "1000/hour",
+        "api_key": "100/minute",
+        "anon": "10/min",
+    },
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Standardized error envelope for all API errors
+    "EXCEPTION_HANDLER": "hvt.exceptions.hvt_exception_handler",
+    # Pagination
+    "DEFAULT_PAGINATION_CLASS": "hvt.pagination.StandardPagination",
+    "PAGE_SIZE": 25,
+    # Filtering
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
+}
+
+# drf-spectacular (OpenAPI / Swagger)
+SPECTACULAR_SETTINGS = {
+    "TITLE": "HVT Authentication API",
+    "DESCRIPTION": (
+        "HVT is a REST-first authentication service that serves as an identity provider "
+        "and single source of truth for authentication. It handles user lifecycle management, "
+        "JWT + refresh token auth, social OAuth (Google/GitHub), per-org API keys, "
+        "role-based access control, webhooks, and audit logging."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SCHEMA_PATH_PREFIX": r"/api/v1/",
+    "TAGS": [
+        {"name": "Auth", "description": "Login, registration, password reset, social OAuth, and token management"},
+        {"name": "Users", "description": "User CRUD, role management, and organization membership"},
+        {"name": "Organizations", "description": "Organization lifecycle and configuration"},
+        {"name": "API Keys", "description": "Create, list, and revoke API keys for server-to-server auth"},
+        {"name": "Webhooks", "description": "Configure webhooks for auth event notifications"},
+    ],
+    "SECURITY": [
+        {"BearerAuth": []},
+        {"APIKeyAuth": []},
+    ],
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {  # <-- MUST be plural "securitySchemes"
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",  # <-- "scheme" not "schema"
+                "bearerFormat": "JWT",
+                "description": "JWT access token. Obtain via POST /api/v1/auth/login/",
+            },
+            "APIKeyAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": "Organization API key (hvt_live_* or hvt_test_*)",
+            },
+        },
+    },
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,
+        "displayOperationId": False,
+        "filter": True,
+    },
+    "FIELD_TYPE_MAPPING": {
+        "rest_framework.fields.ReadOnlyField": "str",
+    }
+}
+
+# Simple JWT
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKEN": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
+
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_UNIQUE_EMAIL = True
+
+# dj-rest-auth
+
+# Cookie defaults that work for cross-origin frontends in production while still
+# keeping local http development simple.
+jwt_cookie_secure_default = not DEBUG
+jwt_cookie_samesite_default = "None" if jwt_cookie_secure_default else "Lax"
+
+REST_AUTH = {
+    "USE_JWT": True,
+    "JWT_AUTH_COOKIE": "auth-token",
+    "JWT_AUTH_REFRESH_COOKIE": "refresh-token",
+    # Frontends on another origin must use credentialed requests and require
+    # SameSite=None; Secure cookies for browser XHR/fetch to include them.
+    "JWT_AUTH_HTTPONLY": True,
+    "JWT_AUTH_SAMESITE": os.getenv("JWT_AUTH_SAMESITE", jwt_cookie_samesite_default),
+    "JWT_AUTH_SECURE": os.getenv("JWT_AUTH_SECURE", str(jwt_cookie_secure_default)).lower() == "true",
+    "TOKEN_MODEL": None,
+    "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
+    "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
+    "PASSWORD_RESET_USE_SITES_DOMAIN": False,
+}
+
+# dj-rest-auth 7.0.1 still reads several legacy top-level settings from its
+# cookie auth code paths. Mirror the REST_AUTH values here so login, /me, and
+# refresh all resolve the same cookie names and flags.
+REST_USE_JWT = REST_AUTH["USE_JWT"]
+JWT_AUTH_COOKIE = REST_AUTH["JWT_AUTH_COOKIE"]
+JWT_AUTH_REFRESH_COOKIE = REST_AUTH["JWT_AUTH_REFRESH_COOKIE"]
+JWT_AUTH_HTTPONLY = REST_AUTH["JWT_AUTH_HTTPONLY"]
+JWT_AUTH_SECURE = REST_AUTH["JWT_AUTH_SECURE"]
+JWT_AUTH_SAMESITE = REST_AUTH["JWT_AUTH_SAMESITE"]
+EMAIL_BACKEND = "hvt.apps.authentication.email.ResendEmailBackend"
+
+PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"
+# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# EMAIL_HOST = "smtp.gmail.com"
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+# EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+# DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# SOCIAL AUTHENTICATION(Google & Github)
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
+
+# Custom adapter for email-only users
+SOCIALACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.CustomSocialAccountAdapter"
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": ["profile", "email"],
+        "AUTH_PARAMS": {"access_type": "online"},
+        "APP": {
+            "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+            "secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+        },
+    },
+    "github": {
+        "SCOPE": ["user:email"],
+        "APP": {
+            "client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+            "secret": os.getenv("GITHUB_CLIENT_SECRET", ""),
+        },
+    },
+}
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_5EB3Xudw_BD2ZrzLcNwCimsQnCZGMsjqi")
+RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
+
+# allauth - Use the custom adapter to point links to the frontend
+ACCOUNT_ADAPTER = "hvt.apps.authentication.adapters.ResendAccountAdapter"
+
+# LOGGING Configuration
+APP_LOG_LEVEL = "INFO" if DEBUG else "WARNING"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "hvt.apps.authentication": {
+            "handlers": ["console"],
+            "level": APP_LOG_LEVEL,
+            "propagate": True,
+        },
+        "hvt.apps.users": {
+            "handlers": ["console"],
+            "level": APP_LOG_LEVEL,
+            "propagate": True,
+        },
+    },
+}

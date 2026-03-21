@@ -1,0 +1,131 @@
+"""
+Standardized error response handler for HVT API.
+
+Wraps all DRF exceptions into a consistent envelope:
+
+    {
+        "error": "Short error label",
+        "code": "machine_readable_code",
+        "detail": <str | dict | list>,
+        "status": <int>
+    }
+
+This ensures SDK consumers and frontend clients can rely on a
+single error shape regardless of which endpoint they call.
+"""
+
+from __future__ import annotations
+
+from rest_framework.views import exception_handler as drf_exception_handler
+from rest_framework.exceptions import (
+    APIException,
+    AuthenticationFailed,
+    NotAuthenticated,
+    PermissionDenied,
+    NotFound,
+    MethodNotAllowed,
+    Throttled,
+    ValidationError,
+)
+from rest_framework.response import Response
+from django.http import Http404
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+
+
+# ---- human-readable labels keyed by status code ----
+_STATUS_LABELS: dict[int, str] = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+}
+
+# ---- machine-readable codes keyed by exception class ----
+_EXCEPTION_CODES: dict[type, str] = {
+    ValidationError: "validation_error",
+    AuthenticationFailed: "authentication_failed",
+    NotAuthenticated: "not_authenticated",
+    PermissionDenied: "permission_denied",
+    NotFound: "not_found",
+    MethodNotAllowed: "method_not_allowed",
+    Throttled: "throttled",
+}
+
+
+def hvt_exception_handler(exc: Exception, context: dict) -> Response | None:
+    """
+    Custom exception handler that normalises every error into
+    the HVT standard envelope.
+
+    Falls through to DRF's default handler first so that signal
+    hooks (e.g. ``got_request_exception``) still fire.
+    """
+    # Let DRF do its thing (converts Django exceptions → DRF exceptions, etc.)
+    response = drf_exception_handler(exc, context)
+
+    if response is None:
+        # DRF didn't handle it — unexpected server error
+        return Response(
+            {
+                "error": "Internal Server Error",
+                "code": "server_error",
+                "detail": "An unexpected error occurred.",
+                "status": 500,
+            },
+            status=500,
+        )
+
+    status_code: int = response.status_code
+    error_label: str = _STATUS_LABELS.get(status_code, "Error")
+    code: str = _EXCEPTION_CODES.get(type(exc), _default_code(status_code))
+    detail = _normalise_detail(response.data)
+
+    # For throttled responses, include retry-after info if available
+    if isinstance(exc, Throttled) and exc.wait is not None:
+        detail = {
+            "message": detail if isinstance(detail, str) else str(detail),
+            "retry_after_seconds": int(exc.wait),
+        }
+
+    response.data = {
+        "error": error_label,
+        "code": code,
+        "detail": detail,
+        "status": status_code,
+    }
+
+    return response
+
+
+# ---- helpers ----
+
+
+def _default_code(status_code: int) -> str:
+    """Fallback machine-readable code derived from the HTTP status."""
+    return _STATUS_LABELS.get(status_code, "error").lower().replace(" ", "_")
+
+
+def _normalise_detail(data):
+    """
+    DRF stores error details in various shapes:
+      - ``{"detail": "..."}`` for simple exceptions
+      - ``{"field": ["err1", ...]}`` for validation errors
+      - ``["err1", ...]`` for non-field errors
+    Flatten where possible so the envelope is predictable.
+    """
+    if isinstance(data, dict):
+        # Simple DRF exception — just a "detail" key
+        if list(data.keys()) == ["detail"]:
+            return data["detail"]
+        return data
+
+    if isinstance(data, list):
+        # Single-string list → unwrap
+        if len(data) == 1:
+            return data[0]
+        return data
+
+    return data

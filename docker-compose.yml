@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=hvt
+      - POSTGRES_USER=hvt_user
+      - POSTGRES_PASSWORD=hvt_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hvt_user -d hvt"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - static_files:/app/staticfiles
+    env_file:
+      - .env
+    environment:
+      - DEBUG=0
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DATABASE_URL=postgres://hvt_user:hvt_password@db:5432/hvt
+      - REDIS_URL=redis://redis:6379/0
+      - STATIC_ROOT=/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_files:
