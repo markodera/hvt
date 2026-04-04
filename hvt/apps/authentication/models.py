@@ -51,6 +51,27 @@ class AuditLog(models.Model):
         ORG_UPDATED = "org.updated", "Organization Updated"
         ORG_MEMBER_ADDED = "org.member.added", "Member Added to Organization"
         ORG_MEMBER_REMOVED = "org.member.removed", "Member Removed from Organization"
+        ORG_INVITATION_CREATED = "org.invitation.created", "Organization Invitation Created"
+        ORG_INVITATION_ACCEPTED = "org.invitation.accepted", "Organization Invitation Accepted"
+        ORG_INVITATION_REVOKED = "org.invitation.revoked", "Organization Invitation Revoked"
+        ORG_INVITATION_RESENT = "org.invitation.resent", "Organization Invitation Resent"
+
+        # Project events
+        PROJECT_CREATED = "project.created", "Project Created"
+        PROJECT_UPDATED = "project.updated", "Project Updated"
+        PROJECT_DELETED = "project.deleted", "Project Deleted"
+        PROJECT_SOCIAL_PROVIDER_CREATED = (
+            "project.social_provider.created",
+            "Project Social Provider Created",
+        )
+        PROJECT_SOCIAL_PROVIDER_UPDATED = (
+            "project.social_provider.updated",
+            "Project Social Provider Updated",
+        )
+        PROJECT_SOCIAL_PROVIDER_DELETED = (
+            "project.social_provider.deleted",
+            "Project Social Provider Deleted",
+        )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -95,6 +116,13 @@ class AuditLog(models.Model):
         blank=True,
         related_name="audit_logs",
     )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
 
     # Request metadata
     ip_address = models.GenericIPAddressField(null=True, blank=True)
@@ -132,6 +160,7 @@ class AuditLog(models.Model):
         user=None,
         api_key=None,
         organization=None,
+        project=None,
         target=None,
         event_data=None,
         success=True,
@@ -163,6 +192,12 @@ class AuditLog(models.Model):
                 ):
                     actor_user = request.user
 
+        if actor_api_key and project is None:
+            project = getattr(actor_api_key, "project", None)
+
+        if project is not None and organization is None:
+            organization = getattr(project, "organization", None)
+
         # Set target object generic relation
         target_content_type = None
         target_object_id = None
@@ -178,6 +213,7 @@ class AuditLog(models.Model):
             target_content_type=target_content_type,
             target_object_id=target_object_id,
             organization=organization,
+            project=project,
             ip_address=ip_address,
             user_agent=user_agent,
             success=success,

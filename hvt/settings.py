@@ -11,26 +11,90 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from urllib.parse import urlparse
+
 import dj_database_url
+from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str, default: str = ""):
+    raw_value = os.getenv(name, default)
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def _host_from_url(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    return (parsed.hostname or "").strip()
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "SECRET_KEY", "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+DEBUG = _env_bool("DEBUG", True)
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if DEBUG:
+    SECRET_KEY = SECRET_KEY or "django-insecure-q=rdhtslcm#@a7pm-k2u5(67+++14#(#ez*at@&-!d*h@k#)m+"
+elif not SECRET_KEY or SECRET_KEY.startswith("django-insecure-") or SECRET_KEY == "change-me-in-production":
+    raise ImproperlyConfigured("SECRET_KEY must be set to a strong value when DEBUG is false.")
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+RAILWAY_PUBLIC_HOST = _host_from_url(RAILWAY_PUBLIC_DOMAIN) or RAILWAY_PUBLIC_DOMAIN
+
+ALLOWED_HOSTS = _env_list(
+    "ALLOWED_HOSTS",
+    ",".join(
+        [
+            host
+            for host in [
+                "localhost",
+                "127.0.0.1",
+                "testserver",
+            ]
+        ]
+    )
+    if DEBUG
+    else ",".join(
+        [
+            host
+            for host in [
+                RAILWAY_PUBLIC_HOST,
+                "healthcheck.railway.app",
+            ]
+            if host
+        ]
+    ),
+)
+for extra_host in [RAILWAY_PUBLIC_HOST, "healthcheck.railway.app"]:
+    if extra_host and extra_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(extra_host)
+configured_public_hosts = [host for host in ALLOWED_HOSTS if host != "healthcheck.railway.app"]
+if not DEBUG and not configured_public_hosts:
+    raise ImproperlyConfigured("ALLOWED_HOSTS must be configured when DEBUG is false.")
+
+default_frontend_origins = []
+if DEBUG:
+    default_frontend_origins.extend(["http://localhost:3000", "http://localhost:5173"])
+if FRONTEND_URL:
+    default_frontend_origins.append(FRONTEND_URL)
+default_frontend_origins = list(dict.fromkeys(default_frontend_origins))
 
 
 # Application definition
@@ -43,9 +107,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "corsheaders",
     # Third-Party
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
@@ -65,7 +131,6 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -110,12 +175,65 @@ DATABASES = {
     )
 }
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-]
+if not DEBUG and _env_bool("DATABASE_SSL_REQUIRE", False):
+    DATABASES["default"].setdefault("OPTIONS", {})
+    DATABASES["default"]["OPTIONS"]["sslmode"] = "require"
+
+CORS_ALLOWED_ORIGINS = _env_list(
+    "CORS_ALLOWED_ORIGINS",
+    ",".join(default_frontend_origins),
+)
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+
+# Allow headers specifically for OpenAPI Schema fetches
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+CSRF_TRUSTED_ORIGINS = _env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    ",".join(CORS_ALLOWED_ORIGINS),
+)
+if not DEBUG and not CORS_ALLOWED_ORIGINS:
+    raise ImproperlyConfigured(
+        "CORS_ALLOWED_ORIGINS must be configured when DEBUG is false."
+    )
+
+USE_X_FORWARDED_HOST = _env_bool("USE_X_FORWARDED_HOST", not DEBUG)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_REDIRECT_EXEMPT = _env_list(
+    "SECURE_REDIRECT_EXEMPT",
+    "healthz/,readyz/" if not DEBUG else "",
+)
+SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", not DEBUG)
+SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", not DEBUG)
+SECURE_HSTS_SECONDS = int(
+    os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0")
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS", not DEBUG
+)
+SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", not DEBUG)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = os.getenv(
+    "SECURE_REFERRER_POLICY",
+    "strict-origin-when-cross-origin" if not DEBUG else "same-origin",
+)
+X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
+EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", DEBUG)
+EXPOSE_API_DOCS = _env_bool("EXPOSE_API_DOCS", DEBUG)
 # Custom User model
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
@@ -125,14 +243,9 @@ HEADLESS_ONLY = True
 
 # Define where the email links should point to on your frontend
 HEADLESS_FRONTEND_URLS = {
-    "account_confirm_email": "http://localhost:5173/auth/verify-email/{key}",
-    
-    # You might also want to set these up for password resets if you haven't already:
-    "account_reset_password_from_key": "http://localhost:5173/auth/password-reset/{key}",
+    "account_confirm_email": f"{FRONTEND_URL}/auth/verify-email/{{key}}",
+    "account_reset_password_from_key": f"{FRONTEND_URL}/auth/password-reset/{{key}}",
 }
-
-# Frontend URL
-FRONTEND_URL = "http://localhost:5173"
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -168,7 +281,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Default primary key field type
@@ -178,12 +291,36 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SITE_ID = 1
 
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+USE_REDIS_CACHE = _env_bool("USE_REDIS_CACHE", False)
+if USE_REDIS_CACHE:
+    if not REDIS_URL:
+        raise ImproperlyConfigured(
+            "REDIS_URL must be configured when USE_REDIS_CACHE is enabled."
+        )
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "hvt-local-cache",
+        }
+    }
+
 # Django Rest Framework
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "dj_rest_auth.jwt_auth.JWTCookieAuthentication",
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "hvt.apps.authentication.backends.HVTJWTCookieAuthentication",
+        "hvt.apps.authentication.backends.HVTJWTAuthentication",
         "hvt.apps.authentication.backends.APIKeyAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -233,25 +370,9 @@ SPECTACULAR_SETTINGS = {
         {"name": "API Keys", "description": "Create, list, and revoke API keys for server-to-server auth"},
         {"name": "Webhooks", "description": "Configure webhooks for auth event notifications"},
     ],
-    "SECURITY": [
-        {"BearerAuth": []},
-        {"APIKeyAuth": []},
-    ],
-    "APPEND_COMPONENTS": {
-        "securitySchemes": {  # <-- MUST be plural "securitySchemes"
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",  # <-- "scheme" not "schema"
-                "bearerFormat": "JWT",
-                "description": "JWT access token. Obtain via POST /api/v1/auth/login/",
-            },
-            "APIKeyAuth": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
-                "description": "Organization API key (hvt_live_* or hvt_test_*)",
-            },
-        },
+    "ENUM_NAME_OVERRIDES": {
+        "UserRoleEnum": "hvt.apps.users.models.User.Role",
+        "InvitationRoleEnum": "hvt.apps.organizations.models.OrganizationInvitation.Role",
     },
     "SWAGGER_UI_SETTINGS": {
         "deepLinking": True,
@@ -272,6 +393,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKEN": True,
     "BLACKLIST_AFTER_ROTATION": True,
+    "TOKEN_OBTAIN_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenObtainPairSerializer",
+    "TOKEN_REFRESH_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenRefreshSerializer",
 }
 
 ACCOUNT_LOGIN_METHODS = {"email"}
@@ -296,9 +419,11 @@ REST_AUTH = {
     "JWT_AUTH_SAMESITE": os.getenv("JWT_AUTH_SAMESITE", jwt_cookie_samesite_default),
     "JWT_AUTH_SECURE": os.getenv("JWT_AUTH_SECURE", str(jwt_cookie_secure_default)).lower() == "true",
     "TOKEN_MODEL": None,
-    "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.CustomRegisterSerializer",
+    "REGISTER_SERIALIZER": "hvt.api.v1.serializers.users.ControlPlaneRegisterSerializer",
     "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
     "SOCIAL_LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomSocialLoginSerializer",
+    "JWT_TOKEN_CLAIMS_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenObtainPairSerializer",
+    "PASSWORD_RESET_SERIALIZER": "hvt.apps.authentication.serializers.HVTPasswordResetSerializer",
     "PASSWORD_RESET_USE_SITES_DOMAIN": False,
 }
 
@@ -311,6 +436,7 @@ JWT_AUTH_REFRESH_COOKIE = REST_AUTH["JWT_AUTH_REFRESH_COOKIE"]
 JWT_AUTH_HTTPONLY = REST_AUTH["JWT_AUTH_HTTPONLY"]
 JWT_AUTH_SECURE = REST_AUTH["JWT_AUTH_SECURE"]
 JWT_AUTH_SAMESITE = REST_AUTH["JWT_AUTH_SAMESITE"]
+JWT_TOKEN_CLAIMS_SERIALIZER = REST_AUTH["JWT_TOKEN_CLAIMS_SERIALIZER"]
 EMAIL_BACKEND = "hvt.apps.authentication.email.ResendEmailBackend"
 
 PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"

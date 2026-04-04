@@ -1,0 +1,31 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}Verify your email for HVT{% endblock %}
+{% block preview %}Confirm your email to activate your HVT account and continue setup.{% endblock %}
+{% block eyebrow %}
+<div style="display:inline-block; margin:0 0 14px 0; padding:6px 10px; border-radius:999px; border:1px solid #3f3f46; background:#18181b; color:#c4b5fd; font-family:Inter, Arial, sans-serif; font-size:11px; line-height:1; font-weight:600; letter-spacing:0.12em; text-transform:uppercase;">
+    Account verification
+</div>
+{% endblock %}
+{% block heading %}Verify your email{% endblock %}
+{% block body %}
+<p style="margin:0 0 16px 0;">You’re almost done setting up your HVT account. Confirm this address to activate your control-plane account and continue into organizations, projects, API keys, runtime auth, audit logs, and webhooks.</p>
+{% if code %}
+<div style="margin:0 0 16px 0; padding:16px 18px; border-radius:14px; border:1px solid #27272a; background:#18181b;">
+    <div style="margin:0 0 8px 0; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#71717a;">Verification code</div>
+    <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:28px; line-height:1.2; letter-spacing:0.16em; color:#ffffff;">{{ code }}</div>
+</div>
+{% else %}
+<p style="margin:0 0 22px 0;">
+    <a href="{{ activate_url }}" style="display:inline-block; padding:12px 18px; border-radius:10px; background:#7c3aed; color:#ffffff; font-weight:700; text-decoration:none;">Verify email</a>
+</p>
+<div style="margin:0 0 16px 0; padding:14px 16px; border-radius:14px; border:1px solid #27272a; background:#18181b;">
+    <div style="margin:0 0 8px 0; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#71717a;">Direct link</div>
+    <a href="{{ activate_url }}" style="word-break:break-all; color:#c4b5fd; text-decoration:none;">{{ activate_url }}</a>
+</div>
+{% endif %}
+<p style="margin:0;">If you did not create this account, you can safely ignore this email.</p>
+{% endblock %}
+{% block footer %}
+This verification email was sent by {{ brand_name }} to confirm ownership of this address. For help, reply to {{ support_email }}.
+{% endblock %}

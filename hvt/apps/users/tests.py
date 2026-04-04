@@ -103,7 +103,11 @@ class IsOrgMemberOrAPIKeyPermissionTest(TestCase):
         # Create API key
         prefix, self.api_key_full, hashed = APIKey.generate_key()
         self.api_key = APIKey.objects.create(
-            organization=self.org, name="Test Key", prefix=prefix, hashed_key=hashed
+            organization=self.org,
+            name="Test Key",
+            prefix=prefix,
+            hashed_key=hashed,
+            scopes=["read"],
         )
 
         self.permission = IsOrgMemberOrAPIKey()
@@ -161,7 +165,11 @@ class IsOrgAdminOrAPIKeyPermissionTest(TestCase):
 
         prefix, _, hashed = APIKey.generate_key()
         self.api_key = APIKey.objects.create(
-            organization=self.org, name="Test Key", prefix=prefix, hashed_key=hashed
+            organization=self.org,
+            name="Test Key",
+            prefix=prefix,
+            hashed_key=hashed,
+            scopes=["read"],
         )
 
         self.permission = IsOrgAdminOrAPIKey()
@@ -227,7 +235,11 @@ class IsOrgOwnerOrAPIKeyPermissionTest(TestCase):
 
         prefix, _, hashed = APIKey.generate_key()
         self.api_key = APIKey.objects.create(
-            organization=self.org, name="Test Key", prefix=prefix, hashed_key=hashed
+            organization=self.org,
+            name="Test Key",
+            prefix=prefix,
+            hashed_key=hashed,
+            scopes=["read"],
         )
 
         self.permission = IsOrgOwnerOrAPIKey()

@@ -1,0 +1,18 @@
+Verify your email for HVT
+
+You’re almost done setting up your HVT account.
+
+Confirm this address to activate your control-plane account and continue into organizations, projects, API keys, runtime auth, audit logs, and webhooks.
+
+{% if code %}
+Verification code:
+{{ code }}
+{% else %}
+Verify email:
+{{ activate_url }}
+{% endif %}
+
+If you did not create this account, you can safely ignore this email.
+
+Sent by HVT
+{{ brand_domain }}

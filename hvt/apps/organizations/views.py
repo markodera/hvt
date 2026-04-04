@@ -1,23 +1,43 @@
-from rest_framework import generics, permissions, status, filters
+from rest_framework import generics, permissions, status, filters, serializers
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view
+from django.conf import settings
+from django.utils import timezone
+from dj_rest_auth.app_settings import api_settings as dj_rest_auth_settings
+from dj_rest_auth.jwt_auth import set_jwt_cookies
 
-from .models import Organization, APIKey, Webhook, WebhookDelivery
+from .models import (
+    Organization,
+    Project,
+    APIKey,
+    SocialProviderConfig,
+    Webhook,
+    WebhookDelivery,
+    OrganizationInvitation,
+)
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import IsOrgOwnerOrAPIKey, IsOrgAdminOrAPIKey, IsOrgMemberOrAPIKey
-from hvt.apps.organizations.permissions import IsOrganizationOwner
+from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
+from hvt.apps.organizations.permissions import IsOrganizationOwner, IsCurrentOrganizationOwner
 from hvt.apps.organizations.webhooks import trigger_webhook_event
 from hvt.pagination import LargeResultPagination
+from hvt.apps.authentication.email import ResendEmailService, build_email_context, render_email_template
 from hvt.api.v1.serializers.organizations import (
     OrganizationSerializer,
+    ProjectSerializer,
     APIKeyCreateSerializer,
     APIKeyListSerializer,
+    SocialProviderConfigSerializer,
     WebhookSerializer,
     WebhookDeliverySerializer,
+    OrganizationInvitationCreateSerializer,
+    OrganizationInvitationSerializer,
+    OrganizationInvitationPublicSerializer,
+    OrganizationInvitationAcceptSerializer,
 )
 
 import logging
@@ -32,6 +52,77 @@ def _authenticated_user_or_none(request):
     return None
 
 
+def _sync_default_project_signup(org: Organization) -> None:
+    """Keep the default project's signup toggle aligned with org onboarding."""
+    default_project = org.ensure_default_project()
+    if default_project.allow_signup != org.allow_signup:
+        default_project.allow_signup = org.allow_signup
+        default_project.save(update_fields=["allow_signup", "updated_at"])
+
+
+def _set_rotated_auth_tokens(response, user) -> None:
+    """Rotate JWTs after an org context change so current-org requests work immediately."""
+    user.refresh_from_db()
+    refresh_token = HVTTokenObtainPairSerializer.get_token(user)
+    access_token = refresh_token.access_token
+    access_value = str(access_token)
+    refresh_value = str(refresh_token)
+
+    response.data["access"] = access_value
+    response.data["refresh"] = "" if dj_rest_auth_settings.JWT_AUTH_HTTPONLY else refresh_value
+    set_jwt_cookies(response, access_value, refresh_value)
+
+
+def _set_bootstrap_auth_tokens(response, user) -> None:
+    _set_rotated_auth_tokens(response, user)
+
+
+def _build_invitation_accept_url(invitation: OrganizationInvitation) -> str:
+    return f"{settings.FRONTEND_URL.rstrip('/')}/invite?token={invitation.token}"
+
+
+def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
+    if not getattr(settings, "RESEND_API_KEY", ""):
+        logger.warning(
+            "Skipping invitation email because RESEND_API_KEY is not configured",
+            extra={"invitation_id": str(invitation.id), "email": invitation.email},
+        )
+        return False
+
+    accept_url = _build_invitation_accept_url(invitation)
+    role_label = invitation.get_role_display()
+    email_context = build_email_context(
+        {
+            "organization_name": invitation.organization.name,
+            "organization_slug": invitation.organization.slug,
+            "invitee_email": invitation.email,
+            "invited_by_email": invitation.invited_by.email if invitation.invited_by else "",
+            "role_label": role_label,
+            "accept_url": accept_url,
+            "expires_at_display": timezone.localtime(invitation.expires_at).strftime("%B %d, %Y at %H:%M %Z"),
+        }
+    )
+    subject, text, html = render_email_template(
+        "organizations/email/invitation",
+        email_context,
+    )
+
+    try:
+        ResendEmailService().send(
+            to=invitation.email,
+            subject=subject,
+            html=html,
+            text=text,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to send organization invitation email",
+            extra={"invitation_id": str(invitation.id), "email": invitation.email},
+        )
+        return False
+
+
 @extend_schema_view(
     get=extend_schema(
         tags=["Organizations"],
@@ -41,7 +132,7 @@ def _authenticated_user_or_none(request):
     post=extend_schema(
         tags=["Organizations"],
         summary="Create an organization",
-        description="Create a new organization. The authenticated user becomes the owner. Max 3 per user.",
+        description="Create a new organization. The authenticated user becomes the owner. Single organization per user at launch.",
     ),
 )
 class OrganizationListView(generics.ListCreateAPIView):
@@ -57,20 +148,31 @@ class OrganizationListView(generics.ListCreateAPIView):
             return [permissions.IsAuthenticated()]
         return [permissions.IsAdminUser()]
 
+    def create(self, request, *args, **kwargs):
+        self._bootstrap_org_tokens = False
+        response = super().create(request, *args, **kwargs)
+        if getattr(self, "_bootstrap_org_tokens", False):
+            _set_bootstrap_auth_tokens(response, request.user)
+        return response
+
     def perform_create(self, serializer):
         from rest_framework.serializers import ValidationError
         user = self.request.user
+        had_organization = bool(user.organization_id)
 
-        owned_org_count = user.owned_organization.count()
-        if owned_org_count >= 3:
-            raise ValidationError("You can only create up to 3 organizations.")
+        if user.organization_id or user.owned_organization.exists():
+            raise ValidationError(
+                "Single-organization launch: you already belong to an organization."
+            )
 
         org = serializer.save(owner=user)
+        org.ensure_default_project()
 
-        if not user.organization:
+        if not had_organization:
             user.organization = org
             user.role = "owner"
             user.save(update_fields=["organization", "role"])
+            self._bootstrap_org_tokens = True
 
         # Audit log
         AuditLog.log(
@@ -114,6 +216,44 @@ class OrganizationDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = OrganizationSerializer
     permission_classes = [permissions.IsAdminUser]
 
+    def get_permissions(self):
+        if self.request.method in ["PATCH", "PUT"]:
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAdminUser()]
+
+    def get_queryset(self):
+        user = getattr(self.request, "user", None)
+        if self.request.method in ["PATCH", "PUT"] and user and user.is_authenticated:
+            if user.is_staff:
+                return Organization.objects.all()
+            return Organization.objects.filter(owner=user)
+        return Organization.objects.all()
+
+    def perform_update(self, serializer):
+        org = self.get_object()
+        old_data = OrganizationSerializer(org).data
+        updated_org = serializer.save()
+        if old_data.get("allow_signup") != updated_org.allow_signup:
+            _sync_default_project_signup(updated_org)
+        new_data = OrganizationSerializer(updated_org).data
+
+        changes = {
+            field: {"old": old_data[field], "new": new_data[field]}
+            for field in old_data
+            if old_data[field] != new_data[field]
+        }
+
+        if changes:
+            AuditLog.log(
+                event_type=AuditLog.EventType.ORG_UPDATED,
+                request=self.request,
+                user=_authenticated_user_or_none(self.request),
+                organization=updated_org,
+                target=updated_org,
+                event_data={"changes": changes},
+                success=True,
+            )
+
 
 @extend_schema_view(
     get=extend_schema(
@@ -138,11 +278,14 @@ class CurrentOrganizationView(generics.RetrieveUpdateAPIView):
     PATCH /api/v1/organizations/current/ - Update current organization (owner only)
     """
     serializer_class = OrganizationSerializer
+    api_key_read_scopes = ("organization:read",)
 
     def perform_update(self, serializer):
         org = self.get_object()
         old_data = OrganizationSerializer(org).data
         updated_org = serializer.save()
+        if old_data.get("allow_signup") != updated_org.allow_signup:
+            _sync_default_project_signup(updated_org)
         new_data = OrganizationSerializer(updated_org).data
 
         changes = {
@@ -185,6 +328,270 @@ class CurrentOrganizationView(generics.RetrieveUpdateAPIView):
 
 @extend_schema_view(
     get=extend_schema(
+        tags=["Projects"],
+        summary="List projects",
+        description="List projects for the current organization. Owner only.",
+    ),
+    post=extend_schema(
+        tags=["Projects"],
+        summary="Create a project",
+        description="Create a new project in the current organization. Owner only.",
+        request=ProjectSerializer,
+        responses={201: ProjectSerializer},
+    ),
+)
+class ProjectListCreateView(generics.ListCreateAPIView):
+    """List and create projects for the current organization."""
+
+    serializer_class = ProjectSerializer
+    permission_classes = [IsCurrentOrganizationOwner]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "slug"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+    ordering = ["created_at", "name"]
+
+    def get_queryset(self):
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated or not user.organization_id:
+            return Project.objects.none()
+        return Project.objects.filter(organization=user.organization)
+
+    def perform_create(self, serializer):
+        project = serializer.save(organization=self.request.user.organization)
+        AuditLog.log(
+            event_type=AuditLog.EventType.PROJECT_CREATED,
+            request=self.request,
+            user=_authenticated_user_or_none(self.request),
+            organization=project.organization,
+            project=project,
+            target=project,
+            event_data={
+                "name": project.name,
+                "slug": project.slug,
+                "allow_signup": project.allow_signup,
+                "is_default": project.is_default,
+            },
+            success=True,
+        )
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Retrieve a project",
+        description="Get details for a project in the current organization. Owner only.",
+    ),
+    patch=extend_schema(
+        tags=["Projects"],
+        summary="Update a project",
+        description="Update a project in the current organization. Owner only.",
+    ),
+    delete=extend_schema(
+        tags=["Projects"],
+        summary="Delete a project",
+        description="Delete a non-default project in the current organization. Owner only.",
+    ),
+)
+class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete a project in the current organization."""
+
+    serializer_class = ProjectSerializer
+    permission_classes = [IsCurrentOrganizationOwner]
+
+    def get_queryset(self):
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated or not user.organization_id:
+            return Project.objects.none()
+        return Project.objects.filter(organization=user.organization)
+
+    def perform_update(self, serializer):
+        project = self.get_object()
+        old_data = ProjectSerializer(project).data
+        updated_project = serializer.save()
+        new_data = ProjectSerializer(updated_project).data
+
+        changes = {
+            field: {"old": old_data[field], "new": new_data[field]}
+            for field in old_data
+            if old_data[field] != new_data[field]
+        }
+
+        if changes:
+            AuditLog.log(
+                event_type=AuditLog.EventType.PROJECT_UPDATED,
+                request=self.request,
+                user=_authenticated_user_or_none(self.request),
+                organization=updated_project.organization,
+                project=updated_project,
+                target=updated_project,
+                event_data={"changes": changes},
+                success=True,
+            )
+
+    def perform_destroy(self, instance):
+        if instance.is_default:
+            raise serializers.ValidationError("The default project cannot be deleted.")
+        if instance.api_keys.exists():
+            raise serializers.ValidationError(
+                "Delete or revoke this project's API keys before deleting the project."
+            )
+        if instance.webhooks.exists():
+            raise serializers.ValidationError(
+                "Delete this project's webhooks before deleting the project."
+            )
+        if instance.users.exists():
+            raise serializers.ValidationError(
+                "Delete or move this project's users before deleting the project."
+            )
+        if instance.social_provider_configs.exists():
+            raise serializers.ValidationError(
+                "Delete this project's social provider configs before deleting the project."
+            )
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.PROJECT_DELETED,
+            request=self.request,
+            user=_authenticated_user_or_none(self.request),
+            organization=instance.organization,
+            project=instance,
+            target=instance,
+            event_data={
+                "name": instance.name,
+                "slug": instance.slug,
+            },
+            success=True,
+        )
+        instance.delete()
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="List project social providers",
+        description="List social provider configs for a project in the current organization. Owner only.",
+    ),
+    post=extend_schema(
+        tags=["Projects"],
+        summary="Create a project social provider config",
+        description="Create or configure a social provider for a project in the current organization. Owner only.",
+        request=SocialProviderConfigSerializer,
+        responses={201: SocialProviderConfigSerializer},
+    ),
+)
+class SocialProviderConfigListCreateView(generics.ListCreateAPIView):
+    """List and create per-project social provider configs."""
+
+    serializer_class = SocialProviderConfigSerializer
+    permission_classes = [IsCurrentOrganizationOwner]
+
+    def _get_project(self):
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated or not user.organization_id:
+            raise NotFound("Project not found.")
+        return get_object_or_404(
+            Project,
+            organization=user.organization,
+            id=self.kwargs["project_pk"],
+        )
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return SocialProviderConfig.objects.none()
+        project = self._get_project()
+        return SocialProviderConfig.objects.filter(project=project).order_by("provider")
+
+    def perform_create(self, serializer):
+        project = self._get_project()
+        config = serializer.save(project=project)
+        AuditLog.log(
+            event_type=AuditLog.EventType.PROJECT_SOCIAL_PROVIDER_CREATED,
+            request=self.request,
+            user=_authenticated_user_or_none(self.request),
+            organization=project.organization,
+            project=project,
+            target=config,
+            event_data={
+                "provider": config.provider,
+                "is_active": config.is_active,
+                "redirect_uris": config.redirect_uris,
+            },
+            success=True,
+        )
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Retrieve a project social provider config",
+        description="Retrieve a social provider config for a project in the current organization. Owner only.",
+    ),
+    patch=extend_schema(
+        tags=["Projects"],
+        summary="Update a project social provider config",
+        description="Update a social provider config for a project in the current organization. Owner only.",
+    ),
+    delete=extend_schema(
+        tags=["Projects"],
+        summary="Delete a project social provider config",
+        description="Delete a social provider config for a project in the current organization. Owner only.",
+    ),
+)
+class SocialProviderConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete a per-project social provider config."""
+
+    serializer_class = SocialProviderConfigSerializer
+    permission_classes = [IsCurrentOrganizationOwner]
+
+    def get_queryset(self):
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated or not user.organization_id:
+            return SocialProviderConfig.objects.none()
+        return SocialProviderConfig.objects.filter(project__organization=user.organization)
+
+    def perform_update(self, serializer):
+        config = self.get_object()
+        old_data = SocialProviderConfigSerializer(config).data
+        updated_config = serializer.save()
+        new_data = SocialProviderConfigSerializer(updated_config).data
+        changes = {
+            field: {"old": old_data[field], "new": new_data[field]}
+            for field in old_data
+            if old_data[field] != new_data[field]
+        }
+
+        if changes:
+            AuditLog.log(
+                event_type=AuditLog.EventType.PROJECT_SOCIAL_PROVIDER_UPDATED,
+                request=self.request,
+                user=_authenticated_user_or_none(self.request),
+                organization=updated_config.organization,
+                project=updated_config.project,
+                target=updated_config,
+                event_data={
+                    "provider": updated_config.provider,
+                    "changes": changes,
+                },
+                success=True,
+            )
+
+    def perform_destroy(self, instance):
+        AuditLog.log(
+            event_type=AuditLog.EventType.PROJECT_SOCIAL_PROVIDER_DELETED,
+            request=self.request,
+            user=_authenticated_user_or_none(self.request),
+            organization=instance.organization,
+            project=instance.project,
+            target=instance,
+            event_data={
+                "provider": instance.provider,
+            },
+            success=True,
+        )
+        instance.delete()
+
+
+@extend_schema_view(
+    get=extend_schema(
         tags=["API Keys"],
         summary="List API keys",
         description=(
@@ -210,10 +617,11 @@ class APIKeyListCreateView(generics.ListCreateAPIView):
     POST: Create a new API Key.
     """
     permission_classes = [IsOrgOwnerOrAPIKey]
+    api_key_read_scopes = ("api_keys:read",)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["environment", "is_active"]
+    filterset_fields = ["environment", "is_active", "project"]
     search_fields = ["name", "prefix"]
-    ordering_fields = ["name", "environment", "created_at", "last_used_at"]
+    ordering_fields = ["name", "environment", "project__name", "created_at", "last_used_at"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
@@ -226,7 +634,10 @@ class APIKeyListCreateView(generics.ListCreateAPIView):
 
         if not org:
             return APIKey.objects.none()
-        return APIKey.objects.filter(organization=org)
+        queryset = APIKey.objects.select_related("project").filter(organization=org)
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            queryset = queryset.filter(project=self.request.auth.project)
+        return queryset
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -262,10 +673,13 @@ class APIKeyListCreateView(generics.ListCreateAPIView):
             user=actor_user,
             api_key=actor_api_key,
             organization=org,
+            project=api_key.project,
             target=api_key,
             event_data={
                 "key_name": api_key.name,
                 "environment": api_key.environment,
+                "project_id": str(api_key.project_id) if api_key.project_id else None,
+                "project_slug": api_key.project.slug if api_key.project_id else "",
                 "scopes": api_key.scopes,
             },
             success=True,
@@ -274,11 +688,13 @@ class APIKeyListCreateView(generics.ListCreateAPIView):
         # Trigger webhook: api_key.created
         trigger_webhook_event(
             organization=org,
+            project=api_key.project,
             event_type="api_key.created",
             payload={
                 "api_key_id": str(api_key.id),
                 "name": api_key.name,
                 "environment": api_key.environment,
+                "project_id": str(api_key.project_id) if api_key.project_id else None,
             },
         )
 
@@ -302,6 +718,7 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
     """
     serializer_class = APIKeyListSerializer
     permission_classes = [IsOrgOwnerOrAPIKey]
+    api_key_read_scopes = ("api_keys:read",)
 
     def get_queryset(self):
         if isinstance(self.request.auth, APIKey):
@@ -313,7 +730,10 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
 
         if not org:
             return APIKey.objects.none()
-        return APIKey.objects.filter(organization=org)
+        queryset = APIKey.objects.select_related("project").filter(organization=org)
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            queryset = queryset.filter(project=self.request.auth.project)
+        return queryset
 
     def destroy(self, request, *args, **kwargs):
         api_key = self.get_object()
@@ -326,10 +746,12 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
                 user=_authenticated_user_or_none(request),
                 api_key=request.auth if isinstance(request.auth, APIKey) else None,
                 organization=api_key.organization,
+                project=api_key.project,
                 target=api_key,
                 event_data={
                     "key_name": api_key.name,
                     "environment": api_key.environment,
+                    "project_id": str(api_key.project_id) if api_key.project_id else None,
                     "action": "deleted",
                 },
                 success=True,
@@ -338,6 +760,7 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
             # Trigger webhook: api_key.revoked
             trigger_webhook_event(
                 organization=api_key.organization,
+                project=api_key.project,
                 event_type="api_key.revoked",
                 payload={
                     "api_key_id": str(api_key.id),
@@ -362,6 +785,7 @@ class APIKeyRevokeView(generics.UpdateAPIView):
     """
     serializer_class = APIKeyListSerializer
     permission_classes = [IsOrgOwnerOrAPIKey]
+    api_key_read_scopes = ("api_keys:read",)
 
     def get_queryset(self):
         if isinstance(self.request.auth, APIKey):
@@ -373,7 +797,10 @@ class APIKeyRevokeView(generics.UpdateAPIView):
 
         if not org:
             return APIKey.objects.none()
-        return APIKey.objects.filter(organization=org)
+        queryset = APIKey.objects.select_related("project").filter(organization=org)
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            queryset = queryset.filter(project=self.request.auth.project)
+        return queryset
 
     def patch(self, request, *args, **kwargs):
         api_key = self.get_object()
@@ -386,10 +813,12 @@ class APIKeyRevokeView(generics.UpdateAPIView):
             user=_authenticated_user_or_none(request),
             api_key=request.auth if isinstance(request.auth, APIKey) else None,
             organization=api_key.organization,
+            project=api_key.project,
             target=api_key,
             event_data={
                 "key_name": api_key.name,
                 "environment": api_key.environment,
+                "project_id": str(api_key.project_id) if api_key.project_id else None,
                 "action": "deactivated",
             },
             success=True,
@@ -398,6 +827,7 @@ class APIKeyRevokeView(generics.UpdateAPIView):
         # Trigger webhook: api_key.revoked
         trigger_webhook_event(
             organization=api_key.organization,
+            project=api_key.project,
             event_type="api_key.revoked",
             payload={
                 "api_key_id": str(api_key.id),
@@ -407,6 +837,277 @@ class APIKeyRevokeView(generics.UpdateAPIView):
         )
 
         return Response({"detail": "API key revoked"}, status=status.HTTP_200_OK)
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Organizations"],
+        summary="List organization invitations",
+        description="List invitations for the current organization. Owner only.",
+    ),
+    post=extend_schema(
+        tags=["Organizations"],
+        summary="Create organization invitation",
+        description="Invite a user to the current organization as an admin or member. Owner only.",
+    ),
+)
+class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
+    """Manage invitations for the current organization."""
+
+    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False) or not self.request.user.is_authenticated:
+            return OrganizationInvitation.objects.none()
+        return OrganizationInvitation.objects.filter(
+            organization=self.request.user.organization
+        ).select_related("invited_by", "accepted_by")
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return OrganizationInvitationCreateSerializer
+        return OrganizationInvitationSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["organization"] = self.request.user.organization
+        return context
+
+    def perform_create(self, serializer):
+        invitation = serializer.save(
+            organization=self.request.user.organization,
+            invited_by=self.request.user,
+        )
+        email_sent = _send_invitation_email(invitation)
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.ORG_INVITATION_CREATED,
+            request=self.request,
+            user=self.request.user,
+            organization=self.request.user.organization,
+            target=invitation,
+            event_data={
+                "email": invitation.email,
+                "role": invitation.role,
+                "email_sent": email_sent,
+            },
+            success=True,
+        )
+
+
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Organizations"],
+        summary="Resend organization invitation",
+        description="Resend a pending invitation email for the current organization. Owner only.",
+    ),
+)
+class OrganizationInvitationResendView(generics.GenericAPIView):
+    """Resend a pending invitation email."""
+
+    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+    serializer_class = OrganizationInvitationSerializer
+
+    def get_queryset(self):
+        return OrganizationInvitation.objects.filter(
+            organization=self.request.user.organization
+        )
+
+    def post(self, request, *args, **kwargs):
+        invitation = get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
+
+        if invitation.accepted_at:
+            raise serializers.ValidationError(
+                {"detail": "Accepted invitations cannot be resent."}
+            )
+
+        if invitation.revoked_at:
+            raise serializers.ValidationError(
+                {"detail": "Revoked invitations cannot be resent."}
+            )
+
+        if invitation.is_expired:
+            raise serializers.ValidationError(
+                {"detail": "Expired invitations cannot be resent."}
+            )
+
+        email_sent = _send_invitation_email(invitation)
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.ORG_INVITATION_RESENT,
+            request=request,
+            user=request.user,
+            organization=request.user.organization,
+            target=invitation,
+            event_data={
+                "email": invitation.email,
+                "role": invitation.role,
+                "email_sent": email_sent,
+            },
+            success=True,
+        )
+
+        invitation.refresh_from_db()
+        return Response(
+            OrganizationInvitationSerializer(invitation).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema_view(
+    delete=extend_schema(
+        tags=["Organizations"],
+        summary="Revoke organization invitation",
+        description="Revoke a pending invitation for the current organization. Owner only.",
+    ),
+)
+class OrganizationInvitationRevokeView(generics.DestroyAPIView):
+    """Revoke a pending invitation without deleting the audit trail."""
+
+    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+    serializer_class = OrganizationInvitationSerializer
+
+    def get_queryset(self):
+        return OrganizationInvitation.objects.filter(
+            organization=self.request.user.organization
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        invitation = self.get_object()
+
+        if invitation.accepted_at:
+            raise serializers.ValidationError(
+                {"detail": "Accepted invitations cannot be revoked."}
+            )
+
+        if invitation.revoked_at:
+            raise serializers.ValidationError(
+                {"detail": "This invitation has already been revoked."}
+            )
+
+        invitation.revoked_at = timezone.now()
+        invitation.save(update_fields=["revoked_at", "updated_at"])
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.ORG_INVITATION_REVOKED,
+            request=request,
+            user=request.user,
+            organization=request.user.organization,
+            target=invitation,
+            event_data={"email": invitation.email, "role": invitation.role},
+            success=True,
+        )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(
+    tags=["Organizations"],
+    summary="Get invitation details by token",
+    description="Public invitation preview for the frontend accept page.",
+    responses={200: OrganizationInvitationPublicSerializer},
+)
+class OrganizationInvitationLookupView(APIView):
+    """Resolve an invitation token into safe preview metadata."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        token = (request.query_params.get("token") or "").strip()
+        if not token:
+            raise serializers.ValidationError({"token": ["This field is required."]})
+
+        invitation = get_object_or_404(
+            OrganizationInvitation.objects.select_related("organization"),
+            token=token,
+        )
+
+        return Response(
+            OrganizationInvitationPublicSerializer(invitation).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=["Organizations"],
+    summary="Accept organization invitation",
+    description="Accept an invitation using its token. The authenticated user's email must match the invitation email.",
+    request=OrganizationInvitationAcceptSerializer,
+    responses={200: OrganizationInvitationSerializer},
+)
+class OrganizationInvitationAcceptView(APIView):
+    """Accept an invitation and join the organization."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OrganizationInvitationAcceptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        invitation = get_object_or_404(
+            OrganizationInvitation.objects.select_related("organization"),
+            token=serializer.validated_data["token"],
+        )
+
+        if invitation.accepted_at:
+            raise serializers.ValidationError(
+                {"detail": "This invitation has already been accepted."}
+            )
+
+        if invitation.revoked_at:
+            raise serializers.ValidationError(
+                {"detail": "This invitation has been revoked."}
+            )
+
+        if invitation.is_expired:
+            raise serializers.ValidationError(
+                {"detail": "This invitation has expired."}
+            )
+
+        if request.user.email.lower() != invitation.email.lower():
+            raise serializers.ValidationError(
+                {"detail": "This invitation is for a different email address."}
+            )
+
+        if request.user.organization_id:
+            raise serializers.ValidationError(
+                {"detail": "You already belong to an organization."}
+            )
+
+        request.user.organization = invitation.organization
+        request.user.role = invitation.role
+        request.user.save(update_fields=["organization", "role"])
+
+        invitation.accepted_by = request.user
+        invitation.accepted_at = timezone.now()
+        invitation.save(update_fields=["accepted_by", "accepted_at", "updated_at"])
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.ORG_INVITATION_ACCEPTED,
+            request=request,
+            user=request.user,
+            organization=invitation.organization,
+            target=invitation,
+            event_data={"email": invitation.email, "role": invitation.role},
+            success=True,
+        )
+        AuditLog.log(
+            event_type=AuditLog.EventType.ORG_MEMBER_ADDED,
+            request=request,
+            user=request.user,
+            organization=invitation.organization,
+            target=request.user,
+            event_data={"email": request.user.email, "role": invitation.role},
+            success=True,
+        )
+
+        invitation.refresh_from_db()
+        response = Response(
+            OrganizationInvitationSerializer(invitation).data,
+            status=status.HTTP_200_OK,
+        )
+        _set_rotated_auth_tokens(response, request.user)
+        return response
 
 
 # --- Webhook CRUD Views ---
@@ -435,10 +1136,11 @@ class WebhookListCreateView(generics.ListCreateAPIView):
     """Manage webhooks for current organization."""
     permission_classes = [IsOrgAdminOrAPIKey]
     serializer_class = WebhookSerializer
+    api_key_read_scopes = ("webhooks:read",)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["is_active"]
+    filterset_fields = ["is_active", "project"]
     search_fields = ["url", "description"]
-    ordering_fields = ["created_at", "last_triggered_at", "success_count", "failure_count"]
+    ordering_fields = ["created_at", "last_triggered_at", "success_count", "failure_count", "project__name"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
@@ -449,7 +1151,18 @@ class WebhookListCreateView(generics.ListCreateAPIView):
         else:
             return Webhook.objects.none()
 
-        return Webhook.objects.filter(organization=org)
+        queryset = Webhook.objects.select_related("project").filter(organization=org)
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            queryset = queryset.filter(project=self.request.auth.project)
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if isinstance(self.request.auth, APIKey):
+            context["organization"] = self.request.auth.organization
+        elif self.request.user and self.request.user.is_authenticated:
+            context["organization"] = self.request.user.organization
+        return context
 
     def perform_create(self, serializer):
         org = (
@@ -494,6 +1207,7 @@ class WebhookDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     serializer_class = WebhookSerializer
     permission_classes = [IsOrgAdminOrAPIKey]
+    api_key_read_scopes = ("webhooks:read",)
 
     def get_queryset(self):
         if isinstance(self.request.auth, APIKey):
@@ -503,7 +1217,18 @@ class WebhookDetailView(generics.RetrieveUpdateDestroyAPIView):
         else:
             return Webhook.objects.none()
 
-        return Webhook.objects.filter(organization=org)
+        queryset = Webhook.objects.select_related("project").filter(organization=org)
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            queryset = queryset.filter(project=self.request.auth.project)
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if isinstance(self.request.auth, APIKey):
+            context["organization"] = self.request.auth.organization
+        elif self.request.user and self.request.user.is_authenticated:
+            context["organization"] = self.request.user.organization
+        return context
 
 
 @extend_schema_view(
@@ -522,6 +1247,7 @@ class WebhookDeliveryListView(generics.ListAPIView):
     """
     serializer_class = WebhookDeliverySerializer
     permission_classes = [IsOrgAdminOrAPIKey]
+    api_key_read_scopes = ("webhooks:read",)
     pagination_class = LargeResultPagination
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["status", "event_type"]
@@ -541,6 +1267,9 @@ class WebhookDeliveryListView(generics.ListAPIView):
             pk=self.kwargs["webhook_pk"],
             organization=org,
         )
+        if isinstance(self.request.auth, APIKey) and self.request.auth.project_id:
+            if webhook.project_id != self.request.auth.project_id:
+                raise NotFound("Webhook not found.")
         return WebhookDelivery.objects.filter(webhook=webhook).order_by("-created_at")
 
 
@@ -560,6 +1289,9 @@ PERMISSION_MATRIX = {
     "organization.read": {"owner": True, "admin": True, "member": True},
     "organization.update": {"owner": True, "admin": False, "member": False},
     "organization.delete": {"owner": True, "admin": False, "member": False},
+    "organization.invites.list": {"owner": True, "admin": False, "member": False},
+    "organization.invites.create": {"owner": True, "admin": False, "member": False},
+    "organization.invites.revoke": {"owner": True, "admin": False, "member": False},
     "api_keys.list": {"owner": True, "admin": False, "member": False},
     "api_keys.create": {"owner": True, "admin": False, "member": False},
     "api_keys.revoke": {"owner": True, "admin": False, "member": False},
@@ -586,6 +1318,7 @@ class PermissionsMatrixView(APIView):
     """
 
     permission_classes = [IsOrgMemberOrAPIKey]
+    api_key_read_scopes = ("organization:read",)
 
     @extend_schema(
         tags=["Organizations"],
@@ -625,14 +1358,19 @@ class PermissionsMatrixView(APIView):
         role = "api_key" if is_api_key else getattr(request.user, "role", "member")
 
         if is_api_key:
-            # API keys get read-only on everything they can access
+            scope_requirements = {
+                "users.list": ("users:read",),
+                "users.read": ("users:read",),
+                "organization.read": ("organization:read",),
+                "api_keys.list": ("api_keys:read",),
+                "webhooks.list": ("webhooks:read",),
+                "webhooks.deliveries": ("webhooks:read",),
+                "audit_logs.list_all": ("audit_logs:read",),
+                "audit_logs.list_own": ("audit_logs:read",),
+                "audit_logs.read": ("audit_logs:read",),
+            }
             effective = {
-                action: (
-                    "list" in action
-                    or "read" in action
-                    or action.endswith("list_all")
-                    or action.endswith("list_own")
-                )
+                action: request.auth.has_any_scope(*scope_requirements.get(action, ()))
                 for action in PERMISSION_MATRIX
             }
         else:

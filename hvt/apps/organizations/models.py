@@ -2,6 +2,7 @@ import uuid
 import secrets
 import hashlib
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -39,6 +40,97 @@ class Organization(models.Model):
     def __str__(self):
         return self.name
 
+    def ensure_default_project(self):
+        """Return the org's default project, creating it when missing."""
+        project, _ = self.projects.get_or_create(
+            is_default=True,
+            defaults={
+                "name": "Default",
+                "slug": "default",
+                "allow_signup": self.allow_signup,
+            },
+        )
+        return project
+
+
+class Project(models.Model):
+    """Application/environment boundary inside an organization."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="projects",
+    )
+    name = models.CharField(max_length=225)
+    slug = models.SlugField(max_length=225, db_index=True)
+    is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    allow_signup = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "projects"
+        ordering = ["created_at", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "slug"],
+                name="uniq_project_slug_per_organization",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=Q(is_default=True),
+                name="uniq_default_project_per_organization",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.organization.name} / {self.name}"
+
+
+class SocialProviderConfig(models.Model):
+    """Per-project OAuth provider credentials for runtime social auth."""
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google"
+        GITHUB = "github", "GitHub"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="social_provider_configs",
+    )
+    provider = models.CharField(max_length=32, choices=Provider.choices)
+    client_id = models.CharField(max_length=255)
+    client_secret = models.CharField(max_length=255)
+    redirect_uris = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Allowed frontend callback URLs for this provider config.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "social_provider_configs"
+        ordering = ["provider", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "provider"],
+                name="uniq_social_provider_per_project",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project} / {self.provider}"
+
+    @property
+    def organization(self):
+        return self.project.organization
+
 
 class APIKey(models.Model):
     """
@@ -50,11 +142,77 @@ class APIKey(models.Model):
         TEST = "test", "Test"
         LIVE = "live", "Live"
 
+    CANONICAL_SCOPES = (
+        "organization:read",
+        "organization:write",
+        "users:read",
+        "users:write",
+        "api_keys:read",
+        "api_keys:write",
+        "webhooks:read",
+        "webhooks:write",
+        "audit_logs:read",
+        "auth:runtime",
+    )
+    SUPPORTED_SCOPES = (
+        *CANONICAL_SCOPES,
+        "*",
+        "read",
+        "write",
+        "auth:*",
+        "organization:*",
+        "org:*",
+        "org:read",
+        "org:write",
+        "read:org",
+        "write:org",
+        "users:*",
+        "api_keys:*",
+        "webhooks:*",
+        "audit_logs:*",
+    )
+    SCOPE_ALIASES = {
+        "organization:read": {
+            "organization:read",
+            "organization:*",
+            "org:read",
+            "org:*",
+            "read:org",
+            "read",
+            "write",
+            "*",
+        },
+        "organization:write": {
+            "organization:write",
+            "organization:*",
+            "org:write",
+            "org:*",
+            "write:org",
+            "write",
+            "*",
+        },
+        "users:read": {"users:read", "users:*", "read", "write", "*"},
+        "users:write": {"users:write", "users:*", "write", "*"},
+        "api_keys:read": {"api_keys:read", "api_keys:*", "read", "write", "*"},
+        "api_keys:write": {"api_keys:write", "api_keys:*", "write", "*"},
+        "webhooks:read": {"webhooks:read", "webhooks:*", "read", "write", "*"},
+        "webhooks:write": {"webhooks:write", "webhooks:*", "write", "*"},
+        "audit_logs:read": {"audit_logs:read", "audit_logs:*", "read", "write", "*"},
+        "auth:runtime": {"auth:runtime", "auth:*", "write", "*"},
+    }
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
         "organizations.Organization",
         on_delete=models.CASCADE,
         related_name="api_keys",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+        null=True,
+        blank=True,
     )
 
     # Environment mode
@@ -148,6 +306,115 @@ class APIKey(models.Model):
         self.last_used_at = timezone.now()
         self.save(update_fields=["last_used_at"])
 
+    @classmethod
+    def get_supported_scopes(cls):
+        return tuple(dict.fromkeys(scope.lower() for scope in cls.SUPPORTED_SCOPES))
+
+    def normalized_scopes(self):
+        return {
+            str(scope).strip().lower()
+            for scope in (self.scopes or [])
+            if str(scope).strip()
+        }
+
+    def has_scope(self, scope: str) -> bool:
+        normalized_scope = (scope or "").strip().lower()
+        if not normalized_scope:
+            return False
+
+        granted_scopes = self.normalized_scopes()
+        if not granted_scopes:
+            return False
+
+        accepted_scopes = self.SCOPE_ALIASES.get(normalized_scope, {normalized_scope})
+        return any(candidate in granted_scopes for candidate in accepted_scopes)
+
+    def has_any_scope(self, *scopes: str) -> bool:
+        normalized = [scope for scope in scopes if (scope or "").strip()]
+        if not normalized:
+            return False
+        return any(self.has_scope(scope) for scope in normalized)
+
+
+class OrganizationInvitation(models.Model):
+    """
+    Invitation to join an organization as an admin or member.
+
+    Invitations are email-bound and accepted by an authenticated user whose
+    email matches the invite address.
+    """
+
+    class Role(models.TextChoices):
+        ADMIN = "admin", "Admin"
+        MEMBER = "member", "Member"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+    )
+    email = models.EmailField(db_index=True)
+    role = models.CharField(
+        max_length=10,
+        choices=Role.choices,
+        default=Role.MEMBER,
+    )
+    token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+    invited_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="sent_organization_invitations",
+    )
+    accepted_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="accepted_organization_invitations",
+    )
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "organization_invitations"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "email"]),
+            models.Index(fields=["organization", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.email} -> {self.organization.name} ({self.role})"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def status(self) -> str:
+        if self.accepted_at:
+            return "accepted"
+        if self.revoked_at:
+            return "revoked"
+        if self.is_expired:
+            return "expired"
+        return "pending"
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == "pending"
+
+    def save(self, *args, **kwargs):
+        self.email = (self.email or "").strip().lower()
+        if not self.token:
+            self.token = secrets.token_hex(32)
+        super().save(*args, **kwargs)
+
 
 class Webhook(models.Model):
     """
@@ -166,6 +433,11 @@ class Webhook(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="webhooks"
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="webhooks",
     )
 
     # Configuration
@@ -201,7 +473,7 @@ class Webhook(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.organization.name} - {self.url}"
+        return f"{self.project.slug} - {self.url}"
 
     @classmethod
     def generate_secret(cls):

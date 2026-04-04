@@ -38,6 +38,7 @@ def on_user_login(sender, request, user, **kwargs):
         request=request,
         user=user,
         organization=org,
+        project=getattr(user, "project", None),
         target=user,
         event_data={
             "login_method": request.META.get("HTTP_X_LOGIN_METHOD", "credentials") if request else "unknown",
@@ -48,6 +49,7 @@ def on_user_login(sender, request, user, **kwargs):
     if org:
         trigger_webhook_event(
             organization=org,
+            project=getattr(user, "project", None),
             event_type="user.login",
             payload={
                 "user_id": str(user.id),
@@ -73,6 +75,7 @@ def on_user_logout(sender, request, user, **kwargs):
         request=request,
         user=user,
         organization=getattr(user, "organization", None),
+        project=getattr(user, "project", None),
         target=user,
         success=True,
     )
@@ -137,6 +140,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             success=True,
         )
@@ -152,6 +156,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             success=True,
         )
@@ -168,6 +173,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             event_data={"email": email_address.email},
             success=True,
@@ -185,6 +191,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             event_data={
                 "email": confirmation.email_address.email,
@@ -205,6 +212,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             event_data={
                 "provider": sociallogin.account.provider,
@@ -225,6 +233,7 @@ try:
             request=request,
             user=user,
             organization=getattr(user, "organization", None),
+            project=getattr(user, "project", None),
             target=user,
             event_data={
                 "provider": socialaccount.provider,

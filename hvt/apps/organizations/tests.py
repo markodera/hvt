@@ -3,13 +3,22 @@ Comprehensive test cases for Test/Live API Key environment isolation.
 Tests that test and live environments are completely isolated.
 """
 from datetime import timedelta
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from rest_framework.test import APITestCase, APIRequestFactory
+from django.urls import reverse
+from rest_framework.test import APITestCase, APIClient, APIRequestFactory
 from rest_framework import status
+from rest_framework_simplejwt.tokens import AccessToken
 
-from hvt.apps.organizations.models import Organization, APIKey
+from hvt.apps.organizations.models import (
+    Organization,
+    Project,
+    APIKey,
+    SocialProviderConfig,
+    Webhook,
+)
+from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.backends import APIKeyAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -295,3 +304,579 @@ class APIKeySecurityTest(TestCase):
         self.assertTrue(api_key.verify_key(full_key))
         self.assertTrue(api_key.verify_key(full_key))
         self.assertTrue(api_key.verify_key(full_key))
+
+
+class OrganizationOnboardingFlowTest(APITestCase):
+    """Tests for organization onboarding and ownership behavior."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="founder@example.com",
+            password="password123",
+        )
+
+    def test_first_organization_creation_assigns_owner_membership(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            reverse("organization_list"),
+            {
+                "name": "Founder Org",
+                "slug": "founder-org",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.user.refresh_from_db()
+        created_org = Organization.objects.get(slug="founder-org")
+        self.assertEqual(created_org.owner, self.user)
+        self.assertEqual(self.user.organization, created_org)
+        self.assertEqual(self.user.role, User.Role.OWNER)
+
+    def test_user_cannot_create_second_org_during_single_org_launch(self):
+        existing_org = Organization.objects.create(
+            name="Existing Org",
+            slug="existing-org",
+            owner=self.user,
+        )
+        self.user.organization = existing_org
+        self.user.role = User.Role.OWNER
+        self.user.save(update_fields=["organization", "role"])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            reverse("organization_list"),
+            {
+                "name": "Second Org",
+                "slug": "second-org",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertFalse(Organization.objects.filter(slug="second-org").exists())
+        self.assertEqual(Organization.objects.filter(owner=self.user).count(), 1)
+        self.assertEqual(self.user.organization, existing_org)
+        self.assertEqual(self.user.role, User.Role.OWNER)
+        self.assertIn("single-organization launch", str(response.data).lower())
+
+    def test_user_cannot_create_org_when_already_member(self):
+        existing_org = Organization.objects.create(
+            name="Member Org",
+            slug="member-org",
+            owner=self.user,
+        )
+        self.user.organization = existing_org
+        self.user.role = User.Role.MEMBER
+        self.user.save(update_fields=["organization", "role"])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            reverse("organization_list"),
+            {
+                "name": "Another Org",
+                "slug": "another-org",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Organization.objects.filter(slug="another-org").exists())
+        self.assertIn("single-organization launch", str(response.data).lower())
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class OrganizationTokenBootstrapFlowTest(APITestCase):
+    """First-org creation should rotate tokens so the new owner can continue immediately."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        self.user = User.objects.create_user(
+            email="bootstrap-owner@example.com",
+            password="password123",
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+
+    def test_first_org_creation_rotates_tokens_for_immediate_current_org_updates(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.user.email, "password": "password123"},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        create_response = self.client.post(
+            reverse("organization_list"),
+            {
+                "name": "Bootstrap Org",
+                "slug": "bootstrap-org",
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("auth-token", create_response.cookies)
+        self.assertIn("refresh-token", create_response.cookies)
+
+        access_token = AccessToken(create_response.cookies["auth-token"].value)
+        created_org = Organization.objects.get(slug="bootstrap-org")
+        self.assertEqual(access_token["org_id"], str(created_org.id))
+
+        patch_response = self.client.patch(
+            reverse("current_organization"),
+            {"name": "Bootstrap Org Updated"},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(patch_response.data["name"], "Bootstrap Org Updated")
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class OrganizationDetailOwnerUpdateCompatibilityTest(APITestCase):
+    """Owner updates by org id should work for frontend compatibility."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        self.owner = User.objects.create_user(
+            email="detail-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
+        )
+        self.org = Organization.objects.create(
+            name="Detail Org",
+            slug="detail-org",
+            owner=self.owner,
+            allow_signup=False,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+
+        self.other_user = User.objects.create_user(
+            email="detail-other@example.com",
+            password="password123",
+            role=User.Role.ADMIN,
+        )
+        EmailAddress.objects.create(
+            user=self.other_user,
+            email=self.other_user.email,
+            verified=True,
+            primary=True,
+        )
+        self.other_org = Organization.objects.create(
+            name="Other Detail Org",
+            slug="other-detail-org",
+            owner=self.other_user,
+        )
+        self.other_user.organization = self.other_org
+        self.other_user.save(update_fields=["organization"])
+
+    def test_owner_can_patch_own_organization_by_id(self):
+        login_response = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.owner.email, "password": "password123"},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        response = self.client.patch(
+            reverse("organization_detail", kwargs={"pk": self.org.id}),
+            {"allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.org.refresh_from_db()
+        self.assertTrue(self.org.allow_signup)
+
+    def test_non_owner_cannot_patch_other_organization_by_id(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.patch(
+            reverse("organization_detail", kwargs={"pk": self.org.id}),
+            {"allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class ProjectAndAPIKeyScopingTest(APITestCase):
+    """Project bootstrapping and project-aware API key behavior."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        self.owner = User.objects.create_user(
+            email="project-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
+        )
+        self.org = Organization.objects.create(
+            name="Project Org",
+            slug="project-org",
+            owner=self.owner,
+            allow_signup=False,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.owner.email, "password": "password123"},
+            format="json",
+        )
+
+    def test_org_creation_bootstraps_default_project(self):
+        founder = User.objects.create_user(
+            email="fresh-founder@example.com",
+            password="password123",
+        )
+        from allauth.account.models import EmailAddress
+
+        EmailAddress.objects.create(
+            user=founder,
+            email=founder.email,
+            verified=True,
+            primary=True,
+        )
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": founder.email, "password": "password123"},
+            format="json",
+        )
+
+        response = self.client.post(
+            reverse("organization_list"),
+            {"name": "Fresh Org", "slug": "fresh-org"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created_org = Organization.objects.get(slug="fresh-org")
+        project = created_org.projects.get(is_default=True)
+        self.assertEqual(project.slug, "default")
+        self.assertEqual(project.allow_signup, created_org.allow_signup)
+
+    def test_owner_can_create_project(self):
+        response = self.client.post(
+            reverse("project_list_create"),
+            {"name": "Storefront Prod", "slug": "storefront-prod", "allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["slug"], "storefront-prod")
+        self.assertFalse(response.data["is_default"])
+        self.assertTrue(
+            Project.objects.filter(
+                organization=self.org,
+                slug="storefront-prod",
+            ).exists()
+        )
+        audit_log = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.PROJECT_CREATED,
+            organization=self.org,
+            project__slug="storefront-prod",
+        ).latest("created_at")
+        self.assertEqual(audit_log.event_data["slug"], "storefront-prod")
+
+    def test_api_key_creation_defaults_to_default_project(self):
+        response = self.client.post(
+            reverse("apikey_list_create"),
+            {"name": "Default Project Key", "scopes": ["read:org"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        api_key = APIKey.objects.get(id=response.data["id"])
+        self.assertEqual(api_key.project_id, self.default_project.id)
+        self.assertEqual(str(response.data["project"]), str(self.default_project.id))
+        self.assertEqual(response.data["project_slug"], self.default_project.slug)
+
+    def test_api_key_creation_accepts_explicit_project(self):
+        project = Project.objects.create(
+            organization=self.org,
+            name="Storefront Prod",
+            slug="storefront-prod",
+            allow_signup=True,
+        )
+
+        response = self.client.post(
+            reverse("apikey_list_create"),
+            {
+                "name": "Storefront Key",
+                "scopes": ["read:org"],
+                "project_id": str(project.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        api_key = APIKey.objects.get(id=response.data["id"])
+        self.assertEqual(api_key.project_id, project.id)
+        self.assertEqual(response.data["project_slug"], "storefront-prod")
+
+    def test_api_key_creation_rejects_unknown_scope(self):
+        response = self.client.post(
+            reverse("apikey_list_create"),
+            {"name": "Bad Scope Key", "scopes": ["totally:unknown"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("unsupported api key scopes", str(response.data).lower())
+
+    def test_api_key_scope_is_enforced_for_users_read(self):
+        prefix, full_key, hashed_key = APIKey.generate_key(environment="test")
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Org Read Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["organization:read"],
+        )
+
+        api_client = APIClient()
+        response = api_client.get(
+            reverse("user_list"),
+            HTTP_X_API_KEY=full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_project_scoped_api_key_only_sees_project_webhooks_and_audit_logs(self):
+        other_project = Project.objects.create(
+            organization=self.org,
+            name="Storefront Staging",
+            slug="storefront-staging",
+            allow_signup=True,
+        )
+        default_webhook = Webhook.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            url="https://default.example.com/hook",
+            events=["user.created"],
+            secret=Webhook.generate_secret(),
+            is_active=True,
+            created_by=self.owner,
+        )
+        Webhook.objects.create(
+            organization=self.org,
+            project=other_project,
+            url="https://staging.example.com/hook",
+            events=["user.created"],
+            secret=Webhook.generate_secret(),
+            is_active=True,
+            created_by=self.owner,
+        )
+        visible_audit = AuditLog.objects.create(
+            event_type=AuditLog.EventType.USER_UPDATED,
+            actor_user=self.owner,
+            organization=self.org,
+            project=self.default_project,
+            success=True,
+        )
+        AuditLog.objects.create(
+            event_type=AuditLog.EventType.USER_UPDATED,
+            actor_user=self.owner,
+            organization=self.org,
+            project=other_project,
+            success=True,
+        )
+        prefix, full_key, hashed_key = APIKey.generate_key(environment="test")
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Scoped Read Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["webhooks:read", "audit_logs:read"],
+        )
+
+        api_client = APIClient()
+        webhook_response = api_client.get(
+            reverse("webhook_list_create"),
+            HTTP_X_API_KEY=full_key,
+        )
+        audit_response = api_client.get(
+            reverse("audit_log_list"),
+            HTTP_X_API_KEY=full_key,
+        )
+
+        self.assertEqual(webhook_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(audit_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(webhook_response.data["results"][0]["id"], str(default_webhook.id))
+        self.assertEqual(len(webhook_response.data["results"]), 1)
+        self.assertEqual(audit_response.data["results"][0]["id"], str(visible_audit.id))
+        self.assertEqual(len(audit_response.data["results"]), 1)
+
+    def test_org_signup_toggle_syncs_default_project(self):
+        response = self.client.patch(
+            reverse("current_organization"),
+            {"allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.default_project.refresh_from_db()
+        self.assertTrue(self.default_project.allow_signup)
+
+    def test_project_update_uses_project_updated_audit_event(self):
+        response = self.client.patch(
+            reverse("project_detail", kwargs={"pk": self.default_project.id}),
+            {"name": "Default App"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        audit_log = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.PROJECT_UPDATED,
+            organization=self.org,
+            project=self.default_project,
+        ).latest("created_at")
+        self.assertIn("name", audit_log.event_data["changes"])
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class ProjectSocialProviderConfigTest(APITestCase):
+    """Project social provider config CRUD and deletion safety."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        self.owner = User.objects.create_user(
+            email="provider-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
+        )
+        self.org = Organization.objects.create(
+            name="Provider Org",
+            slug="provider-org",
+            owner=self.owner,
+            allow_signup=True,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.owner.email, "password": "password123"},
+            format="json",
+        )
+
+    def test_owner_can_create_project_social_provider_config(self):
+        response = self.client.post(
+            reverse(
+                "social_provider_config_list_create",
+                kwargs={"project_pk": self.default_project.id},
+            ),
+            {
+                "provider": "google",
+                "client_id": "google-client-id",
+                "client_secret": "google-secret-value",
+                "redirect_uris": ["http://localhost:3000/auth/google/callback"],
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["has_client_secret"])
+        self.assertEqual(response.data["client_secret_last4"], "alue")
+        config = SocialProviderConfig.objects.get(project=self.default_project, provider="google")
+        self.assertEqual(config.client_id, "google-client-id")
+        self.assertEqual(
+            config.redirect_uris,
+            ["http://localhost:3000/auth/google/callback"],
+        )
+        audit_log = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.PROJECT_SOCIAL_PROVIDER_CREATED,
+            organization=self.org,
+            project=self.default_project,
+        ).latest("created_at")
+        self.assertEqual(audit_log.event_data["provider"], "google")
+
+    def test_project_delete_is_blocked_when_social_provider_config_exists(self):
+        project = Project.objects.create(
+            organization=self.org,
+            name="Storefront Prod",
+            slug="storefront-prod",
+            allow_signup=True,
+        )
+        SocialProviderConfig.objects.create(
+            project=project,
+            provider="google",
+            client_id="google-client-id",
+            client_secret="google-secret-value",
+            redirect_uris=["http://localhost:3000/auth/google/callback"],
+            is_active=True,
+        )
+
+        response = self.client.delete(
+            reverse("project_detail", kwargs={"pk": project.id}),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("social provider configs", str(response.data))
+
+    def test_social_provider_update_uses_project_social_provider_updated_event(self):
+        config = SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider="google",
+            client_id="google-client-id",
+            client_secret="google-secret-value",
+            redirect_uris=["http://localhost:3000/auth/google/callback"],
+            is_active=True,
+        )
+
+        response = self.client.patch(
+            reverse(
+                "social_provider_config_detail",
+                kwargs={"project_pk": self.default_project.id, "pk": config.id},
+            ),
+            {"client_id": "updated-client-id"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        audit_log = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.PROJECT_SOCIAL_PROVIDER_UPDATED,
+            organization=self.org,
+            project=self.default_project,
+        ).latest("created_at")
+        self.assertEqual(audit_log.event_data["provider"], "google")
+        self.assertIn("client_id", audit_log.event_data["changes"])

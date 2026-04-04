@@ -1,6 +1,11 @@
-from rest_framework import authentication, exceptions
-from hvt.apps.organizations.models import APIKey
 import logging
+
+from dj_rest_auth.jwt_auth import JWTCookieAuthentication
+from rest_framework import authentication, exceptions
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from hvt.apps.organizations.models import APIKey
+from hvt.apps.authentication.tokens import _OrgClaimVerificationMixin
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +62,9 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         # Find key by prefix and environment
         try:
-            api_key_obj = APIKey.objects.select_related("organization").get(
-                prefix=prefix, environment=environment
+            api_key_obj = APIKey.objects.select_related("organization", "project").get(
+                prefix=prefix,
+                environment=environment,
             )
         except APIKey.DoesNotExist:
             logger.warning(f"[APIKeyAuthentication] Key not found: {prefix}")
@@ -74,6 +80,19 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             logger.warning(f"[APIKeyAuthentication] Key inactive/expired: {prefix}")
             raise exceptions.AuthenticationFailed("API key is inactive or expired.")
 
+        if api_key_obj.organization and not api_key_obj.organization.is_active:
+            raise exceptions.AuthenticationFailed("API key organization is inactive.")
+
+        if api_key_obj.project_id is None:
+            api_key_obj.project = api_key_obj.organization.ensure_default_project()
+            api_key_obj.save(update_fields=["project"])
+        elif api_key_obj.project.organization_id != api_key_obj.organization_id:
+            raise exceptions.AuthenticationFailed(
+                "API key project does not belong to the organization."
+            )
+        elif not api_key_obj.project.is_active:
+            raise exceptions.AuthenticationFailed("API key project is inactive.")
+
         # Update last used timestamp
         api_key_obj.update_last_used()
 
@@ -82,3 +101,11 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
     def authenticate_header(self, request):
         return self.keyword
+
+
+class HVTJWTAuthentication(_OrgClaimVerificationMixin, JWTAuthentication):
+    """Bearer JWT auth with org claim verification."""
+
+
+class HVTJWTCookieAuthentication(_OrgClaimVerificationMixin, JWTCookieAuthentication):
+    """Cookie-based JWT auth with the same org claim verification."""

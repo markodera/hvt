@@ -5,16 +5,55 @@ from hvt.apps.organizations.models import APIKey
 logger = logging.getLogger(__name__)
 
 
-def _allow_api_key_read_only(request, permission_name):
-    """Allow API keys for read-only requests only."""
-    if request.method in permissions.SAFE_METHODS:
-        logger.info(f"[{permission_name}] API key detected for read-only request")
-        return True
+def _normalize_scope_values(value):
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
 
-    logger.warning(
-        f"[{permission_name}] API key denied for write request: {request.method}"
+
+def _resolve_api_key_scope_requirements(view, method: str):
+    if view is None:
+        return ("read",) if method in permissions.SAFE_METHODS else ("write",)
+
+    scope_map = getattr(view, "api_key_scope_map", {}) or {}
+    if method in scope_map:
+        return _normalize_scope_values(scope_map[method])
+
+    if method in permissions.SAFE_METHODS:
+        return _normalize_scope_values(getattr(view, "api_key_read_scopes", ("read",)))
+
+    return _normalize_scope_values(getattr(view, "api_key_write_scopes", ("write",)))
+
+
+def _allow_api_key(request, view, permission_name):
+    """Allow API key access only when the key has the required scopes."""
+    api_key = request.auth
+    required_scopes = _resolve_api_key_scope_requirements(view, request.method)
+
+    if request.method not in permissions.SAFE_METHODS:
+        logger.warning(
+            f"[{permission_name}] API key denied for write request: {request.method}"
+        )
+        return False
+
+    if not api_key.has_any_scope(*required_scopes):
+        logger.warning(
+            "[%s] API key missing required scopes for %s: required=%s granted=%s",
+            permission_name,
+            request.method,
+            list(required_scopes),
+            api_key.scopes,
+        )
+        return False
+
+    logger.info(
+        "[%s] API key granted for read-only request with scopes=%s",
+        permission_name,
+        api_key.scopes,
     )
-    return False
+    return True
 
 
 class IsAuthenticatedOrAPIKey(permissions.BasePermission):
@@ -36,8 +75,7 @@ class IsAuthenticatedOrAPIKey(permissions.BasePermission):
 
         # Check if API key is present in auth
         if isinstance(request.auth, APIKey):
-            logger.info("[IsAuthenticatedOrAPIKey] API Key detected, granting access")
-            return True
+            return _allow_api_key(request, view, "IsAuthenticatedOrAPIKey")
 
         logger.info("[IsAuthenticatedOrAPIKey] No valid auth found, denying access")
         return False
@@ -60,7 +98,7 @@ class IsAdminOrAPIKey(permissions.BasePermission):
 
         # Check if API key is present in and valid
         if isinstance(request.auth, APIKey):
-            return _allow_api_key_read_only(request, "IsAdminOrAPIKey")
+            return _allow_api_key(request, view, "IsAdminOrAPIKey")
 
         logger.info("[IsAdminOrAPIKey] No valid auth found, denying access")
         return False
@@ -77,7 +115,7 @@ class IsOrgAdminOrAPIKey(permissions.BasePermission):
     def has_permission(self, request, view):
         # API key is read-only only
         if isinstance(request.auth, APIKey):
-            return _allow_api_key_read_only(request, "IsOrgAdminOrAPIKey")
+            return _allow_api_key(request, view, "IsOrgAdminOrAPIKey")
 
         if request.user and request.user.is_authenticated:
             # Check if user belongs to an organization
@@ -110,7 +148,7 @@ class IsOrgOwnerOrAPIKey(permissions.BasePermission):
     def has_permission(self, request, view):
         # API key is read-only only
         if isinstance(request.auth, APIKey):
-            return _allow_api_key_read_only(request, "IsOrgOwnerOrAPIKey")
+            return _allow_api_key(request, view, "IsOrgOwnerOrAPIKey")
 
         # Check user role
         if request.user and request.user.is_authenticated:
@@ -144,7 +182,7 @@ class IsOrgMemberOrAPIKey(permissions.BasePermission):
     def has_permission(self, request, view):
         # API key is read-only only
         if isinstance(request.auth, APIKey):
-            return _allow_api_key_read_only(request, "IsOrgMemberOrAPIKey")
+            return _allow_api_key(request, view, "IsOrgMemberOrAPIKey")
 
         # Check if user is authenticated and belongs to an org
         if request.user and request.user.is_authenticated:
@@ -171,7 +209,7 @@ class IsSelfOrOrgAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         # API key is read-only only
         if isinstance(request.auth, APIKey):
-            return _allow_api_key_read_only(request, "IsSelfOrOrgAdmin")
+            return _allow_api_key(request, view, "IsSelfOrOrgAdmin")
 
         if request.user and request.user.is_authenticated:
             # User can always edit themselves

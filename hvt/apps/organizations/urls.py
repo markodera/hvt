@@ -12,6 +12,51 @@ urlpatterns = [
     path(
         "current/", views.CurrentOrganizationView.as_view(), name="current_organization"
     ),
+    path(
+        "current/projects/",
+        views.ProjectListCreateView.as_view(),
+        name="project_list_create",
+    ),
+    path(
+        "current/projects/<uuid:pk>/",
+        views.ProjectDetailView.as_view(),
+        name="project_detail",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/social-providers/",
+        views.SocialProviderConfigListCreateView.as_view(),
+        name="social_provider_config_list_create",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/social-providers/<uuid:pk>/",
+        views.SocialProviderConfigDetailView.as_view(),
+        name="social_provider_config_detail",
+    ),
+    path(
+        "current/invitations/",
+        views.OrganizationInvitationListCreateView.as_view(),
+        name="organization_invitation_list_create",
+    ),
+    path(
+        "current/invitations/<uuid:pk>/",
+        views.OrganizationInvitationRevokeView.as_view(),
+        name="organization_invitation_revoke",
+    ),
+    path(
+        "current/invitations/<uuid:pk>/resend/",
+        views.OrganizationInvitationResendView.as_view(),
+        name="organization_invitation_resend",
+    ),
+    path(
+        "invitations/lookup/",
+        views.OrganizationInvitationLookupView.as_view(),
+        name="organization_invitation_lookup",
+    ),
+    path(
+        "invitations/accept/",
+        views.OrganizationInvitationAcceptView.as_view(),
+        name="organization_invitation_accept",
+    ),
     # Current Organization Members
     path(
         "current/members/",
