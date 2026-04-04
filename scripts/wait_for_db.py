@@ -23,14 +23,39 @@ def _connection_kwargs() -> dict[str, object]:
     }
 
 
+def _is_truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> int:
     attempts = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "45"))
     delay_seconds = float(os.getenv("DB_CONNECT_RETRY_DELAY", "2"))
     connection_kwargs = _connection_kwargs()
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    debug = _is_truthy(os.getenv("DEBUG", "0"))
+    host = str(connection_kwargs.get("host", "") or "").strip()
 
     if not any(connection_kwargs.values()):
         print("No database settings found; skipping database wait.")
         return 0
+
+    if database_url:
+        print("Using DATABASE_URL for database connectivity.", flush=True)
+    else:
+        print(
+            "DATABASE_URL is not set; falling back to DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT.",
+            flush=True,
+        )
+        if not debug and host in {"localhost", "127.0.0.1", "::1"}:
+            print(
+                (
+                    "Production startup is pointing at localhost for Postgres. "
+                    "On Railway, this usually means the web service does not have "
+                    "DATABASE_URL referenced from the Postgres service."
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
 
     last_error = None
     for attempt in range(1, attempts + 1):
