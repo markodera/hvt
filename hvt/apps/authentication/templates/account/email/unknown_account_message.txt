@@ -1,0 +1,11 @@
+No HVT account was found for this email address.
+
+We received a password reset request for {{ email }}, but there is no active HVT account associated with it.
+
+If this was you, create an account here:
+{{ signup_url }}
+
+If you did not request this, you can safely ignore this email.
+
+Sent by HVT
+{{ brand_domain }}

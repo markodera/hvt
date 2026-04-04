@@ -33,8 +33,7 @@ paths:
               $ref: '#/components/schemas/CustomLoginRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -56,8 +55,7 @@ paths:
       tags:
       - auth
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -76,8 +74,7 @@ paths:
       tags:
       - Auth
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -105,8 +102,7 @@ paths:
             schema:
               $ref: '#/components/schemas/UserRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -134,8 +130,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUserRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -168,8 +163,7 @@ paths:
               $ref: '#/components/schemas/PasswordChangeRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -193,17 +187,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/HVTPasswordResetRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/HVTPasswordResetRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/HVTPasswordResetRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -217,13 +210,7 @@ paths:
   /api/v1/auth/password/reset/confirm/{uidb64}/{token}/:
     post:
       operationId: auth_password_reset_confirm_create
-      description: |-
-        Password reset e-mail link is confirmed, therefore
-        this resets the user's password.
-
-        Accepts the following POST parameters: token, uid,
-            new_password1, new_password2
-        Returns the success/fail message.
+      description: Accept reset uid/token from the URL as well as the POST body.
       parameters:
       - in: path
         name: token
@@ -250,8 +237,7 @@ paths:
               $ref: '#/components/schemas/PasswordResetConfirmRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -260,32 +246,60 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RestAuthDetail'
+                $ref: '#/components/schemas/PasswordResetConfirm'
+          description: ''
+  /api/v1/auth/password/reset/validate/:
+    post:
+      operationId: auth_password_reset_validate_create
+      description: Checks whether a password reset uid/token pair is still valid.
+      summary: Validate password reset token
+      tags:
+      - Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetTokenValidationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordResetTokenValidationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordResetTokenValidationRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetTokenValidation'
           description: ''
   /api/v1/auth/register/:
     post:
       operationId: auth_register_create
-      description: |-
-        Registers a new user.
-
-        Accepts the following POST parameters: username, email, password1, password2.
+      description: Register view with provider-aware error handling for email delivery
+        failures.
       tags:
       - auth
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CustomRegisterRequest'
+              $ref: '#/components/schemas/ControlPlaneRegisterRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CustomRegisterRequest'
+              $ref: '#/components/schemas/ControlPlaneRegisterRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CustomRegisterRequest'
+              $ref: '#/components/schemas/ControlPlaneRegisterRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -294,7 +308,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RestAuthDetail'
+                $ref: '#/components/schemas/ControlPlaneRegister'
           description: ''
   /api/v1/auth/register/resend-email/:
     post:
@@ -318,8 +332,7 @@ paths:
               $ref: '#/components/schemas/ResendEmailVerificationRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -352,8 +365,7 @@ paths:
               $ref: '#/components/schemas/VerifyEmailRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -363,6 +375,149 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RestAuthDetail'
+          description: ''
+  /api/v1/auth/runtime/login/:
+    post:
+      operationId: auth_runtime_login_create
+      description: Authenticate an end user within the organization identified by
+        the provided X-API-Key.
+      summary: Runtime login
+      tags:
+      - Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeLoginRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeLogin'
+          description: ''
+  /api/v1/auth/runtime/register/:
+    post:
+      operationId: auth_runtime_register_create
+      description: Register an end user within the organization and project identified
+        by the provided X-API-Key.
+      summary: Runtime register
+      tags:
+      - Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeRegisterRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeRegisterRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeRegisterRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRegister'
+          description: ''
+  /api/v1/auth/runtime/social/github/:
+    post:
+      operationId: auth_runtime_social_github_create
+      description: API-key-scoped social login flow for customer-facing app users.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSocialLogin'
+          description: ''
+  /api/v1/auth/runtime/social/google/:
+    post:
+      operationId: auth_runtime_social_google_create
+      description: API-key-scoped social login flow for customer-facing app users.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeSocialLoginRequest'
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSocialLogin'
+          description: ''
+  /api/v1/auth/runtime/social/providers/:
+    get:
+      operationId: auth_runtime_social_providers_retrieve
+      description: List active project-scoped runtime social providers configuration
+        that match the API Key.
+      summary: List runtime social providers
+      tags:
+      - Auth
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/auth/social/github/:
     post:
@@ -394,16 +549,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -412,7 +566,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SocialLogin'
+                $ref: '#/components/schemas/CustomSocialLogin'
           description: ''
   /api/v1/auth/social/google/:
     post:
@@ -444,16 +598,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/SocialLoginRequest'
+              $ref: '#/components/schemas/CustomSocialLoginRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       - {}
@@ -462,37 +615,51 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SocialLogin'
+                $ref: '#/components/schemas/CustomSocialLogin'
+          description: ''
+  /api/v1/auth/social/providers/:
+    get:
+      operationId: auth_social_providers_retrieve
+      description: List active generic social auth providers configuration.
+      summary: List control-plane social providers
+      tags:
+      - Auth
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/auth/token/refresh/:
     post:
       operationId: auth_token_refresh_create
-      description: |-
-        Takes a refresh type JSON web token and returns an access type JSON web
-        token if the refresh token is valid.
+      description: JWT refresh view that preserves HVT org/project claim validation.
       tags:
       - auth
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
+              $ref: '#/components/schemas/HVTCookieTokenRefreshRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
+              $ref: '#/components/schemas/HVTCookieTokenRefreshRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
-        required: true
-      security:
-      - BearerAuth: []
-      - APIKeyAuth: []
+              $ref: '#/components/schemas/HVTCookieTokenRefreshRequest'
       responses:
         '200':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenRefresh'
+                $ref: '#/components/schemas/HVTCookieTokenRefresh'
           description: ''
   /api/v1/auth/user/:
     get:
@@ -509,8 +676,7 @@ paths:
       tags:
       - auth
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -545,8 +711,7 @@ paths:
             schema:
               $ref: '#/components/schemas/UserDetailsRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -581,8 +746,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUserDetailsRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -625,8 +789,7 @@ paths:
       tags:
       - Organizations
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -639,7 +802,7 @@ paths:
     post:
       operationId: organizations_create
       description: Create a new organization. The authenticated user becomes the owner.
-        Max 3 per user.
+        Single organization per user at launch.
       summary: Create an organization
       tags:
       - Organizations
@@ -656,8 +819,7 @@ paths:
               $ref: '#/components/schemas/OrganizationRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -682,8 +844,7 @@ paths:
       tags:
       - Organizations
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -719,8 +880,7 @@ paths:
               $ref: '#/components/schemas/OrganizationRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -755,8 +915,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedOrganizationRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -780,8 +939,7 @@ paths:
       tags:
       - Organizations
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -795,8 +953,7 @@ paths:
       tags:
       - Organizations
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -826,8 +983,7 @@ paths:
               $ref: '#/components/schemas/OrganizationRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -855,8 +1011,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedOrganizationRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -912,8 +1067,7 @@ paths:
       tags:
       - Audit Logs
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -938,8 +1092,7 @@ paths:
       tags:
       - Audit Logs
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -948,6 +1101,127 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /api/v1/organizations/current/invitations/:
+    get:
+      operationId: organizations_current_invitations_list
+      description: List invitations for the current organization. Owner only.
+      summary: List organization invitations
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Organizations
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrganizationInvitationList'
+          description: ''
+    post:
+      operationId: organizations_current_invitations_create
+      description: Invite a user to the current organization as an admin or member.
+        Owner only.
+      summary: Create organization invitation
+      tags:
+      - Organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationCreateRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitationCreate'
+          description: ''
+  /api/v1/organizations/current/invitations/{id}/:
+    delete:
+      operationId: organizations_current_invitations_destroy
+      description: Revoke a pending invitation for the current organization. Owner
+        only.
+      summary: Revoke organization invitation
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Organizations
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/organizations/current/invitations/{id}/resend/:
+    post:
+      operationId: organizations_current_invitations_resend_create
+      description: Resend a pending invitation email for the current organization.
+        Owner only.
+      summary: Resend organization invitation
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Organizations
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitation'
           description: ''
   /api/v1/organizations/current/keys/:
     get:
@@ -990,6 +1264,11 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
       - name: search
         required: false
         in: query
@@ -999,8 +1278,7 @@ paths:
       tags:
       - API Keys
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1030,8 +1308,7 @@ paths:
               $ref: '#/components/schemas/APIKeyCreateRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1056,8 +1333,7 @@ paths:
       tags:
       - API Keys
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1081,8 +1357,7 @@ paths:
       tags:
       - API Keys
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1114,8 +1389,7 @@ paths:
               $ref: '#/components/schemas/APIKeyListRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1151,8 +1425,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedAPIKeyListRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1213,8 +1486,7 @@ paths:
       tags:
       - Users
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1234,8 +1506,7 @@ paths:
       tags:
       - Organizations
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1264,6 +1535,423 @@ paths:
                         member:
                           type: boolean
           description: ''
+  /api/v1/organizations/current/projects/:
+    get:
+      operationId: organizations_current_projects_list
+      description: List projects for the current organization. Owner only.
+      summary: List projects
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjectList'
+          description: ''
+    post:
+      operationId: organizations_current_projects_create
+      description: Create a new project in the current organization. Owner only.
+      summary: Create a project
+      tags:
+      - Projects
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/organizations/current/projects/{id}/:
+    get:
+      operationId: organizations_current_projects_retrieve
+      description: Get details for a project in the current organization. Owner only.
+      summary: Retrieve a project
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    put:
+      operationId: organizations_current_projects_update
+      description: Retrieve, update, or delete a project in the current organization.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    patch:
+      operationId: organizations_current_projects_partial_update
+      description: Update a project in the current organization. Owner only.
+      summary: Update a project
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectRequest'
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    delete:
+      operationId: organizations_current_projects_destroy
+      description: Delete a non-default project in the current organization. Owner
+        only.
+      summary: Delete a project
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/organizations/current/projects/{project_pk}/social-providers/:
+    get:
+      operationId: organizations_current_projects_social_providers_list
+      description: List social provider configs for a project in the current organization.
+        Owner only.
+      summary: List project social providers
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSocialProviderConfigList'
+          description: ''
+    post:
+      operationId: organizations_current_projects_social_providers_create
+      description: Create or configure a social provider for a project in the current
+        organization. Owner only.
+      summary: Create a project social provider config
+      parameters:
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialProviderConfig'
+          description: ''
+  /api/v1/organizations/current/projects/{project_pk}/social-providers/{id}/:
+    get:
+      operationId: organizations_current_projects_social_providers_retrieve
+      description: Retrieve a social provider config for a project in the current
+        organization. Owner only.
+      summary: Retrieve a project social provider config
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialProviderConfig'
+          description: ''
+    put:
+      operationId: organizations_current_projects_social_providers_update
+      description: Retrieve, update, or delete a per-project social provider config.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SocialProviderConfigRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialProviderConfig'
+          description: ''
+    patch:
+      operationId: organizations_current_projects_social_providers_partial_update
+      description: Update a social provider config for a project in the current organization.
+        Owner only.
+      summary: Update a project social provider config
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSocialProviderConfigRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSocialProviderConfigRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSocialProviderConfigRequest'
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialProviderConfig'
+          description: ''
+    delete:
+      operationId: organizations_current_projects_social_providers_destroy
+      description: Delete a social provider config for a project in the current organization.
+        Owner only.
+      summary: Delete a project social provider config
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Projects
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/organizations/current/webhooks/:
     get:
       operationId: organizations_current_webhooks_list
@@ -1293,6 +1981,11 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: project
+        schema:
+          type: string
+          format: uuid
       - name: search
         required: false
         in: query
@@ -1302,8 +1995,7 @@ paths:
       tags:
       - Webhooks
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1334,8 +2026,7 @@ paths:
               $ref: '#/components/schemas/WebhookRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1360,8 +2051,7 @@ paths:
       tags:
       - Webhooks
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1397,8 +2087,7 @@ paths:
               $ref: '#/components/schemas/WebhookRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1433,8 +2122,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedWebhookRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1458,8 +2146,7 @@ paths:
       tags:
       - Webhooks
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1517,8 +2204,7 @@ paths:
       tags:
       - Webhooks
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1527,6 +2213,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedWebhookDeliveryList'
+          description: ''
+  /api/v1/organizations/invitations/accept/:
+    post:
+      operationId: organizations_invitations_accept_create
+      description: Accept an invitation using its token. The authenticated user's
+        email must match the invitation email.
+      summary: Accept organization invitation
+      tags:
+      - Organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationAcceptRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationAcceptRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationInvitationAcceptRequest'
+        required: true
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitation'
+          description: ''
+  /api/v1/organizations/invitations/lookup/:
+    get:
+      operationId: organizations_invitations_lookup_retrieve
+      description: Public invitation preview for the frontend accept page.
+      summary: Get invitation details by token
+      tags:
+      - Organizations
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitationPublic'
           description: ''
   /api/v1/users/:
     get:
@@ -1583,8 +2319,7 @@ paths:
       tags:
       - Users
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1614,8 +2349,7 @@ paths:
               $ref: '#/components/schemas/UserCreateRequest'
         required: true
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1640,8 +2374,7 @@ paths:
       tags:
       - Users
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1676,8 +2409,7 @@ paths:
             schema:
               $ref: '#/components/schemas/UserRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1712,8 +2444,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUserRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1738,8 +2469,7 @@ paths:
       tags:
       - Users
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1772,8 +2502,7 @@ paths:
             schema:
               $ref: '#/components/schemas/UserRoleUpdateRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1809,8 +2538,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUserRoleUpdateRequest'
       security:
-      - jwtAuth: []
-      - APIKeyAuth: []
+      - jwtCookieAuth: []
       - BearerAuth: []
       - APIKeyAuth: []
       responses:
@@ -1851,6 +2579,19 @@ components:
           type: string
           format: date-time
           nullable: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        project_name:
+          type: string
+          readOnly: true
+          nullable: true
+        project_slug:
+          type: string
+          readOnly: true
+          nullable: true
         key:
           type: string
           readOnly: true
@@ -1864,6 +2605,9 @@ components:
       - id
       - key
       - name
+      - project
+      - project_name
+      - project_slug
     APIKeyCreateRequest:
       type: object
       description: Serializer for creating API Keys.  Returns the full key only on
@@ -1890,6 +2634,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        project_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: Optional project ID. Defaults to the organization's default
+            project.
       required:
       - name
     APIKeyList:
@@ -1919,6 +2669,19 @@ components:
         environment_display:
           type: string
           readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        project_name:
+          type: string
+          readOnly: true
+          nullable: true
+        project_slug:
+          type: string
+          readOnly: true
+          nullable: true
         scopes:
           description: 'list of allowed scopes: [''users:read'', ''users:write'',
             ''auth:*'']'
@@ -1945,6 +2708,9 @@ components:
       - last_used_at
       - name
       - prefix
+      - project
+      - project_name
+      - project_slug
     APIKeyListRequest:
       type: object
       description: Serializer for listing API Keys (no sensitive data).
@@ -2002,6 +2768,11 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
         ip_address:
           type: string
           readOnly: true
@@ -2031,25 +2802,23 @@ components:
       - id
       - ip_address
       - organization
+      - project
       - success
       - target_object_id
       - target_type
       - user_agent
-    CustomLoginRequest:
+    ControlPlaneRegister:
       type: object
-      description: Custom login serializer to use email only and extract user info
+      description: Control-plane signup for HVT dashboard users.
       properties:
         email:
           type: string
           format: email
-        password:
-          type: string
-          minLength: 1
       required:
-      - password
-    CustomRegisterRequest:
+      - email
+    ControlPlaneRegisterRequest:
       type: object
-      description: Custom registration serializer without username
+      description: Control-plane signup for HVT dashboard users.
       properties:
         email:
           type: string
@@ -2067,6 +2836,45 @@ components:
       - email
       - password1
       - password2
+    CustomLoginRequest:
+      type: object
+      description: Custom login serializer to use email only and extract user info
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+      required:
+      - password
+    CustomSocialLogin:
+      type: object
+      description: Normalize provider/setup errors into 400 responses for social login.
+      properties:
+        access_token:
+          type: string
+        code:
+          type: string
+        id_token:
+          type: string
+        callback_url:
+          type: string
+          format: uri
+    CustomSocialLoginRequest:
+      type: object
+      description: Normalize provider/setup errors into 400 responses for social login.
+      properties:
+        access_token:
+          type: string
+        code:
+          type: string
+        id_token:
+          type: string
+        callback_url:
+          type: string
+          format: uri
+          minLength: 1
     EnvironmentEnum:
       enum:
       - test
@@ -2101,6 +2909,16 @@ components:
       - org.updated
       - org.member.added
       - org.member.removed
+      - org.invitation.created
+      - org.invitation.accepted
+      - org.invitation.revoked
+      - org.invitation.resent
+      - project.created
+      - project.updated
+      - project.deleted
+      - project.social_provider.created
+      - project.social_provider.updated
+      - project.social_provider.deleted
       type: string
       description: |-
         * `user.login` - User Login
@@ -2127,6 +2945,52 @@ components:
         * `org.updated` - Organization Updated
         * `org.member.added` - Member Added to Organization
         * `org.member.removed` - Member Removed from Organization
+        * `org.invitation.created` - Organization Invitation Created
+        * `org.invitation.accepted` - Organization Invitation Accepted
+        * `org.invitation.revoked` - Organization Invitation Revoked
+        * `org.invitation.resent` - Organization Invitation Resent
+        * `project.created` - Project Created
+        * `project.updated` - Project Updated
+        * `project.deleted` - Project Deleted
+        * `project.social_provider.created` - Project Social Provider Created
+        * `project.social_provider.updated` - Project Social Provider Updated
+        * `project.social_provider.deleted` - Project Social Provider Deleted
+    HVTCookieTokenRefresh:
+      type: object
+      description: Cookie-aware refresh serializer that preserves HVT org claim validation.
+      properties:
+        refresh:
+          type: string
+        access:
+          type: string
+          readOnly: true
+      required:
+      - access
+    HVTCookieTokenRefreshRequest:
+      type: object
+      description: Cookie-aware refresh serializer that preserves HVT org claim validation.
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+    HVTPasswordResetRequest:
+      type: object
+      description: Password reset serializer that emits frontend reset links.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+      required:
+      - email
+    InvitationRoleEnum:
+      enum:
+      - admin
+      - member
+      type: string
+      description: |-
+        * `admin` - Admin
+        * `member` - Member
     JWT:
       type: object
       description: Serializer for JWT authentication.
@@ -2177,6 +3041,177 @@ components:
       - name
       - slug
       - user_count
+    OrganizationInvitation:
+      type: object
+      description: Read serializer for organization invitations.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/InvitationRoleEnum'
+          readOnly: true
+        status:
+          type: string
+          readOnly: true
+        accept_url:
+          type: string
+          format: uri
+          readOnly: true
+        invited_by_email:
+          type: string
+          format: email
+          readOnly: true
+        accepted_by_email:
+          type: string
+          format: email
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accept_url
+      - accepted_at
+      - accepted_by_email
+      - created_at
+      - email
+      - expires_at
+      - id
+      - invited_by_email
+      - revoked_at
+      - role
+      - status
+    OrganizationInvitationAcceptRequest:
+      type: object
+      description: Serializer for accepting an invitation by token.
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+      - token
+    OrganizationInvitationCreate:
+      type: object
+      description: Create serializer for organization invitations.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/InvitationRoleEnum'
+        expires_at:
+          type: string
+          format: date-time
+        accept_url:
+          type: string
+          format: uri
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accept_url
+      - created_at
+      - email
+      - id
+    OrganizationInvitationCreateRequest:
+      type: object
+      description: Create serializer for organization invitations.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/InvitationRoleEnum'
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - email
+    OrganizationInvitationPublic:
+      type: object
+      description: Public invitation preview serializer for the frontend accept page.
+      properties:
+        email:
+          type: string
+          format: email
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/InvitationRoleEnum'
+          readOnly: true
+        status:
+          type: string
+          readOnly: true
+        organization_name:
+          type: string
+          readOnly: true
+        organization_slug:
+          type: string
+          readOnly: true
+        invited_by_email:
+          type: string
+          format: email
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accepted_at
+      - created_at
+      - email
+      - expires_at
+      - invited_by_email
+      - organization_name
+      - organization_slug
+      - revoked_at
+      - role
+      - status
     OrganizationMember:
       type: object
       description: Serializer for listing organization members when role with info.
@@ -2203,9 +3238,18 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        project_slug:
+          type: string
+          readOnly: true
+          nullable: true
         role:
           allOf:
-          - $ref: '#/components/schemas/RoleEnum'
+          - $ref: '#/components/schemas/UserRoleEnum'
           readOnly: true
         role_display:
           type: string
@@ -2239,6 +3283,8 @@ components:
       - is_test
       - last_name
       - organization
+      - project
+      - project_slug
       - role
       - role_display
     OrganizationRequest:
@@ -2298,6 +3344,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AuditLog'
+    PaginatedOrganizationInvitationList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationInvitation'
     PaginatedOrganizationList:
       type: object
       properties:
@@ -2338,6 +3404,46 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrganizationMember'
+    PaginatedProjectList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+    PaginatedSocialProviderConfigList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialProviderConfig'
     PaginatedUserList:
       type: object
       properties:
@@ -2412,6 +3518,25 @@ components:
       required:
       - new_password1
       - new_password2
+    PasswordResetConfirm:
+      type: object
+      description: Serializer for confirming a password reset attempt.
+      properties:
+        new_password1:
+          type: string
+          maxLength: 128
+        new_password2:
+          type: string
+          maxLength: 128
+        uid:
+          type: string
+        token:
+          type: string
+      required:
+      - new_password1
+      - new_password2
+      - token
+      - uid
     PasswordResetConfirmRequest:
       type: object
       description: Serializer for confirming a password reset attempt.
@@ -2435,16 +3560,30 @@ components:
       - new_password2
       - token
       - uid
-    PasswordResetRequest:
+    PasswordResetTokenValidation:
       type: object
-      description: Serializer for requesting a password reset e-mail.
+      description: Validate password reset uid/token pairs without consuming the token.
       properties:
-        email:
+        uid:
           type: string
-          format: email
+        token:
+          type: string
+      required:
+      - token
+      - uid
+    PasswordResetTokenValidationRequest:
+      type: object
+      description: Validate password reset uid/token pairs without consuming the token.
+      properties:
+        uid:
+          type: string
+          minLength: 1
+        token:
+          type: string
           minLength: 1
       required:
-      - email
+      - token
+      - uid
     PatchedAPIKeyListRequest:
       type: object
       description: Serializer for listing API Keys (no sensitive data).
@@ -2484,6 +3623,45 @@ components:
           type: string
           format: uuid
           nullable: true
+    PatchedProjectRequest:
+      type: object
+      description: Serializer for organization projects.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 225
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 225
+          pattern: ^[-a-zA-Z0-9_]+$
+        is_active:
+          type: boolean
+        allow_signup:
+          type: boolean
+    PatchedSocialProviderConfigRequest:
+      type: object
+      description: Serializer for per-project social provider configuration.
+      properties:
+        provider:
+          $ref: '#/components/schemas/ProviderEnum'
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        client_secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+        redirect_uris:
+          type: array
+          items:
+            type: string
+            format: uri
+            minLength: 1
+        is_active:
+          type: boolean
     PatchedUserDetailsRequest:
       type: object
       description: User model w/o password
@@ -2505,7 +3683,7 @@ components:
           type: string
           maxLength: 150
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
         is_active:
           type: boolean
     PatchedUserRoleUpdateRequest:
@@ -2513,10 +3691,16 @@ components:
       description: Serializer for updating user role only.
       properties:
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
     PatchedWebhookRequest:
       type: object
       properties:
+        project_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: Optional project ID. Defaults to the organization's default
+            project.
         url:
           type: string
           format: uri
@@ -2529,6 +3713,71 @@ components:
           type: string
         is_active:
           type: boolean
+    Project:
+      type: object
+      description: Serializer for organization projects.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 225
+        slug:
+          type: string
+          maxLength: 225
+          pattern: ^[-a-zA-Z0-9_]+$
+        is_default:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+        allow_signup:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - is_default
+      - name
+      - slug
+      - updated_at
+    ProjectRequest:
+      type: object
+      description: Serializer for organization projects.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 225
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 225
+          pattern: ^[-a-zA-Z0-9_]+$
+        is_active:
+          type: boolean
+        allow_signup:
+          type: boolean
+      required:
+      - name
+      - slug
+    ProviderEnum:
+      enum:
+      - google
+      - github
+      type: string
+      description: |-
+        * `google` - Google
+        * `github` - GitHub
     ResendEmailVerificationRequest:
       type: object
       properties:
@@ -2546,18 +3795,61 @@ components:
           readOnly: true
       required:
       - detail
-    RoleEnum:
-      enum:
-      - owner
-      - admin
-      - member
-      type: string
-      description: |-
-        * `owner` - Owner
-        * `admin` - Admin
-        * `member` - Member
-    SocialLogin:
+    RuntimeLogin:
       type: object
+      description: Login serializer for app-runtime auth scoped by API key org.
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+      - password
+    RuntimeLoginRequest:
+      type: object
+      description: Login serializer for app-runtime auth scoped by API key org.
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+      required:
+      - password
+    RuntimeRegister:
+      type: object
+      description: API-key-scoped runtime registration for customer-facing app users.
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+      - email
+    RuntimeRegisterRequest:
+      type: object
+      description: API-key-scoped runtime registration for customer-facing app users.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+        password1:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password2:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - email
+      - password1
+      - password2
+    RuntimeSocialLogin:
+      type: object
+      description: Social login serializer for runtime app users scoped by API key/project.
       properties:
         access_token:
           type: string
@@ -2565,8 +3857,12 @@ components:
           type: string
         id_token:
           type: string
-    SocialLoginRequest:
+        callback_url:
+          type: string
+          format: uri
+    RuntimeSocialLoginRequest:
       type: object
+      description: Social login serializer for runtime app users scoped by API key/project.
       properties:
         access_token:
           type: string
@@ -2574,6 +3870,84 @@ components:
           type: string
         id_token:
           type: string
+        callback_url:
+          type: string
+          format: uri
+          minLength: 1
+    SocialProviderConfig:
+      type: object
+      description: Serializer for per-project social provider configuration.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+        provider:
+          $ref: '#/components/schemas/ProviderEnum'
+        client_id:
+          type: string
+          maxLength: 255
+        has_client_secret:
+          type: boolean
+          readOnly: true
+        client_secret_last4:
+          type: string
+          readOnly: true
+        redirect_uris:
+          type: array
+          items:
+            type: string
+            format: uri
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - client_id
+      - client_secret_last4
+      - created_at
+      - has_client_secret
+      - id
+      - project
+      - provider
+      - redirect_uris
+      - updated_at
+    SocialProviderConfigRequest:
+      type: object
+      description: Serializer for per-project social provider configuration.
+      properties:
+        provider:
+          $ref: '#/components/schemas/ProviderEnum'
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        client_secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+        redirect_uris:
+          type: array
+          items:
+            type: string
+            format: uri
+            minLength: 1
+        is_active:
+          type: boolean
+      required:
+      - client_id
+      - provider
+      - redirect_uris
     StatusEnum:
       enum:
       - pending
@@ -2586,23 +3960,6 @@ components:
         * `success` - Success
         * `failed` - Failed
         * `retrying` - Retrying
-    TokenRefresh:
-      type: object
-      properties:
-        access:
-          type: string
-          readOnly: true
-      required:
-      - access
-    TokenRefreshRequest:
-      type: object
-      properties:
-        refresh:
-          type: string
-          writeOnly: true
-          minLength: 1
-      required:
-      - refresh
     User:
       type: object
       description: Serializer for User model
@@ -2629,10 +3986,22 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        project_slug:
+          type: string
+          readOnly: true
+          nullable: true
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
         role_display:
           type: string
+          readOnly: true
+        is_project_scoped:
+          type: boolean
           readOnly: true
         is_active:
           type: boolean
@@ -2649,8 +4018,11 @@ components:
       - email
       - full_name
       - id
+      - is_project_scoped
       - is_test
       - organization
+      - project
+      - project_slug
       - role_display
     UserCreateRequest:
       type: object
@@ -2676,7 +4048,7 @@ components:
           format: uuid
           nullable: true
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
       required:
       - email
       - password
@@ -2723,21 +4095,31 @@ components:
           type: string
           maxLength: 150
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
         is_active:
           type: boolean
+    UserRoleEnum:
+      enum:
+      - owner
+      - admin
+      - member
+      type: string
+      description: |-
+        * `owner` - Owner
+        * `admin` - Admin
+        * `member` - Member
     UserRoleUpdate:
       type: object
       description: Serializer for updating user role only.
       properties:
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
     UserRoleUpdateRequest:
       type: object
       description: Serializer for updating user role only.
       properties:
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
     VerifyEmailRequest:
       type: object
       properties:
@@ -2753,6 +4135,16 @@ components:
         id:
           type: string
           format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+        project_name:
+          type: string
+          readOnly: true
+        project_slug:
+          type: string
           readOnly: true
         url:
           type: string
@@ -2794,6 +4186,9 @@ components:
       - failure_count
       - id
       - last_triggered_at
+      - project
+      - project_name
+      - project_slug
       - secret
       - success_count
       - url
@@ -2860,6 +4255,12 @@ components:
     WebhookRequest:
       type: object
       properties:
+        project_id:
+          type: string
+          format: uuid
+          writeOnly: true
+          description: Optional project ID. Defaults to the organization's default
+            project.
         url:
           type: string
           format: uri
@@ -2879,16 +4280,17 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: Organization API key (hvt_live_* or hvt_test_*)
+      description: Organization API Key (hvt_live_* or hvt_test_*)
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT access token. Obtain via POST /api/v1/auth/login/
-    jwtAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+      description: JWT Access Token
+    jwtCookieAuth:
+      type: apiKey
+      in: cookie
+      name: hvt_access
+      description: JWT Access Token Cookie
 tags:
 - name: Auth
   description: Login, registration, password reset, social OAuth, and token management

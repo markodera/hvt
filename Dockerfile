@@ -3,7 +3,8 @@ FROM python:3.12-slim-bookworm AS base
 
 # Prevent Python from writing .pyc and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1
 
 WORKDIR /app
 
@@ -23,6 +24,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ----- Production -----
 FROM base AS production
 
+ENV PORT=8000 \
+    WEB_CONCURRENCY=3 \
+    GUNICORN_TIMEOUT=120 \
+    GUNICORN_GRACEFUL_TIMEOUT=30 \
+    GUNICORN_KEEPALIVE=5 \
+    GUNICORN_MAX_REQUESTS=1000 \
+    GUNICORN_MAX_REQUESTS_JITTER=100 \
+    RUN_MIGRATIONS=0 \
+    COLLECTSTATIC_ON_START=1
+
 # Install only the runtime lib (not build-essential)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libpq5 && \
@@ -40,10 +51,9 @@ COPY . .
 
 # Copy and set entrypoint
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Collect static files (needs STATIC_ROOT set at build time)
-RUN STATIC_ROOT=/app/staticfiles python manage.py collectstatic --noinput || true
+RUN chmod +x /entrypoint.sh && \
+    mkdir -p /app/staticfiles && \
+    chown -R hvt:hvt /app /entrypoint.sh
 
 # Switch to non-root user
 USER hvt

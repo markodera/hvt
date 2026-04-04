@@ -1,0 +1,12 @@
+You’ve been invited to join {{ organization_name }} on HVT as a {{ role_label }}.
+
+Accept invitation:
+{{ accept_url }}
+
+{% if invited_by_email %}Invited by: {{ invited_by_email }}
+{% endif %}This invitation is tied to {{ invitee_email }} and expires on {{ expires_at_display }}.
+
+If you were not expecting this invitation, you can safely ignore this email.
+
+Sent by HVT
+{{ brand_domain }}

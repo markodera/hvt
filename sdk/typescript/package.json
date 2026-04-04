@@ -1,0 +1,22 @@
+{
+  "name": "@hvt/sdk",
+  "version": "0.1.0",
+  "description": "Zero-dependency fetch client for the HVT Authentication API.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node ../../scripts/build_hvt_typescript_sdk.mjs"
+  }
+}

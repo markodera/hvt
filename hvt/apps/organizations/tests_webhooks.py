@@ -49,6 +49,7 @@ def _create_webhook(org, user=None, events=None, url="https://example.com/hook")
     """Create a Webhook for the given org."""
     return Webhook.objects.create(
         organization=org,
+        project=org.ensure_default_project(),
         url=url,
         events=events or ["user.created", "user.updated", "user.deleted"],
         secret=Webhook.generate_secret(),
@@ -72,6 +73,7 @@ class WebhookModelTest(TestCase):
         self.assertIsNotNone(wh.id)
         self.assertTrue(wh.is_active)
         self.assertEqual(wh.organization, self.org)
+        self.assertEqual(wh.project, self.org.ensure_default_project())
         self.assertEqual(wh.consecutive_failures, 0)
 
     def test_generate_secret_is_64_hex(self):
@@ -81,7 +83,7 @@ class WebhookModelTest(TestCase):
 
     def test_webhook_str(self):
         wh = _create_webhook(self.org)
-        self.assertIn(self.org.name, str(wh))
+        self.assertIn(self.org.ensure_default_project().slug, str(wh))
         self.assertIn("https://example.com/hook", str(wh))
 
     def test_events_field_stores_list(self):

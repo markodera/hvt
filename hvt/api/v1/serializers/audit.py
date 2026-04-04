@@ -22,6 +22,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "target_type",
             "target_object_id",
             "organization",
+            "project",
             "ip_address",
             "user_agent",
             "success",

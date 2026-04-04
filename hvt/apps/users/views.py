@@ -34,6 +34,18 @@ def _get_org(request):
     return None
 
 
+def _get_user_queryset(request):
+    """Base user queryset scoped by org and, for API keys, by project."""
+    org = _get_org(request)
+    if not org:
+        return User.objects.none()
+
+    queryset = User.objects.filter(organization=org)
+    if isinstance(request.auth, APIKey) and request.auth.project_id:
+        queryset = queryset.filter(project=request.auth.project)
+    return queryset
+
+
 @extend_schema_view(
     get=extend_schema(
         tags=["Users"],
@@ -61,6 +73,7 @@ class UserListView(generics.ListCreateAPIView):
     POST: Creates a new user within the organization (admin only).
     """
     permission_classes = [IsOrgMemberOrAPIKey]
+    api_key_read_scopes = ("users:read",)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["role", "is_active", "is_test"]
     search_fields = ["email", "first_name", "last_name"]
@@ -73,10 +86,7 @@ class UserListView(generics.ListCreateAPIView):
         return UserSerializer
 
     def get_queryset(self):
-        org = _get_org(self.request)
-        if not org:
-            return User.objects.none()
-        return User.objects.filter(organization=org).order_by('-created_at')
+        return _get_user_queryset(self.request).order_by("-created_at")
 
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -92,6 +102,7 @@ class UserListView(generics.ListCreateAPIView):
             request=self.request,
             user=self.request.user if self.request.user.is_authenticated else None,
             organization=org,
+            project=user.project,
             target=user,
             event_data={
                 'created_user_email': user.email,
@@ -102,6 +113,7 @@ class UserListView(generics.ListCreateAPIView):
         # Trigger webhook for user creation
         trigger_webhook_event(
             organization=org,
+            project=user.project,
             event_type='user.created',
             payload={
                 'user_id': str(user.id),
@@ -143,13 +155,11 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     serializer_class = UserSerializer
     permission_classes = [IsOrgMemberOrAPIKey]
+    api_key_read_scopes = ("users:read",)
     lookup_field = 'pk'
 
     def get_queryset(self):
-        org = _get_org(self.request)
-        if not org:
-            return User.objects.none()
-        return User.objects.filter(organization=org)
+        return _get_user_queryset(self.request)
 
     def get_permissions(self):
         if self.request.method in ('PUT', 'PATCH', 'DELETE'):
@@ -176,6 +186,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
                 request=self.request,
                 user=self.request.user if self.request.user.is_authenticated else None,
                 organization=org,
+                project=updated_user.project,
                 target=updated_user,
                 event_data={
                     'changes': changes,
@@ -186,6 +197,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
             # Trigger webhook for user update
             trigger_webhook_event(
                 organization=org,
+                project=updated_user.project,
                 event_type='user.updated',
                 payload={
                     'user_id': str(updated_user.id),
@@ -215,6 +227,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
                 request=request,
                 user=request.user if request.user.is_authenticated else None,
                 organization=org,
+                project=user.project,
                 event_data={
                     'deleted_user_id': user_id,
                     'deleted_user_email': user_email,
@@ -225,6 +238,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
             # Trigger webhook for user deletion
             trigger_webhook_event(
                 organization=org,
+                project=user.project,
                 event_type='user.deleted',
                 payload={
                     'user_id': user_id,
@@ -265,10 +279,7 @@ class UserRoleUpdateView(generics.UpdateAPIView):
     lookup_field = 'pk'
 
     def get_queryset(self):
-        org = _get_org(self.request)
-        if not org:
-            return User.objects.none()
-        return User.objects.filter(organization=org)
+        return _get_user_queryset(self.request)
 
     def update(self, request, *args, **kwargs):
         user = self.get_object()
@@ -305,6 +316,7 @@ class UserRoleUpdateView(generics.UpdateAPIView):
                 request=request,
                 user=request.user if request.user.is_authenticated else None,
                 organization=org,
+                project=user.project,
                 target=user,
                 event_data={
                     'target_user_email': user.email,
@@ -317,6 +329,7 @@ class UserRoleUpdateView(generics.UpdateAPIView):
             # Trigger webhook for role change
             trigger_webhook_event(
                 organization=org,
+                project=user.project,
                 event_type='user.role.changed',
                 payload={
                     'user_id': str(user.id),
@@ -349,6 +362,7 @@ class OrganizationMembersView(generics.ListAPIView):
     """
     serializer_class = OrganizationMemberSerializer
     permission_classes = [IsOrgMemberOrAPIKey]
+    api_key_read_scopes = ("users:read",)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["role", "is_active"]
     search_fields = ["email", "first_name", "last_name"]
@@ -356,7 +370,4 @@ class OrganizationMembersView(generics.ListAPIView):
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        org = _get_org(self.request)
-        if not org:
-            return User.objects.none()
-        return User.objects.filter(organization=org).order_by('-created_at')
+        return _get_user_queryset(self.request).order_by("-created_at")

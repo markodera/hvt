@@ -1,9 +1,14 @@
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.account.adapter import DefaultAccountAdapter
-from django.template.loader import render_to_string
+from allauth.socialaccount.models import SocialApp
 from django.conf import settings
+import logging
 
-from .email import ResendEmailService
+from hvt.apps.organizations.models import APIKey, SocialProviderConfig
+from .email import ResendEmailService, build_email_context, render_email_template
+
+
+logger = logging.getLogger(__name__)
 
 
 class FrontendAccountAdapter(DefaultAccountAdapter):
@@ -17,6 +22,16 @@ class FrontendAccountAdapter(DefaultAccountAdapter):
         """
         # settings.FRONTEND_URL should be set in settings.py (e.g., http://localhost:5173)
         return f"{settings.FRONTEND_URL}/auth/verify-email/{emailconfirmation.key}"
+
+    def get_reset_password_from_key_url(self, key):
+        """
+        Construct password reset URLs for the frontend SPA instead of relying on
+        allauth's default server-side route name.
+        """
+        uid, separator, token = str(key).partition("-")
+        if separator and uid and token:
+            return f"{settings.FRONTEND_URL}/auth/password-reset/{uid}/{token}"
+        return f"{settings.FRONTEND_URL}/auth/password-reset/{key}"
 
 
 class ResendAccountAdapter(FrontendAccountAdapter):
@@ -43,15 +58,35 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             email: The recipient email address
             context: Context dictionary for the email template
         """
-        subject = render_to_string(f"{template_prefix}_subject.txt", context).strip()
-        text_body = render_to_string(f"{template_prefix}_message.txt", context)
-        html_body = text_body.replace("\n", "<br>")
-        self.email_service.send(
-            to=email,
-            subject=subject,
-            html=html_body,
-            text=text_body,
-        )
+        try:
+            email_context = build_email_context({"email": email, **context})
+            subject, text_body, html_body = render_email_template(
+                template_prefix,
+                email_context,
+            )
+            self.email_service.send(
+                to=email,
+                subject=subject,
+                html=html_body,
+                text=text_body,
+            )
+            logger.info(
+                "Account email queued via Resend",
+                extra={
+                    "template_prefix": template_prefix,
+                    "to": email,
+                    "subject": subject,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Account email send failed",
+                extra={
+                    "template_prefix": template_prefix,
+                    "to": email,
+                },
+            )
+            raise
 
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
@@ -85,8 +120,45 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         return user
 
+    def get_app(self, request, provider, client_id=None):
+        api_key = getattr(request, "auth", None)
+        if isinstance(api_key, APIKey):
+            queryset = SocialProviderConfig.objects.select_related(
+                "project",
+                "project__organization",
+            ).filter(
+                project=api_key.project,
+                provider=provider,
+                is_active=True,
+            )
+            if client_id:
+                queryset = queryset.filter(client_id=client_id)
+
+            config = queryset.first()
+            if not config:
+                raise SocialApp.DoesNotExist()
+
+            app = SocialApp(
+                provider=config.provider,
+                name=f"{config.project.slug}-{config.provider}",
+                client_id=config.client_id,
+                secret=config.client_secret,
+            )
+            app.settings = {}
+            return app
+
+        return super().get_app(request, provider, client_id=client_id)
+
     def save_user(self, request, sociallogin, form=None):
         user = super().save_user(request, sociallogin, form)
+        api_key = getattr(request, "auth", None)
+        update_fields = []
+        if isinstance(api_key, APIKey):
+            user.organization = api_key.organization
+            user.project = api_key.project
+            user.role = user.Role.MEMBER
+            update_fields.extend(["organization", "project", "role"])
         user.is_active = True
-        user.save()
+        update_fields.append("is_active")
+        user.save(update_fields=update_fields)
         return user

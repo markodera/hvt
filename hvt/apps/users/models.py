@@ -52,6 +52,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         null=True,
         blank=True,
     )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.PROTECT,
+        related_name="users",
+        null=True,
+        blank=True,
+    )
 
     # Role
     role = models.CharField(
@@ -93,6 +100,10 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def is_org_admin(self):
         return self.role in [self.Role.OWNER, self.Role.ADMIN]
+
+    @property
+    def is_project_scoped(self) -> bool:
+        return self.project_id is not None
 
     def can_manage_users(self):
         """Owner and Admin can manage users"""

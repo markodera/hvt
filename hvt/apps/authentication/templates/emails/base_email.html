@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HVT{% endblock %}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#0a0a0a; color:#ffffff;">
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
+        {% block preview %}HVT auth infrastructure for developers.{% endblock %}
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0a0a0a; margin:0; padding:0; width:100%;">
+        <tr>
+            <td align="center" style="padding:32px 16px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px; margin:0 auto;">
+                    <tr>
+                        <td style="padding:0 0 20px 0;">
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                    <td style="vertical-align:middle;">
+                                        <div style="width:44px; height:44px; border-radius:10px; background:#5b21b6; color:#ffffff; font-family:Inter, Arial, sans-serif; font-size:13px; line-height:44px; text-align:center; font-weight:700; letter-spacing:0.08em;">
+                                            HVT
+                                        </div>
+                                    </td>
+                                    <td style="padding-left:12px; vertical-align:middle;">
+                                        <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:19px; line-height:1.1; font-weight:700; color:#ffffff;">{{ brand_name }}</div>
+                                        <div style="font-family:Inter, Arial, sans-serif; font-size:12px; line-height:1.4; color:#71717a;">{{ brand_domain }}</div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background-color:#111111; border:1px solid #27272a; border-radius:18px; padding:32px 28px;">
+                            {% block eyebrow %}{% endblock %}
+                            <h1 style="margin:0 0 14px 0; font-family:Inter, Arial, sans-serif; font-size:30px; line-height:1.15; font-weight:800; color:#ffffff;">
+                                {% block heading %}HVT{% endblock %}
+                            </h1>
+                            <div style="font-family:Inter, Arial, sans-serif; font-size:15px; line-height:1.75; color:#a1a1aa;">
+                                {% block body %}{% endblock %}
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:16px 8px 0 8px; font-family:Inter, Arial, sans-serif; font-size:12px; line-height:1.7; color:#71717a;">
+                            {% block footer %}
+                                This email was sent by {{ brand_name }}. If you were not expecting it, you can safely ignore it.
+                            {% endblock %}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
