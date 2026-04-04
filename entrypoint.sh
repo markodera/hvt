@@ -11,6 +11,11 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
+if [ "${WAIT_FOR_DB:-1}" = "1" ]; then
+    echo "Waiting for database connectivity..."
+    python scripts/wait_for_db.py
+fi
+
 if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
     run_manage_command migrate --noinput
 fi
