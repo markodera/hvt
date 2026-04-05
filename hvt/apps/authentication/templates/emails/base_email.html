@@ -9,36 +9,71 @@
     <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
         {% block preview %}HVT auth infrastructure for developers.{% endblock %}
     </div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0a0a0a; margin:0; padding:0; width:100%;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background-color:#0a0a0a; margin:0; padding:0;">
         <tr>
             <td align="center" style="padding:32px 16px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px; margin:0 auto;">
                     <tr>
-                        <td style="padding:0 0 20px 0;">
-                            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                        <td style="padding:0 0 18px 0;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                                 <tr>
-                                    <td style="vertical-align:middle;">
-                                        <div style="width:44px; height:44px; border-radius:10px; background:#5b21b6; color:#ffffff; font-family:Inter, Arial, sans-serif; font-size:13px; line-height:44px; text-align:center; font-weight:700; letter-spacing:0.08em;">
-                                            HVT
-                                        </div>
+                                    <td align="left" style="vertical-align:middle;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                            <tr>
+                                                <td style="vertical-align:middle;">
+                                                    <div style="width:44px; height:44px; border-radius:12px; background:#5b21b6; color:#ffffff; font-family:Inter, Arial, sans-serif; font-size:15px; line-height:44px; text-align:center; font-weight:800; letter-spacing:0.08em;">
+                                                        H
+                                                    </div>
+                                                </td>
+                                                <td style="padding-left:12px; vertical-align:middle;">
+                                                    <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:19px; line-height:1.1; font-weight:700; color:#ffffff;">{{ brand_name }}</div>
+                                                    <div style="font-family:Inter, Arial, sans-serif; font-size:12px; line-height:1.4; color:#71717a;">{{ brand_domain }}</div>
+                                                </td>
+                                            </tr>
+                                        </table>
                                     </td>
-                                    <td style="padding-left:12px; vertical-align:middle;">
-                                        <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:19px; line-height:1.1; font-weight:700; color:#ffffff;">{{ brand_name }}</div>
-                                        <div style="font-family:Inter, Arial, sans-serif; font-size:12px; line-height:1.4; color:#71717a;">{{ brand_domain }}</div>
+                                    <td align="right" style="vertical-align:middle;">
+                                        <div style="display:inline-block; padding:7px 11px; border-radius:999px; border:1px solid #27272a; background:#111111; color:#a78bfa; font-family:Inter, Arial, sans-serif; font-size:11px; line-height:1; font-weight:700; letter-spacing:0.12em; text-transform:uppercase;">
+                                            Account security
+                                        </div>
                                     </td>
                                 </tr>
                             </table>
                         </td>
                     </tr>
                     <tr>
-                        <td style="background-color:#111111; border:1px solid #27272a; border-radius:18px; padding:32px 28px;">
-                            {% block eyebrow %}{% endblock %}
-                            <h1 style="margin:0 0 14px 0; font-family:Inter, Arial, sans-serif; font-size:30px; line-height:1.15; font-weight:800; color:#ffffff;">
-                                {% block heading %}HVT{% endblock %}
-                            </h1>
-                            <div style="font-family:Inter, Arial, sans-serif; font-size:15px; line-height:1.75; color:#a1a1aa;">
-                                {% block body %}{% endblock %}
-                            </div>
+                        <td>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #27272a; border-radius:20px; background:#111111; overflow:hidden;">
+                                <tr>
+                                    <td style="height:4px; background:#7c3aed; font-size:0; line-height:0;">&nbsp;</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:32px 28px 28px 28px;">
+                                        {% block eyebrow %}{% endblock %}
+                                        <h1 style="margin:0 0 14px 0; font-family:Inter, Arial, sans-serif; font-size:30px; line-height:1.12; font-weight:800; letter-spacing:-0.03em; color:#ffffff;">
+                                            {% block heading %}HVT{% endblock %}
+                                        </h1>
+                                        <div style="font-family:Inter, Arial, sans-serif; font-size:15px; line-height:1.75; color:#a1a1aa;">
+                                            {% block body %}{% endblock %}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0 0 0;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #27272a; border-radius:16px; background:#111111;">
+                                <tr>
+                                    <td style="padding:16px 18px; font-family:Inter, Arial, sans-serif; font-size:13px; line-height:1.7; color:#a1a1aa;">
+                                        <strong style="color:#ffffff;">Need help?</strong>
+                                        Read the docs at
+                                        <a href="{{ docs_url }}" style="color:#c4b5fd; text-decoration:none;">{{ docs_url }}</a>
+                                        or reply to
+                                        <a href="mailto:{{ support_email }}" style="color:#c4b5fd; text-decoration:none;">{{ support_email }}</a>.
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
                     <tr>
@@ -46,6 +81,11 @@
                             {% block footer %}
                                 This email was sent by {{ brand_name }}. If you were not expecting it, you can safely ignore it.
                             {% endblock %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:10px 8px 0 8px; font-family:Inter, Arial, sans-serif; font-size:11px; line-height:1.6; color:#52525b;">
+                            {{ brand_name }} &middot; {{ brand_domain }} &middot; {{ current_year }}
                         </td>
                     </tr>
                 </table>

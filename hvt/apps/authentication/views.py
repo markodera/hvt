@@ -398,7 +398,10 @@ class HVTRegisterView(RegisterView):
         summary="Runtime register",
         description=(
             "Register an end user within the organization and project identified by "
-            "the provided X-API-Key."
+            "the provided X-API-Key.\n\n"
+            "Verification emails are currently sent from HVT's email infrastructure. "
+            "Per-project sender branding — custom domain, sender name, and templates — "
+            "is planned for Builder tier and above."
         ),
     ),
 )

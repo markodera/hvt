@@ -9,23 +9,35 @@
 {% endblock %}
 {% block heading %}Verify your email{% endblock %}
 {% block body %}
-<p style="margin:0 0 16px 0;">You’re almost done setting up your HVT account. Confirm this address to activate your control-plane account and continue into organizations, projects, API keys, runtime auth, audit logs, and webhooks.</p>
+<p style="margin:0 0 16px 0;">Confirm this address to finish creating your HVT account and unlock organization setup, projects, API keys, runtime auth, audit logs, and webhooks.</p>
+
 {% if code %}
-<div style="margin:0 0 16px 0; padding:16px 18px; border-radius:14px; border:1px solid #27272a; background:#18181b;">
-    <div style="margin:0 0 8px 0; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#71717a;">Verification code</div>
-    <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:28px; line-height:1.2; letter-spacing:0.16em; color:#ffffff;">{{ code }}</div>
+<div style="margin:0 0 18px 0; padding:18px; border-radius:16px; border:1px solid #27272a; background:#18181b;">
+    <div style="margin:0 0 8px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">Verification code</div>
+    <div style="font-family:'SFMono-Regular', 'JetBrains Mono', Consolas, monospace; font-size:30px; line-height:1.2; letter-spacing:0.18em; color:#ffffff;">{{ code }}</div>
+    <p style="margin:12px 0 0 0; color:#a1a1aa;">Enter this code in the verification screen to finish account setup.</p>
 </div>
 {% else %}
 <p style="margin:0 0 22px 0;">
     <a href="{{ activate_url }}" style="display:inline-block; padding:12px 18px; border-radius:10px; background:#7c3aed; color:#ffffff; font-weight:700; text-decoration:none;">Verify email</a>
 </p>
-<div style="margin:0 0 16px 0; padding:14px 16px; border-radius:14px; border:1px solid #27272a; background:#18181b;">
-    <div style="margin:0 0 8px 0; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#71717a;">Direct link</div>
+<div style="margin:0 0 18px 0; padding:16px; border-radius:16px; border:1px solid #27272a; background:#18181b;">
+    <div style="margin:0 0 8px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">Direct link</div>
     <a href="{{ activate_url }}" style="word-break:break-all; color:#c4b5fd; text-decoration:none;">{{ activate_url }}</a>
 </div>
 {% endif %}
+
+<div style="margin:0 0 18px 0; padding:16px; border-radius:16px; border:1px solid #27272a; background:#111111;">
+    <div style="margin:0 0 8px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">What happens next</div>
+    <ul style="margin:0; padding-left:18px; color:#d4d4d8;">
+        <li style="margin:0 0 6px 0;">Your HVT account becomes active.</li>
+        <li style="margin:0 0 6px 0;">You can create or join an organization.</li>
+        <li style="margin:0;">You can start configuring projects, keys, and sign-in flows.</li>
+    </ul>
+</div>
+
 <p style="margin:0;">If you did not create this account, you can safely ignore this email.</p>
 {% endblock %}
 {% block footer %}
-This verification email was sent by {{ brand_name }} to confirm ownership of this address. For help, reply to {{ support_email }}.
+This verification email was sent by {{ brand_name }} to confirm ownership of this address. If anything looks wrong, reply to {{ support_email }}.
 {% endblock %}

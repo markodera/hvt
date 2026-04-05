@@ -1,4 +1,5 @@
 from typing import Optional, Any
+from email.utils import parseaddr
 import resend
 from django.conf import settings
 from django.template import TemplateDoesNotExist
@@ -10,12 +11,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _resolve_sender_identity() -> tuple[str, str]:
+    raw_from = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@notify.hvts.app")
+    display_name, email_address = parseaddr(raw_from)
+    sender_email = email_address or raw_from
+    sender_name = display_name or "HVT"
+    return sender_name, sender_email
+
+
 def build_email_context(context: Optional[dict] = None) -> dict:
+    sender_name, sender_email = _resolve_sender_identity()
     base_context = {
-        "brand_name": "HVT",
+        "brand_name": sender_name or "HVT",
         "brand_domain": "hvts.app",
         "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
-        "support_email": getattr(settings, "DEFAULT_FROM_EMAIL", "security@hvts.app"),
+        "docs_url": getattr(settings, "DOCS_URL", "https://docs.hvts.app"),
+        "support_email": sender_email,
+        "from_email": sender_email,
+        "from_display_name": sender_name,
         "current_year": timezone.now().year,
     }
     if context:
@@ -70,8 +83,9 @@ class ResendEmailService:
         Returns:
             Response from Resend API
         """
+        _, sender_email = _resolve_sender_identity()
         params = {
-            "from": from_email or getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev"),
+            "from": from_email or getattr(settings, "DEFAULT_FROM_EMAIL", sender_email),
             "to": to if isinstance(to, list) else [to],
             "subject": subject,
             "html": html,
@@ -137,7 +151,8 @@ class ResendEmailBackend(BaseEmailBackend):
 
         try:
             # Prepare from_email
-            from_email = email_message.from_email or getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
+            _, sender_email = _resolve_sender_identity()
+            from_email = email_message.from_email or getattr(settings, "DEFAULT_FROM_EMAIL", sender_email)
             
             # Use html if message is multipart, otherwise use body
             html_content = ""

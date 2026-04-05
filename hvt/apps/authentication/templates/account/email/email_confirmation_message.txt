@@ -1,18 +1,26 @@
-Verify your email for HVT
+VERIFY YOUR EMAIL FOR HVT
 
-You’re almost done setting up your HVT account.
-
-Confirm this address to activate your control-plane account and continue into organizations, projects, API keys, runtime auth, audit logs, and webhooks.
+Confirm this address to finish creating your HVT account and continue into organization setup, projects, API keys, runtime auth, audit logs, and webhooks.
 
 {% if code %}
 Verification code:
 {{ code }}
+
+Enter this code in the verification screen to finish account setup.
 {% else %}
 Verify email:
 {{ activate_url }}
 {% endif %}
 
+What happens next:
+- Your HVT account becomes active
+- You can create or join an organization
+- You can start configuring projects, keys, and sign-in flows
+
 If you did not create this account, you can safely ignore this email.
+
+Docs: {{ docs_url }}
+Support: {{ support_email }}
 
 Sent by HVT
 {{ brand_domain }}

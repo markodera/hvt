@@ -1,1 +1,1 @@
-You’re invited to join {{ organization_name }} on HVT
+You're invited to join {{ organization_name }} on HVT

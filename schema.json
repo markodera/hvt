@@ -671,7 +671,7 @@
         "/api/v1/auth/runtime/register/": {
             "post": {
                 "operationId": "auth_runtime_register_create",
-                "description": "Register an end user within the organization and project identified by the provided X-API-Key.",
+                "description": "Register an end user within the organization and project identified by the provided X-API-Key.\n\nVerification emails are currently sent from HVT's email infrastructure. Per-project sender branding — custom domain, sender name, and templates — is planned for Builder tier and above.",
                 "summary": "Runtime register",
                 "tags": [
                     "Auth"
