@@ -1,5 +1,6 @@
 import logging
 
+from django.contrib.auth.models import AnonymousUser
 from dj_rest_auth.jwt_auth import JWTCookieAuthentication
 from rest_framework import authentication, exceptions
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -97,7 +98,7 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
         api_key_obj.update_last_used()
 
         logger.info(f"[APIKeyAuthentication] Success: {prefix} ({environment})")
-        return (None, api_key_obj)
+        return (AnonymousUser(), api_key_obj)
 
     def authenticate_header(self, request):
         return self.keyword

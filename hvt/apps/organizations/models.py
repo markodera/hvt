@@ -1,9 +1,19 @@
 import uuid
 import secrets
 import hashlib
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
+
+
+APP_ACCESS_SLUG_VALIDATOR = RegexValidator(
+    regex=r"^[a-z0-9]+(?:[._:-][a-z0-9]+)*$",
+    message=(
+        "Use lowercase letters, numbers, and separators like '.', '_', ':', or '-'."
+    ),
+)
 
 
 class Organization(models.Model):
@@ -87,6 +97,199 @@ class Project(models.Model):
 
     def __str__(self):
         return f"{self.organization.name} / {self.name}"
+
+
+class ProjectPermission(models.Model):
+    """Project-scoped permission defined by the customer app."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="app_permissions",
+    )
+    slug = models.CharField(
+        max_length=100,
+        validators=[APP_ACCESS_SLUG_VALIDATOR],
+        help_text="Stable permission identifier such as orders.read.own.",
+    )
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "project_permissions"
+        ordering = ["slug"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "slug"],
+                name="uniq_project_permission_slug",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project.slug}:{self.slug}"
+
+    def save(self, *args, **kwargs):
+        self.slug = (self.slug or "").strip().lower()
+        self.name = (self.name or "").strip()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ProjectRole(models.Model):
+    """Project-scoped role that bundles one or more permissions."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="app_roles",
+    )
+    slug = models.CharField(
+        max_length=100,
+        validators=[APP_ACCESS_SLUG_VALIDATOR],
+        help_text="Stable role identifier such as buyer or teacher.",
+    )
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    is_default_signup = models.BooleanField(
+        default=False,
+        help_text="Assign this role automatically during public runtime signup.",
+    )
+    permissions = models.ManyToManyField(
+        ProjectPermission,
+        through="ProjectRolePermission",
+        related_name="roles",
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "project_roles"
+        ordering = ["name", "slug"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "slug"],
+                name="uniq_project_role_slug",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project.slug}:{self.slug}"
+
+    def save(self, *args, **kwargs):
+        self.slug = (self.slug or "").strip().lower()
+        self.name = (self.name or "").strip()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ProjectRolePermission(models.Model):
+    """Explicit join table between project roles and permissions."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    role = models.ForeignKey(
+        ProjectRole,
+        on_delete=models.CASCADE,
+        related_name="permission_links",
+    )
+    permission = models.ForeignKey(
+        ProjectPermission,
+        on_delete=models.CASCADE,
+        related_name="role_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "project_role_permissions"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["role", "permission"],
+                name="uniq_project_role_permission",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.role.slug}->{self.permission.slug}"
+
+    def clean(self):
+        if (
+            self.role_id
+            and self.permission_id
+            and self.role.project_id != self.permission.project_id
+        ):
+            raise ValidationError(
+                "Roles can only be linked to permissions from the same project."
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class UserProjectRole(models.Model):
+    """Project role assignment for a user inside an organization."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="project_role_assignments",
+    )
+    role = models.ForeignKey(
+        ProjectRole,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    assigned_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_project_roles",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_project_roles"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "role"],
+                name="uniq_user_project_role_assignment",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email}->{self.role.project.slug}:{self.role.slug}"
+
+    def clean(self):
+        if self.user_id and self.role_id:
+            if self.user.organization_id != self.role.project.organization_id:
+                raise ValidationError(
+                    "Users can only be assigned project roles within their organization."
+                )
+            if self.user.project_id and self.user.project_id != self.role.project_id:
+                raise ValidationError(
+                    "Project-scoped users can only receive roles in their bound project."
+                )
+        if (
+            self.assigned_by_id
+            and self.role_id
+            and self.assigned_by.organization_id
+            and self.assigned_by.organization_id != self.role.project.organization_id
+        ):
+            raise ValidationError(
+                "Role assigners must belong to the same organization as the project."
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class SocialProviderConfig(models.Model):
@@ -354,6 +557,13 @@ class OrganizationInvitation(models.Model):
         on_delete=models.CASCADE,
         related_name="invitations",
     )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="organization_invitations",
+    )
     email = models.EmailField(db_index=True)
     role = models.CharField(
         max_length=10,
@@ -379,6 +589,11 @@ class OrganizationInvitation(models.Model):
     revoked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    app_roles = models.ManyToManyField(
+        ProjectRole,
+        related_name="organization_invitations",
+        blank=True,
+    )
 
     class Meta:
         db_table = "organization_invitations"
@@ -409,10 +624,18 @@ class OrganizationInvitation(models.Model):
     def is_pending(self) -> bool:
         return self.status == "pending"
 
+    def clean(self):
+        if self.project_id and self.organization_id:
+            if self.project.organization_id != self.organization_id:
+                raise ValidationError(
+                    {"project": "Selected project must belong to the current organization."}
+                )
+
     def save(self, *args, **kwargs):
         self.email = (self.email or "").strip().lower()
         if not self.token:
             self.token = secrets.token_hex(32)
+        self.full_clean()
         super().save(*args, **kwargs)
 
 

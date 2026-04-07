@@ -2,6 +2,8 @@ import json
 from datetime import timedelta
 from unittest.mock import patch
 from django.conf import settings as django_settings
+from django.contrib.auth.models import AnonymousUser
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -10,13 +12,17 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialApp
 
 from hvt.apps.organizations.models import (
     Organization,
     Project,
     APIKey,
+    ProjectPermission,
+    ProjectRole,
     SocialProviderConfig,
+    UserProjectRole,
 )
 from hvt.apps.authentication.backends import APIKeyAuthentication
 from hvt.apps.authentication.models import AuditLog
@@ -24,6 +30,16 @@ from hvt.apps.authentication.permissions import IsAuthenticatedOrAPIKey, IsAdmin
 from django.contrib.sites.models import Site
 
 User = get_user_model()
+
+
+def _rest_framework_with_rates(**rate_overrides):
+    return {
+        **django_settings.REST_FRAMEWORK,
+        "DEFAULT_THROTTLE_RATES": {
+            **django_settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+            **rate_overrides,
+        },
+    }
 
 
 class APIKeyModelTest(TestCase):
@@ -151,7 +167,8 @@ class APIKeyAuthenticationTest(TestCase):
         self.assertEqual(len(result), 2)
 
         user, auth = result
-        self.assertIsNone(user)
+        self.assertIsInstance(user, AnonymousUser)
+        self.assertFalse(user.is_authenticated)
         self.assertIsInstance(auth, APIKey)
         self.assertEqual(auth.id, self.api_key.id)
 
@@ -636,6 +653,12 @@ class APIKeyRegistrationFlowTest(APITestCase):
         self.owner.organization = self.org
         self.owner.save(update_fields=["organization"])
         self.default_project = self.org.ensure_default_project()
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
+        )
 
         prefix, self.full_key, hashed_key = APIKey.generate_key()
         self.api_key = APIKey.objects.create(
@@ -677,6 +700,39 @@ class APIKeyRegistrationFlowTest(APITestCase):
                 organization=self.org,
                 project=self.default_project,
             ).exists()
+        )
+        mock_send_mail.assert_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_api_key_assigns_default_project_roles(self, mock_send_mail):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+            is_default_signup=True,
+        )
+        role.permissions.add(permission)
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "default-role-shopper@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created_user = User.objects.get(email="default-role-shopper@example.com")
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=created_user, role=role).exists()
         )
         mock_send_mail.assert_called()
 
@@ -897,6 +953,112 @@ class RuntimeLoginFlowTest(APITestCase):
             "This API key does not have the required auth:runtime scope.",
         )
 
+    def test_runtime_login_embeds_app_roles_and_permissions(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=role,
+            assigned_by=self.owner,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["app_roles"], ["buyer"])
+        self.assertEqual(access_token["app_permissions"], ["orders.read.own"])
+
+    def test_runtime_login_heals_owner_missing_organization_link(self):
+        from allauth.account.models import EmailAddress
+
+        owner = User.objects.create_user(
+            email="healed-owner@example.com",
+            password="testpass123",
+            role=User.Role.OWNER,
+        )
+        org = Organization.objects.create(
+            name="Healed Runtime Org",
+            slug="healed-runtime-org",
+            owner=owner,
+        )
+        default_project = org.ensure_default_project()
+        owner.organization = None
+        owner.project = None
+        owner.save(update_fields=["organization", "project"])
+        EmailAddress.objects.create(
+            user=owner,
+            email=owner.email,
+            verified=True,
+            primary=True,
+        )
+        prefix, full_key, hashed_key = APIKey.generate_key()
+        APIKey.objects.create(
+            organization=org,
+            project=default_project,
+            name="Healed Runtime Login Key",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": owner.email, "password": "testpass123"},
+            format="json",
+            HTTP_X_API_KEY=full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        owner.refresh_from_db()
+        self.assertEqual(owner.organization_id, org.id)
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["org_id"], str(org.id))
+        self.assertEqual(access_token["project_id"], str(default_project.id))
+
+    def test_runtime_login_explains_when_email_is_not_a_runtime_user(self):
+        from allauth.account.models import EmailAddress
+
+        orphan_user = User.objects.create_user(
+            email="orphan-user@example.com",
+            password="Strongpass123!",
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=orphan_user,
+            email=orphan_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": orphan_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["non_field_errors"][0]),
+            "This email does not belong to a runtime user in any organization. Register through /api/v1/auth/runtime/register/ with an API key first.",
+        )
+
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class SocialLoginErrorHandlingTest(APITestCase):
@@ -972,6 +1134,36 @@ class SocialLoginErrorHandlingTest(APITestCase):
         providers = {item["provider"]: item for item in response.data["providers"]}
         self.assertEqual(providers["google"]["client_id"], "google-db-client")
 
+    def test_control_plane_social_lookup_strips_stale_runtime_site_links(self):
+        from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+
+        site = Site.objects.get(id=1)
+        runtime_app = SocialApp.objects.create(
+            provider="google",
+            name="rt-stale-google",
+            client_id="runtime-google-client",
+            secret="runtime-google-secret",
+        )
+        runtime_app.sites.add(site)
+
+        request = self.client.get("/api/v1/auth/social/providers/").wsgi_request
+
+        with override_settings(
+            SOCIALACCOUNT_PROVIDERS={
+                "google": {
+                    "APP": {
+                        "client_id": "google-control-plane-client",
+                        "secret": "google-control-plane-secret",
+                    }
+                }
+            }
+        ):
+            app = CustomSocialAccountAdapter().get_app(request, "google")
+
+        runtime_app.refresh_from_db()
+        self.assertEqual(runtime_app.sites.count(), 0)
+        self.assertEqual(app.client_id, "google-control-plane-client")
+
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class PasswordResetFlowTest(APITestCase):
@@ -1030,6 +1222,239 @@ class PasswordResetFlowTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("Updatedpass123!"))
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class SensitiveAuthThrottlingTest(APITestCase):
+    """Sensitive auth endpoints should apply dedicated throttles."""
+
+    def setUp(self):
+        from allauth.account.models import EmailAddress
+
+        cache.clear()
+        Site.objects.update_or_create(
+            id=1,
+            defaults={"domain": "testserver", "name": "testserver"},
+        )
+
+        self.user = User.objects.create_user(
+            email="sensitive-user@example.com",
+            password="Strongpass123!",
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+
+        self.unverified_user = User.objects.create_user(
+            email="pending-verify@example.com",
+            password="Strongpass123!",
+        )
+        EmailAddress.objects.create(
+            user=self.unverified_user,
+            email=self.unverified_user.email,
+            verified=False,
+            primary=True,
+        )
+
+        self.owner = User.objects.create_user(
+            email="throttle-owner@example.com",
+            password="Strongpass123!",
+            role=User.Role.OWNER,
+        )
+        self.org = Organization.objects.create(
+            name="Throttle Org",
+            slug="throttle-org",
+            owner=self.owner,
+            allow_signup=True,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+        self.default_project.allow_signup = True
+        self.default_project.save(update_fields=["allow_signup"])
+
+        prefix, self.full_key, hashed_key = APIKey.generate_key()
+        self.api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Throttle Runtime Key",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    def _assert_throttled(self, response):
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(response.data["code"], "throttled")
+        self.assertIn("retry_after_seconds", response.data["detail"])
+
+    def test_login_is_rate_limited(self):
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(auth_login_ip="1/min")
+        ):
+            cache.clear()
+
+            first = self.client.post(
+                "/api/v1/auth/login/",
+                {"email": self.user.email, "password": "Wrongpass123!"},
+                format="json",
+            )
+            second = self.client.post(
+                "/api/v1/auth/login/",
+                {"email": self.user.email, "password": "Wrongpass123!"},
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, status.HTTP_400_BAD_REQUEST)
+        self._assert_throttled(second)
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_password_reset_request_is_rate_limited(self, mock_send_mail):
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(auth_password_reset_email="1/hour")
+        ):
+            cache.clear()
+
+            first = self.client.post(
+                "/api/v1/auth/password/reset/",
+                {"email": self.user.email},
+                format="json",
+            )
+            second = self.client.post(
+                "/api/v1/auth/password/reset/",
+                {"email": self.user.email},
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self._assert_throttled(second)
+        mock_send_mail.assert_called_once()
+
+    @patch("allauth.account.models.EmailAddress.send_confirmation", return_value=None)
+    def test_resend_email_verification_is_rate_limited(self, mock_send_confirmation):
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(
+                auth_resend_verification_email="1/hour"
+            )
+        ):
+            cache.clear()
+
+            first = self.client.post(
+                "/api/v1/auth/register/resend-email/",
+                {"email": self.unverified_user.email},
+                format="json",
+            )
+            second = self.client.post(
+                "/api/v1/auth/register/resend-email/",
+                {"email": self.unverified_user.email},
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self._assert_throttled(second)
+        mock_send_confirmation.assert_called_once()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_register_is_rate_limited_per_api_key(self, mock_send_mail):
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(
+                auth_runtime_register_api_key="1/hour"
+            )
+        ):
+            cache.clear()
+
+            first = self.client.post(
+                "/api/v1/auth/runtime/register/",
+                {
+                    "email": "first-runtime-user@example.com",
+                    "password1": "Strongpass123!",
+                    "password2": "Strongpass123!",
+                },
+                format="json",
+                HTTP_X_API_KEY=self.full_key,
+            )
+            second = self.client.post(
+                "/api/v1/auth/runtime/register/",
+                {
+                    "email": "second-runtime-user@example.com",
+                    "password1": "Strongpass123!",
+                    "password2": "Strongpass123!",
+                },
+                format="json",
+                HTTP_X_API_KEY=self.full_key,
+            )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self._assert_throttled(second)
+        mock_send_mail.assert_called_once()
+
+    def test_runtime_social_login_is_rate_limited_per_api_key(self):
+        SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GOOGLE,
+            client_id="google-runtime-client",
+            client_secret="google-runtime-secret",
+            redirect_uris=["http://localhost:3000/auth/google/callback"],
+            is_active=True,
+        )
+
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(
+                auth_runtime_social_api_key="1/min"
+            )
+        ):
+            cache.clear()
+
+            first = self.client.post(
+                "/api/v1/auth/runtime/social/google/",
+                {
+                    "code": "dummy-code",
+                    "callback_url": "http://localhost:3000/auth/google/callback",
+                },
+                format="json",
+                HTTP_X_API_KEY=self.full_key,
+            )
+            second = self.client.post(
+                "/api/v1/auth/runtime/social/google/",
+                {
+                    "code": "dummy-code",
+                    "callback_url": "http://localhost:3000/auth/google/callback",
+                },
+                format="json",
+                HTTP_X_API_KEY=self.full_key,
+            )
+
+        self.assertEqual(first.status_code, status.HTTP_400_BAD_REQUEST)
+        self._assert_throttled(second)
+
+    def test_token_refresh_is_rate_limited(self):
+        with override_settings(
+            REST_FRAMEWORK=_rest_framework_with_rates(auth_token_refresh="1/min")
+        ):
+            cache.clear()
+
+            login_response = self.client.post(
+                "/api/v1/auth/login/",
+                {"email": self.user.email, "password": "Strongpass123!"},
+                format="json",
+            )
+            self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+            del self.client.cookies["auth-token"]
+
+            first = self.client.post("/api/v1/auth/token/refresh/", {}, format="json")
+            second = self.client.post("/api/v1/auth/token/refresh/", {}, format="json")
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self._assert_throttled(second)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
@@ -1096,6 +1521,33 @@ class RuntimeSocialAuthFlowTest(APITestCase):
         self.assertEqual(len(response.data["providers"]), 1)
         self.assertEqual(response.data["providers"][0]["provider"], "google")
         self.assertEqual(response.data["providers"][0]["client_id"], "google-default")
+
+    def test_runtime_social_adapter_returns_persisted_social_app(self):
+        from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+
+        config = SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GITHUB,
+            client_id="github-runtime-client",
+            client_secret="github-runtime-secret",
+            redirect_uris=["http://localhost:3000/auth/github/callback"],
+            is_active=True,
+        )
+
+        request = self.client.get(
+            "/api/v1/auth/runtime/social/providers/",
+            HTTP_X_API_KEY=self.full_key,
+        ).wsgi_request
+        request.auth = self.api_key
+
+        app = CustomSocialAccountAdapter().get_app(request, "github")
+
+        self.assertIsNotNone(app.pk)
+        self.assertEqual(app.provider, "github")
+        self.assertEqual(app.client_id, config.client_id)
+        self.assertEqual(app.secret, config.client_secret)
+        if hasattr(app, "sites"):
+            self.assertEqual(app.sites.count(), 0)
 
     def test_runtime_social_provider_list_requires_auth_runtime_scope(self):
         self.api_key.scopes = ["read"]
@@ -1198,3 +1650,101 @@ class RuntimeSocialAuthFlowTest(APITestCase):
         self.assertEqual(access_token["org_id"], str(self.org.id))
         self.assertEqual(access_token["project_id"], str(self.default_project.id))
         self.assertEqual(access_token["project_slug"], self.default_project.slug)
+
+    @patch("hvt.api.v1.serializers.users.SocialLoginSerializer.validate", autospec=True)
+    def test_runtime_social_login_passes_anonymous_user_to_social_serializer(
+        self, mock_validate
+    ):
+        runtime_user = User.objects.create_user(
+            email="runtime-social-anon@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GOOGLE,
+            client_id="google-default",
+            client_secret="secret-default",
+            redirect_uris=["http://localhost:3000/auth/google/callback"],
+            is_active=True,
+        )
+
+        def validate(serializer, attrs):
+            request = serializer.context["request"]
+            self.assertIsInstance(request.user, AnonymousUser)
+            self.assertFalse(request.user.is_authenticated)
+            return {"user": runtime_user}
+
+        mock_validate.side_effect = validate
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/social/google/",
+            {
+                "code": "dummy-code",
+                "callback_url": "http://localhost:3000/auth/google/callback",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @override_settings(DEBUG=True)
+    @patch("hvt.api.v1.serializers.users.SocialLoginSerializer.validate", autospec=True)
+    def test_runtime_social_login_surfaces_unexpected_error_in_debug(
+        self, mock_validate
+    ):
+        SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GITHUB,
+            client_id="github-default",
+            client_secret="secret-default",
+            redirect_uris=["http://localhost:5173/runtime-playground/callback/github"],
+            is_active=True,
+        )
+        mock_validate.side_effect = AttributeError("boom")
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/social/github/",
+            {
+                "code": "dummy-code",
+                "callback_url": "http://localhost:5173/runtime-playground/callback/github",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Social login failed: AttributeError: boom",
+        )
+
+    def test_runtime_github_social_login_returns_400_on_failure(self):
+        SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GITHUB,
+            client_id="github-default",
+            client_secret="secret-default",
+            redirect_uris=["http://localhost:5173/runtime-playground/callback/github"],
+            is_active=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/social/github/",
+            {
+                "code": "dummy-code",
+                "callback_url": "http://localhost:5173/runtime-playground/callback/github",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["non_field_errors"][0],
+            "Social login failed. Please try again.",
+        )

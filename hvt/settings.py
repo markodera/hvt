@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
 from pathlib import Path
+from corsheaders.defaults import default_headers
 from urllib.parse import urlparse
 
 import dj_database_url
@@ -191,18 +192,8 @@ if DEBUG:
     
 CORS_ALLOW_CREDENTIALS = True
 
-# Allow headers specifically for OpenAPI Schema fetches
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-]
+# Preserve django-cors-headers defaults and allow runtime API-key auth from browsers.
+CORS_ALLOW_HEADERS = [*default_headers, "x-api-key"]
 
 CSRF_TRUSTED_ORIGINS = _env_list(
     "CSRF_TRUSTED_ORIGINS",
@@ -338,6 +329,23 @@ REST_FRAMEWORK = {
         "organization": "1000/hour",
         "api_key": "100/minute",
         "anon": "10/min",
+        "auth_login_ip": "10/min",
+        "auth_login_email": "10/hour",
+        "auth_register_ip": "5/hour",
+        "auth_register_email": "3/hour",
+        "auth_runtime_register_api_key": "20/hour",
+        "auth_password_reset_ip": "5/hour",
+        "auth_password_reset_email": "3/hour",
+        "auth_password_reset_confirm_ip": "10/hour",
+        "auth_password_reset_validate_ip": "30/hour",
+        "auth_password_change_user": "10/hour",
+        "auth_email_verification_ip": "10/hour",
+        "auth_resend_verification_ip": "5/hour",
+        "auth_resend_verification_email": "3/hour",
+        "auth_social_login_ip": "10/min",
+        "auth_runtime_login_api_key": "60/min",
+        "auth_runtime_social_api_key": "60/min",
+        "auth_token_refresh": "60/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # Standardized error envelope for all API errors

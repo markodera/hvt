@@ -1,10 +1,12 @@
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.models import SocialApp
+from django.contrib.sites.shortcuts import get_current_site
 from django.conf import settings
 import logging
 
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
+from hvt.apps.organizations.access import assign_default_signup_roles
 from .email import ResendEmailService, build_email_context, render_email_template
 
 
@@ -97,6 +99,38 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
     - Populates first_name/last_name from provider data
     """
 
+    @staticmethod
+    def _is_runtime_social_app(app: SocialApp) -> bool:
+        return str(getattr(app, "name", "") or "").startswith("rt-")
+
+    def _ensure_runtime_social_app_isolated(self, app: SocialApp) -> SocialApp:
+        """
+        Runtime social apps exist only to give allauth a persisted app for token
+        storage during API-key-scoped runtime auth. They must never be discoverable
+        through site-level control-plane provider lookup.
+        """
+        if hasattr(app, "sites") and self._is_runtime_social_app(app):
+            app.sites.clear()
+        return app
+
+    def _isolate_runtime_apps_for_provider(self, request, provider: str) -> None:
+        """
+        Older runtime logins may already have linked rt-* apps to the default site.
+        Strip those links before control-plane provider discovery so stale runtime
+        rows cannot hijack or duplicate dashboard social-auth config.
+        """
+        current_site = get_current_site(request)
+        if not current_site:
+            return
+
+        runtime_apps = SocialApp.objects.filter(
+            provider=provider,
+            name__startswith="rt-",
+            sites=current_site,
+        )
+        for app in runtime_apps:
+            app.sites.remove(current_site)
+
     def populate_user(self, request, sociallogin, data):
         """
         Populate user instance with data from social provider.
@@ -120,6 +154,40 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         return user
 
+    def _get_or_create_runtime_social_app(self, request, config: SocialProviderConfig) -> SocialApp:
+        """
+        Materialize a real SocialApp row for runtime provider configs.
+
+        allauth may persist SocialToken rows during first-time social signup. That path
+        expects token.app to either be null or point at a saved SocialApp instance with
+        a primary key. Returning an unsaved in-memory SocialApp causes provider-specific
+        500s during token storage.
+        """
+        app_name = f"rt-{str(config.project_id)[:8]}-{config.provider}"
+        app_defaults = {
+            "secret": config.client_secret,
+            "key": "",
+            "settings": {},
+        }
+        app, created = SocialApp.objects.get_or_create(
+            provider=config.provider,
+            name=app_name,
+            client_id=config.client_id,
+            defaults=app_defaults,
+        )
+
+        update_fields = []
+        if app.secret != config.client_secret:
+            app.secret = config.client_secret
+            update_fields.append("secret")
+        if app.settings != {}:
+            app.settings = {}
+            update_fields.append("settings")
+        if update_fields:
+            app.save(update_fields=update_fields)
+
+        return self._ensure_runtime_social_app_isolated(app)
+
     def get_app(self, request, provider, client_id=None):
         api_key = getattr(request, "auth", None)
         if isinstance(api_key, APIKey):
@@ -137,16 +205,9 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
             config = queryset.first()
             if not config:
                 raise SocialApp.DoesNotExist()
+            return self._get_or_create_runtime_social_app(request, config)
 
-            app = SocialApp(
-                provider=config.provider,
-                name=f"{config.project.slug}-{config.provider}",
-                client_id=config.client_id,
-                secret=config.client_secret,
-            )
-            app.settings = {}
-            return app
-
+        self._isolate_runtime_apps_for_provider(request, provider)
         return super().get_app(request, provider, client_id=client_id)
 
     def save_user(self, request, sociallogin, form=None):
@@ -161,4 +222,5 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         user.is_active = True
         update_fields.append("is_active")
         user.save(update_fields=update_fields)
+        assign_default_signup_roles(user, api_key.project if isinstance(api_key, APIKey) else None)
         return user

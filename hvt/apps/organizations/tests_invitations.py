@@ -7,7 +7,13 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 from unittest.mock import patch
 
-from hvt.apps.organizations.models import Organization, OrganizationInvitation
+from hvt.apps.organizations.models import (
+    Organization,
+    OrganizationInvitation,
+    ProjectPermission,
+    ProjectRole,
+    UserProjectRole,
+)
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.organizations.views import _send_invitation_email
 
@@ -32,6 +38,7 @@ class OrganizationInvitationAPITest(APITestCase):
         )
         self.owner.organization = self.org
         self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
 
         self.admin = User.objects.create_user(
             email="admin@example.com",
@@ -58,6 +65,7 @@ class OrganizationInvitationAPITest(APITestCase):
         )
         self.other_owner.organization = self.other_org
         self.other_owner.save(update_fields=["organization"])
+        self.other_project = self.other_org.ensure_default_project()
 
     @patch("hvt.apps.organizations.views._send_invitation_email", return_value=True)
     def test_owner_can_create_invitation(self, mock_send_invitation_email):
@@ -79,6 +87,40 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertEqual(invitation.role, OrganizationInvitation.Role.ADMIN)
         self.assertTrue(invitation.token)
         self.assertIn("/invite?token=", response.data["accept_url"])
+        mock_send_invitation_email.assert_called_once()
+
+    @patch("hvt.apps.organizations.views._send_invitation_email", return_value=True)
+    def test_owner_can_create_invitation_with_project_app_roles(self, mock_send_invitation_email):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.post(
+            reverse("organization_invitation_list_create"),
+            {
+                "email": "project-invitee@example.com",
+                "role": "member",
+                "project_id": str(self.default_project.id),
+                "app_role_ids": [str(role.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        invitation = OrganizationInvitation.objects.get(email="project-invitee@example.com")
+        self.assertEqual(invitation.project, self.default_project)
+        self.assertEqual(list(invitation.app_roles.values_list("slug", flat=True)), ["buyer"])
+        self.assertEqual(response.data["project_slug"], self.default_project.slug)
+        self.assertEqual(response.data["app_roles"][0]["slug"], "buyer")
         mock_send_invitation_email.assert_called_once()
 
     @patch("hvt.apps.organizations.views.ResendEmailService.send", return_value={"id": "email_123"})
@@ -115,6 +157,49 @@ class OrganizationInvitationAPITest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(OrganizationInvitation.objects.filter(email="invitee@example.com").exists())
+
+    def test_invitation_rejects_app_roles_without_project(self):
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.post(
+            reverse("organization_invitation_list_create"),
+            {
+                "email": "invalid-invitee@example.com",
+                "role": "member",
+                "app_role_ids": [str(role.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("project_id", response.data["detail"])
+
+    def test_invitation_rejects_roles_from_different_project(self):
+        other_role = ProjectRole.objects.create(
+            project=self.other_project,
+            slug="seller",
+            name="Seller",
+        )
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.post(
+            reverse("organization_invitation_list_create"),
+            {
+                "email": "invalid-invitee@example.com",
+                "role": "member",
+                "project_id": str(self.default_project.id),
+                "app_role_ids": [str(other_role.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("app_role_ids", response.data["detail"])
 
     def test_owner_lists_only_current_org_invitations(self):
         own_invitation = OrganizationInvitation.objects.create(
@@ -204,6 +289,37 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertEqual(response.data["status"], "pending")
         self.assertEqual(response.data["invited_by_email"], self.owner.email)
 
+    def test_lookup_invitation_returns_project_and_app_roles(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        invitation = OrganizationInvitation.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            email="invitee@example.com",
+            role=OrganizationInvitation.Role.MEMBER,
+            invited_by=self.owner,
+            expires_at=self.invitation_expiry,
+        )
+        invitation.app_roles.add(role)
+
+        response = self.client.get(
+            reverse("organization_invitation_lookup"),
+            {"token": invitation.token},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["project_slug"], self.default_project.slug)
+        self.assertEqual(response.data["app_roles"][0]["slug"], "buyer")
+
     def test_accept_invitation_assigns_user_to_org_and_role(self):
         invitee = User.objects.create_user(
             email="invitee@example.com",
@@ -232,6 +348,51 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertEqual(invitation.accepted_by, invitee)
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(response.data["status"], "accepted")
+
+    def test_accept_invitation_assigns_project_and_app_roles(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        invitee = User.objects.create_user(
+            email="invitee@example.com",
+            password="password123",
+        )
+        invitation = OrganizationInvitation.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            email=invitee.email,
+            role=OrganizationInvitation.Role.MEMBER,
+            invited_by=self.owner,
+            expires_at=self.invitation_expiry,
+        )
+        invitation.app_roles.add(role)
+
+        self.client.force_authenticate(user=invitee)
+        response = self.client.post(
+            reverse("organization_invitation_accept"),
+            {"token": invitation.token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invitee.refresh_from_db()
+        self.assertEqual(invitee.organization, self.org)
+        self.assertEqual(invitee.project, self.default_project)
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=invitee, role=role).exists()
+        )
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["project_id"], str(self.default_project.id))
+        self.assertEqual(access_token["app_roles"], ["buyer"])
+        self.assertEqual(access_token["app_permissions"], ["orders.read.own"])
 
     def test_accept_invitation_rotates_auth_tokens_for_immediate_access(self):
         invitee = User.objects.create_user(

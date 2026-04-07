@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.conf import settings
@@ -14,6 +15,8 @@ from .models import (
     Organization,
     Project,
     APIKey,
+    ProjectPermission,
+    ProjectRole,
     SocialProviderConfig,
     Webhook,
     WebhookDelivery,
@@ -22,15 +25,30 @@ from .models import (
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import IsOrgOwnerOrAPIKey, IsOrgAdminOrAPIKey, IsOrgMemberOrAPIKey
 from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
-from hvt.apps.organizations.permissions import IsOrganizationOwner, IsCurrentOrganizationOwner
+from hvt.apps.organizations.access import (
+    get_user_project_permission_slugs,
+    get_user_project_roles,
+    sync_user_project_roles,
+)
+from hvt.apps.organizations.permissions import (
+    IsOrganizationOwner,
+    IsCurrentOrganizationAdmin,
+    IsCurrentOrganizationOwner,
+)
 from hvt.apps.organizations.webhooks import trigger_webhook_event
 from hvt.pagination import LargeResultPagination
 from hvt.apps.authentication.email import ResendEmailService, build_email_context, render_email_template
+from hvt.apps.users.models import User
 from hvt.api.v1.serializers.organizations import (
     OrganizationSerializer,
     ProjectSerializer,
     APIKeyCreateSerializer,
     APIKeyListSerializer,
+    ProjectPermissionSerializer,
+    ProjectRoleSerializer,
+    ProjectRoleSummarySerializer,
+    ProjectUserRoleAccessSerializer,
+    ProjectUserRoleAssignmentUpdateSerializer,
     SocialProviderConfigSerializer,
     WebhookSerializer,
     WebhookDeliverySerializer,
@@ -52,6 +70,28 @@ def _authenticated_user_or_none(request):
     return None
 
 
+def _current_user_project_queryset(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated or not user.organization_id:
+        return Project.objects.none()
+    return Project.objects.filter(organization=user.organization)
+
+
+def _get_current_project_or_404(request, project_pk):
+    return get_object_or_404(_current_user_project_queryset(request), pk=project_pk)
+
+
+def _serialize_user_project_access(user, project) -> dict:
+    roles = list(get_user_project_roles(user, project))
+    permissions = get_user_project_permission_slugs(user, project)
+    return {
+        "user": str(user.id),
+        "project": str(project.id),
+        "roles": ProjectRoleSummarySerializer(roles, many=True).data,
+        "permissions": permissions,
+    }
+
+
 def _sync_default_project_signup(org: Organization) -> None:
     """Keep the default project's signup toggle aligned with org onboarding."""
     default_project = org.ensure_default_project()
@@ -60,10 +100,13 @@ def _sync_default_project_signup(org: Organization) -> None:
         default_project.save(update_fields=["allow_signup", "updated_at"])
 
 
-def _set_rotated_auth_tokens(response, user) -> None:
+def _set_rotated_auth_tokens(response, user, project=None) -> None:
     """Rotate JWTs after an org context change so current-org requests work immediately."""
     user.refresh_from_db()
-    refresh_token = HVTTokenObtainPairSerializer.get_token(user)
+    refresh_token = HVTTokenObtainPairSerializer.get_token(
+        user,
+        project=project or getattr(user, "project", None),
+    )
     access_token = refresh_token.access_token
     access_value = str(access_token)
     refresh_value = str(refresh_token)
@@ -91,6 +134,10 @@ def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
 
     accept_url = _build_invitation_accept_url(invitation)
     role_label = invitation.get_role_display()
+    app_role_labels = [
+        role.name or role.slug
+        for role in invitation.app_roles.all().order_by("name", "slug")
+    ]
     email_context = build_email_context(
         {
             "organization_name": invitation.organization.name,
@@ -98,6 +145,9 @@ def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
             "invitee_email": invitation.email,
             "invited_by_email": invitation.invited_by.email if invitation.invited_by else "",
             "role_label": role_label,
+            "project_name": invitation.project.name if invitation.project else "",
+            "project_slug": invitation.project.slug if invitation.project else "",
+            "app_role_labels": app_role_labels,
             "accept_url": accept_url,
             "expires_at_display": timezone.localtime(invitation.expires_at).strftime("%B %d, %Y at %H:%M %Z"),
         }
@@ -350,11 +400,13 @@ class ProjectListCreateView(generics.ListCreateAPIView):
     ordering_fields = ["name", "created_at", "updated_at"]
     ordering = ["created_at", "name"]
 
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsCurrentOrganizationOwner()]
+        return [IsCurrentOrganizationAdmin()]
+
     def get_queryset(self):
-        user = getattr(self.request, "user", None)
-        if not user or not user.is_authenticated or not user.organization_id:
-            return Project.objects.none()
-        return Project.objects.filter(organization=user.organization)
+        return _current_user_project_queryset(self.request)
 
     def perform_create(self, serializer):
         project = serializer.save(organization=self.request.user.organization)
@@ -398,11 +450,13 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProjectSerializer
     permission_classes = [IsCurrentOrganizationOwner]
 
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsCurrentOrganizationAdmin()]
+        return [IsCurrentOrganizationOwner()]
+
     def get_queryset(self):
-        user = getattr(self.request, "user", None)
-        if not user or not user.is_authenticated or not user.organization_id:
-            return Project.objects.none()
-        return Project.objects.filter(organization=user.organization)
+        return _current_user_project_queryset(self.request)
 
     def perform_update(self, serializer):
         project = self.get_object()
@@ -447,6 +501,21 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise serializers.ValidationError(
                 "Delete this project's social provider configs before deleting the project."
             )
+        if instance.organization_invitations.filter(
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+        ).exists():
+            raise serializers.ValidationError(
+                "Revoke or accept this project's pending invitations before deleting the project."
+            )
+        if instance.app_roles.exists():
+            raise serializers.ValidationError(
+                "Delete this project's app roles before deleting the project."
+            )
+        if instance.app_permissions.exists():
+            raise serializers.ValidationError(
+                "Delete this project's app permissions before deleting the project."
+            )
 
         AuditLog.log(
             event_type=AuditLog.EventType.PROJECT_DELETED,
@@ -462,6 +531,282 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
             success=True,
         )
         instance.delete()
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="List project app permissions",
+        description="List dynamic app permissions for a project in the current organization. Owner/admin only.",
+    ),
+    post=extend_schema(
+        tags=["Projects"],
+        summary="Create project app permission",
+        description="Create a dynamic app permission for a project. Owner/admin only.",
+        request=ProjectPermissionSerializer,
+        responses={201: ProjectPermissionSerializer},
+    ),
+)
+class ProjectPermissionListCreateView(generics.ListCreateAPIView):
+    """List and create project-scoped app permissions."""
+
+    serializer_class = ProjectPermissionSerializer
+    permission_classes = [IsCurrentOrganizationAdmin]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["slug", "name", "description"]
+    ordering_fields = ["slug", "name", "created_at", "updated_at"]
+    ordering = ["slug"]
+
+    def _get_project(self):
+        return _get_current_project_or_404(self.request, self.kwargs["project_pk"])
+
+    def get_queryset(self):
+        return ProjectPermission.objects.filter(project=self._get_project())
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["project"] = self._get_project()
+        return context
+
+    def perform_create(self, serializer):
+        serializer.save(project=self._get_project())
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Retrieve project app permission",
+        description="Retrieve a dynamic app permission for a project. Owner/admin only.",
+    ),
+    patch=extend_schema(
+        tags=["Projects"],
+        summary="Update project app permission",
+        description="Update a dynamic app permission for a project. Owner/admin only.",
+    ),
+    delete=extend_schema(
+        tags=["Projects"],
+        summary="Delete project app permission",
+        description="Delete a dynamic app permission for a project after unlinking it from roles. Owner/admin only.",
+    ),
+)
+class ProjectPermissionDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete a project app permission."""
+
+    serializer_class = ProjectPermissionSerializer
+    permission_classes = [IsCurrentOrganizationAdmin]
+
+    def _get_project(self):
+        return _get_current_project_or_404(self.request, self.kwargs["project_pk"])
+
+    def get_queryset(self):
+        return ProjectPermission.objects.filter(project=self._get_project())
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["project"] = self._get_project()
+        return context
+
+    def perform_destroy(self, instance):
+        if instance.role_links.exists():
+            raise serializers.ValidationError(
+                "Remove this permission from all project roles before deleting it."
+            )
+        instance.delete()
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="List project app roles",
+        description="List dynamic app roles for a project in the current organization. Owner/admin only.",
+    ),
+    post=extend_schema(
+        tags=["Projects"],
+        summary="Create project app role",
+        description="Create a dynamic app role and attach permissions. Owner/admin only.",
+        request=ProjectRoleSerializer,
+        responses={201: ProjectRoleSerializer},
+    ),
+)
+class ProjectRoleListCreateView(generics.ListCreateAPIView):
+    """List and create project-scoped app roles."""
+
+    serializer_class = ProjectRoleSerializer
+    permission_classes = [IsCurrentOrganizationAdmin]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["slug", "name", "description"]
+    ordering_fields = ["name", "slug", "created_at", "updated_at"]
+    ordering = ["name", "slug"]
+
+    def _get_project(self):
+        return _get_current_project_or_404(self.request, self.kwargs["project_pk"])
+
+    def get_queryset(self):
+        return ProjectRole.objects.filter(project=self._get_project()).prefetch_related(
+            "permissions"
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["project"] = self._get_project()
+        return context
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Retrieve project app role",
+        description="Retrieve a dynamic app role for a project. Owner/admin only.",
+    ),
+    patch=extend_schema(
+        tags=["Projects"],
+        summary="Update project app role",
+        description="Update a dynamic app role and its permissions. Owner/admin only.",
+    ),
+    delete=extend_schema(
+        tags=["Projects"],
+        summary="Delete project app role",
+        description="Delete a dynamic app role after removing it from users. Owner/admin only.",
+    ),
+)
+class ProjectRoleDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete a project app role."""
+
+    serializer_class = ProjectRoleSerializer
+    permission_classes = [IsCurrentOrganizationAdmin]
+
+    def _get_project(self):
+        return _get_current_project_or_404(self.request, self.kwargs["project_pk"])
+
+    def get_queryset(self):
+        return ProjectRole.objects.filter(project=self._get_project()).prefetch_related(
+            "permissions"
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["project"] = self._get_project()
+        return context
+
+    def perform_destroy(self, instance):
+        if instance.assignments.exists():
+            raise serializers.ValidationError(
+                "Remove this role from all users before deleting it."
+            )
+        if instance.organization_invitations.filter(
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+        ).exists():
+            raise serializers.ValidationError(
+                "Remove this role from pending invitations before deleting it."
+            )
+        instance.delete()
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Get user app access for a project",
+        description="Get a user's assigned app roles and effective permissions for a project. Owner/admin only.",
+        responses={200: ProjectUserRoleAccessSerializer},
+    ),
+    put=extend_schema(
+        tags=["Projects"],
+        summary="Replace user app roles for a project",
+        description="Replace a user's assigned app roles for a project. Owner/admin only.",
+        request=ProjectUserRoleAssignmentUpdateSerializer,
+        responses={200: ProjectUserRoleAccessSerializer},
+    ),
+    patch=extend_schema(
+        tags=["Projects"],
+        summary="Replace user app roles for a project",
+        description="Replace a user's assigned app roles for a project. Owner/admin only.",
+        request=ProjectUserRoleAssignmentUpdateSerializer,
+        responses={200: ProjectUserRoleAccessSerializer},
+    ),
+)
+class ProjectUserRoleAssignmentView(APIView):
+    """Read or replace a user's assigned app roles for a project."""
+
+    permission_classes = [IsCurrentOrganizationAdmin]
+
+    def _get_project(self):
+        return _get_current_project_or_404(self.request, self.kwargs["project_pk"])
+
+    def _get_user(self, project):
+        user = get_object_or_404(
+            User.objects.filter(organization=self.request.user.organization),
+            pk=self.kwargs["user_pk"],
+        )
+        if user.project_id and user.project_id != project.id:
+            raise NotFound("User is not available in this project.")
+        return user
+
+    def get(self, request, *args, **kwargs):
+        project = self._get_project()
+        user = self._get_user(project)
+        payload = _serialize_user_project_access(user, project)
+        serializer = ProjectUserRoleAccessSerializer(payload)
+        return Response(serializer.data)
+
+    def put(self, request, *args, **kwargs):
+        return self._replace_roles(request)
+
+    def patch(self, request, *args, **kwargs):
+        return self._replace_roles(request)
+
+    def _replace_roles(self, request):
+        project = self._get_project()
+        user = self._get_user(project)
+        serializer = ProjectUserRoleAssignmentUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        roles = list(
+            ProjectRole.objects.filter(
+                project=project,
+                id__in=serializer.validated_data["role_ids"],
+            )
+        )
+        found_ids = {role.id for role in roles}
+        requested_ids = serializer.validated_data["role_ids"]
+        if any(role_id not in found_ids for role_id in requested_ids):
+            raise serializers.ValidationError(
+                {"role_ids": ["Select valid roles in the current project."]}
+            )
+
+        sync_user_project_roles(
+            user,
+            project,
+            roles,
+            assigned_by=request.user,
+        )
+        payload = _serialize_user_project_access(user, project)
+        response_serializer = ProjectUserRoleAccessSerializer(payload)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Projects"],
+    summary="Get current project access",
+    description="Return the authenticated user's app roles and effective permissions for a project.",
+    responses={200: ProjectUserRoleAccessSerializer},
+)
+class CurrentProjectAccessView(APIView):
+    """Expose the current user's effective app access for a project."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        project = _get_current_project_or_404(request, kwargs["project_pk"])
+        if request.user.project_id and request.user.project_id != project.id:
+            raise NotFound("Project not found.")
+
+        payload = _serialize_user_project_access(request.user, project)
+        serializer = ProjectUserRoleAccessSerializer(payload)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @extend_schema_view(
@@ -861,7 +1206,7 @@ class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
             return OrganizationInvitation.objects.none()
         return OrganizationInvitation.objects.filter(
             organization=self.request.user.organization
-        ).select_related("invited_by", "accepted_by")
+        ).select_related("project", "invited_by", "accepted_by").prefetch_related("app_roles")
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -889,6 +1234,9 @@ class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
             event_data={
                 "email": invitation.email,
                 "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
                 "email_sent": email_sent,
             },
             success=True,
@@ -911,7 +1259,7 @@ class OrganizationInvitationResendView(generics.GenericAPIView):
     def get_queryset(self):
         return OrganizationInvitation.objects.filter(
             organization=self.request.user.organization
-        )
+        ).select_related("project", "invited_by", "accepted_by").prefetch_related("app_roles")
 
     def post(self, request, *args, **kwargs):
         invitation = get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
@@ -942,6 +1290,9 @@ class OrganizationInvitationResendView(generics.GenericAPIView):
             event_data={
                 "email": invitation.email,
                 "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
                 "email_sent": email_sent,
             },
             success=True,
@@ -970,7 +1321,7 @@ class OrganizationInvitationRevokeView(generics.DestroyAPIView):
     def get_queryset(self):
         return OrganizationInvitation.objects.filter(
             organization=self.request.user.organization
-        )
+        ).select_related("project", "invited_by", "accepted_by").prefetch_related("app_roles")
 
     def destroy(self, request, *args, **kwargs):
         invitation = self.get_object()
@@ -994,7 +1345,13 @@ class OrganizationInvitationRevokeView(generics.DestroyAPIView):
             user=request.user,
             organization=request.user.organization,
             target=invitation,
-            event_data={"email": invitation.email, "role": invitation.role},
+            event_data={
+                "email": invitation.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
+            },
             success=True,
         )
 
@@ -1018,7 +1375,7 @@ class OrganizationInvitationLookupView(APIView):
             raise serializers.ValidationError({"token": ["This field is required."]})
 
         invitation = get_object_or_404(
-            OrganizationInvitation.objects.select_related("organization"),
+            OrganizationInvitation.objects.select_related("organization", "project").prefetch_related("app_roles"),
             token=token,
         )
 
@@ -1045,7 +1402,7 @@ class OrganizationInvitationAcceptView(APIView):
         serializer.is_valid(raise_exception=True)
 
         invitation = get_object_or_404(
-            OrganizationInvitation.objects.select_related("organization"),
+            OrganizationInvitation.objects.select_related("organization", "project", "invited_by").prefetch_related("app_roles"),
             token=serializer.validated_data["token"],
         )
 
@@ -1074,21 +1431,42 @@ class OrganizationInvitationAcceptView(APIView):
                 {"detail": "You already belong to an organization."}
             )
 
-        request.user.organization = invitation.organization
-        request.user.role = invitation.role
-        request.user.save(update_fields=["organization", "role"])
+        invited_app_roles = list(invitation.app_roles.all())
+        with transaction.atomic():
+            request.user.organization = invitation.organization
+            request.user.role = invitation.role
+            update_fields = ["organization", "role"]
+            if invitation.project_id and invitation.role == User.Role.MEMBER:
+                request.user.project = invitation.project
+                update_fields.append("project")
+            request.user.save(update_fields=update_fields)
 
-        invitation.accepted_by = request.user
-        invitation.accepted_at = timezone.now()
-        invitation.save(update_fields=["accepted_by", "accepted_at", "updated_at"])
+            if invitation.project_id:
+                sync_user_project_roles(
+                    request.user,
+                    invitation.project,
+                    invited_app_roles,
+                    assigned_by=invitation.invited_by,
+                )
+
+            invitation.accepted_by = request.user
+            invitation.accepted_at = timezone.now()
+            invitation.save(update_fields=["accepted_by", "accepted_at", "updated_at"])
 
         AuditLog.log(
             event_type=AuditLog.EventType.ORG_INVITATION_ACCEPTED,
             request=request,
             user=request.user,
             organization=invitation.organization,
+            project=invitation.project,
             target=invitation,
-            event_data={"email": invitation.email, "role": invitation.role},
+            event_data={
+                "email": invitation.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": [role.slug for role in invited_app_roles],
+            },
             success=True,
         )
         AuditLog.log(
@@ -1096,8 +1474,15 @@ class OrganizationInvitationAcceptView(APIView):
             request=request,
             user=request.user,
             organization=invitation.organization,
+            project=invitation.project,
             target=request.user,
-            event_data={"email": request.user.email, "role": invitation.role},
+            event_data={
+                "email": request.user.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": [role.slug for role in invited_app_roles],
+            },
             success=True,
         )
 
@@ -1106,7 +1491,7 @@ class OrganizationInvitationAcceptView(APIView):
             OrganizationInvitationSerializer(invitation).data,
             status=status.HTTP_200_OK,
         )
-        _set_rotated_auth_tokens(response, request.user)
+        _set_rotated_auth_tokens(response, request.user, project=invitation.project)
         return response
 
 
@@ -1279,6 +1664,15 @@ class WebhookDeliveryListView(generics.ListAPIView):
 # The definitive permission matrix for HVT.
 # Each key is a resource/action, value maps role -> bool.
 PERMISSION_MATRIX = {
+    "projects.list": {"owner": True, "admin": True, "member": False},
+    "projects.read": {"owner": True, "admin": True, "member": False},
+    "projects.create": {"owner": True, "admin": False, "member": False},
+    "projects.update": {"owner": True, "admin": False, "member": False},
+    "projects.delete": {"owner": True, "admin": False, "member": False},
+    "project_access.read": {"owner": True, "admin": True, "member": True},
+    "project_permissions.manage": {"owner": True, "admin": True, "member": False},
+    "project_roles.manage": {"owner": True, "admin": True, "member": False},
+    "project_role_assignments.manage": {"owner": True, "admin": True, "member": False},
     "users.list": {"owner": True, "admin": True, "member": True},
     "users.read": {"owner": True, "admin": True, "member": True},
     "users.create": {"owner": True, "admin": True, "member": False},

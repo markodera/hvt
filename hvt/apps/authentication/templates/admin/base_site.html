@@ -1,0 +1,36 @@
+{% extends "admin/base.html" %}
+{% load i18n static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | HVT Admin{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/hvt-admin.css' %}">
+{% endblock %}
+
+{% block branding %}
+<h1 id="site-name">
+    <a href="{% url 'admin:index' %}" class="hvt-admin-brand__home">
+        <span class="hvt-admin-brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" role="presentation">
+                <defs>
+                    <mask id="hvt-admin-mark-mask">
+                        <rect width="32" height="32" rx="7" fill="white" />
+                        <rect x="8" y="5" width="5" height="22" rx="1.5" fill="black" />
+                        <rect x="19" y="5" width="5" height="22" rx="1.5" fill="black" />
+                        <rect x="8" y="13" width="16" height="7" rx="1" fill="black" />
+                        <rect x="13" y="13" width="6" height="7" fill="white" />
+                    </mask>
+                </defs>
+                <rect width="32" height="32" rx="7" fill="#5b21b6" mask="url(#hvt-admin-mark-mask)" />
+            </svg>
+        </span>
+        <span class="hvt-admin-brand__copy">
+            <strong>HVT</strong>
+            <span>Control Panel</span>
+        </span>
+    </a>
+</h1>
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

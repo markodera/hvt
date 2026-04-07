@@ -30,6 +30,18 @@
             <td style="padding:0 0 6px 0; color:#71717a;">Role</td>
             <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ role_label }}</td>
         </tr>
+        {% if project_name %}
+        <tr>
+            <td style="padding:0 0 6px 0; color:#71717a;">Project</td>
+            <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ project_name }}</td>
+        </tr>
+        {% endif %}
+        {% if app_role_labels %}
+        <tr>
+            <td style="padding:0 0 6px 0; color:#71717a;">App roles</td>
+            <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ app_role_labels|join:", " }}</td>
+        </tr>
+        {% endif %}
         <tr>
             <td style="padding:0 0 6px 0; color:#71717a;">Email</td>
             <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ invitee_email }}</td>

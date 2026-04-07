@@ -23,6 +23,36 @@ urlpatterns = [
         name="project_detail",
     ),
     path(
+        "current/projects/<uuid:project_pk>/permissions/",
+        views.ProjectPermissionListCreateView.as_view(),
+        name="project_permission_list_create",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/permissions/<uuid:pk>/",
+        views.ProjectPermissionDetailView.as_view(),
+        name="project_permission_detail",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/roles/",
+        views.ProjectRoleListCreateView.as_view(),
+        name="project_role_list_create",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/roles/<uuid:pk>/",
+        views.ProjectRoleDetailView.as_view(),
+        name="project_role_detail",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/access/",
+        views.CurrentProjectAccessView.as_view(),
+        name="current_project_access",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/users/<uuid:user_pk>/roles/",
+        views.ProjectUserRoleAssignmentView.as_view(),
+        name="project_user_role_assignment",
+    ),
+    path(
         "current/projects/<uuid:project_pk>/social-providers/",
         views.SocialProviderConfigListCreateView.as_view(),
         name="social_provider_config_list_create",

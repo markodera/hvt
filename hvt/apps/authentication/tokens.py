@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 def _stamp_org_claims(token, user, project=None) -> None:
     """Embed HVT-specific claims into a SimpleJWT token."""
+    from hvt.apps.organizations.access import (
+        get_user_project_permission_slugs,
+        get_user_project_role_slugs,
+    )
+
     org = getattr(user, "organization", None)
     token["org_id"] = str(org.id) if org else None
     token["org_slug"] = org.slug if org else ""
@@ -24,6 +29,10 @@ def _stamp_org_claims(token, user, project=None) -> None:
     token["project_slug"] = project.slug if project else ""
     token["role"] = user.role
     token["email"] = user.email
+    token["app_roles"] = get_user_project_role_slugs(user, project) if project else []
+    token["app_permissions"] = (
+        get_user_project_permission_slugs(user, project) if project else []
+    )
 
 
 def _validate_refresh_context(refresh_token: RefreshToken):

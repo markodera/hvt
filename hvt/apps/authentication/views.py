@@ -10,9 +10,18 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 from drf_spectacular.types import OpenApiTypes
 from dj_rest_auth.app_settings import api_settings as dj_rest_auth_settings
 from dj_rest_auth.jwt_auth import set_jwt_cookies
-from dj_rest_auth.views import LoginView, PasswordResetConfirmView
-from dj_rest_auth.registration.views import RegisterView
-from dj_rest_auth.registration.views import SocialLoginView
+from dj_rest_auth.views import (
+    LoginView,
+    PasswordChangeView,
+    PasswordResetConfirmView,
+    PasswordResetView,
+)
+from dj_rest_auth.registration.views import (
+    RegisterView,
+    ResendEmailVerificationView,
+    SocialLoginView,
+    VerifyEmailView,
+)
 from allauth.account import app_settings as allauth_account_settings
 from allauth.account.utils import complete_signup
 from allauth.socialaccount.models import SocialApp
@@ -36,6 +45,27 @@ from hvt.api.v1.serializers.users import (
     RuntimeRegisterSerializer,
 )
 from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+from hvt.apps.authentication.throttling import (
+    BurstRateThrottle,
+    EmailVerificationIPRateThrottle,
+    LoginEmailRateThrottle,
+    LoginIPRateThrottle,
+    OrganizationRateThrottle,
+    PasswordChangeUserRateThrottle,
+    PasswordResetConfirmIPRateThrottle,
+    PasswordResetEmailRateThrottle,
+    PasswordResetIPRateThrottle,
+    PasswordResetValidateIPRateThrottle,
+    RefreshTokenRateThrottle,
+    RegisterEmailRateThrottle,
+    RegisterIPRateThrottle,
+    ResendVerificationEmailRateThrottle,
+    ResendVerificationIPRateThrottle,
+    RuntimeLoginAPIKeyThrottle,
+    RuntimeRegisterAPIKeyThrottle,
+    RuntimeSocialLoginAPIKeyThrottle,
+    SocialLoginIPRateThrottle,
+)
 from hvt.apps.authentication.tokens import (
     build_hvt_token_pair,
     HVTCookieTokenRefreshSerializer,
@@ -118,6 +148,72 @@ def _provider_authorization_url(provider: str) -> str:
     return ""
 
 
+CONTROL_PLANE_LOGIN_THROTTLES = [
+    BurstRateThrottle,
+    LoginIPRateThrottle,
+    LoginEmailRateThrottle,
+]
+CONTROL_PLANE_REGISTER_THROTTLES = [
+    BurstRateThrottle,
+    RegisterIPRateThrottle,
+    RegisterEmailRateThrottle,
+]
+PASSWORD_RESET_REQUEST_THROTTLES = [
+    BurstRateThrottle,
+    PasswordResetIPRateThrottle,
+    PasswordResetEmailRateThrottle,
+]
+PASSWORD_RESET_CONFIRM_THROTTLES = [
+    BurstRateThrottle,
+    PasswordResetConfirmIPRateThrottle,
+]
+PASSWORD_RESET_VALIDATE_THROTTLES = [
+    BurstRateThrottle,
+    PasswordResetValidateIPRateThrottle,
+]
+PASSWORD_CHANGE_THROTTLES = [
+    BurstRateThrottle,
+    PasswordChangeUserRateThrottle,
+]
+VERIFY_EMAIL_THROTTLES = [
+    BurstRateThrottle,
+    EmailVerificationIPRateThrottle,
+]
+RESEND_EMAIL_THROTTLES = [
+    BurstRateThrottle,
+    ResendVerificationIPRateThrottle,
+    ResendVerificationEmailRateThrottle,
+]
+SOCIAL_LOGIN_THROTTLES = [
+    BurstRateThrottle,
+    SocialLoginIPRateThrottle,
+]
+RUNTIME_LOGIN_THROTTLES = [
+    BurstRateThrottle,
+    OrganizationRateThrottle,
+    RuntimeLoginAPIKeyThrottle,
+    LoginIPRateThrottle,
+    LoginEmailRateThrottle,
+]
+RUNTIME_REGISTER_THROTTLES = [
+    BurstRateThrottle,
+    OrganizationRateThrottle,
+    RuntimeRegisterAPIKeyThrottle,
+    RegisterIPRateThrottle,
+    RegisterEmailRateThrottle,
+]
+RUNTIME_SOCIAL_LOGIN_THROTTLES = [
+    BurstRateThrottle,
+    OrganizationRateThrottle,
+    RuntimeSocialLoginAPIKeyThrottle,
+    SocialLoginIPRateThrottle,
+]
+TOKEN_REFRESH_THROTTLES = [
+    BurstRateThrottle,
+    RefreshTokenRateThrottle,
+]
+
+
 @extend_schema_view(
     get=extend_schema(
         tags=["Auth"],
@@ -148,6 +244,10 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
 
+class HVTLoginView(LoginView):
+    throttle_classes = CONTROL_PLANE_LOGIN_THROTTLES
+
+
 @extend_schema_view(
     post=extend_schema(
         tags=["Auth"],
@@ -162,6 +262,7 @@ class RuntimeLoginView(LoginView):
     """API-key-scoped login flow for customer-facing app users."""
 
     serializer_class = RuntimeLoginSerializer
+    throttle_classes = RUNTIME_LOGIN_THROTTLES
 
     def login(self):
         self.user = self.serializer.validated_data["user"]
@@ -179,6 +280,7 @@ class GoogleLogin(SocialLoginView):
     callback_url = _frontend_callback_url("/auth/google/callback")
     client_class = HVTCompatibilityOAuth2Client
     serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
 class GithubLogin(SocialLoginView):
@@ -186,6 +288,7 @@ class GithubLogin(SocialLoginView):
     callback_url = _frontend_callback_url("/auth/github/callback")
     client_class = HVTCompatibilityOAuth2Client
     serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
 class RuntimeSocialLoginView(SocialLoginView):
@@ -194,6 +297,7 @@ class RuntimeSocialLoginView(SocialLoginView):
     permission_classes = [permissions.AllowAny]
     serializer_class = RuntimeSocialLoginSerializer
     client_class = HVTCompatibilityOAuth2Client
+    throttle_classes = RUNTIME_SOCIAL_LOGIN_THROTTLES
 
     def login(self):
         self.user = self.serializer.validated_data["user"]
@@ -212,9 +316,6 @@ class RuntimeGoogleLogin(RuntimeSocialLoginView):
 
 class RuntimeGithubLogin(RuntimeSocialLoginView):
     adapter_class = GitHubOAuth2Adapter
-
-
-from rest_framework.views import APIView
 
 class ControlPlaneSocialProviderListView(views.APIView):
     """Expose configured control-plane social providers for the HVT dashboard."""
@@ -310,6 +411,7 @@ class HVTTokenRefreshView(TokenRefreshView):
     """JWT refresh view that preserves HVT org/project claim validation."""
 
     serializer_class = HVTCookieTokenRefreshSerializer
+    throttle_classes = TOKEN_REFRESH_THROTTLES
 
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
@@ -322,8 +424,14 @@ class HVTTokenRefreshView(TokenRefreshView):
         return response
 
 
+class HVTPasswordResetView(PasswordResetView):
+    throttle_classes = PASSWORD_RESET_REQUEST_THROTTLES
+
+
 class HVTPasswordResetConfirmView(PasswordResetConfirmView):
     """Accept reset uid/token from the URL as well as the POST body."""
+
+    throttle_classes = PASSWORD_RESET_CONFIRM_THROTTLES
 
     def post(self, request, *args, **kwargs):
         payload = request.data.copy()
@@ -350,6 +458,7 @@ class HVTPasswordResetConfirmView(PasswordResetConfirmView):
 class PasswordResetTokenValidationView(generics.GenericAPIView):
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetTokenValidationSerializer
+    throttle_classes = PASSWORD_RESET_VALIDATE_THROTTLES
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -364,6 +473,7 @@ class HVTRegisterView(RegisterView):
     """Register view with provider-aware error handling for email delivery failures."""
 
     serializer_class = ControlPlaneRegisterSerializer
+    throttle_classes = CONTROL_PLANE_REGISTER_THROTTLES
 
     def perform_create(self, serializer):
         try:
@@ -392,6 +502,18 @@ class HVTRegisterView(RegisterView):
             raise
 
 
+class HVTVerifyEmailView(VerifyEmailView):
+    throttle_classes = VERIFY_EMAIL_THROTTLES
+
+
+class HVTResendEmailVerificationView(ResendEmailVerificationView):
+    throttle_classes = RESEND_EMAIL_THROTTLES
+
+
+class HVTPasswordChangeView(PasswordChangeView):
+    throttle_classes = PASSWORD_CHANGE_THROTTLES
+
+
 @extend_schema_view(
     post=extend_schema(
         tags=["Auth"],
@@ -409,6 +531,7 @@ class HVTRuntimeRegisterView(HVTRegisterView):
     """API-key-scoped runtime register view for customer-facing app users."""
 
     serializer_class = RuntimeRegisterSerializer
+    throttle_classes = RUNTIME_REGISTER_THROTTLES
 
 
 @csrf_exempt

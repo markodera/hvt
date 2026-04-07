@@ -1,9 +1,6 @@
 from django.urls import path, include
 from dj_rest_auth.views import (
-    LoginView,
     LogoutView,
-    PasswordChangeView,
-    PasswordResetView,
     UserDetailsView,
 )
 from . import views
@@ -28,16 +25,16 @@ urlpatterns = [
         views.RuntimeGithubLogin.as_view(),
         name="runtime_github_login",
     ),
-    path("login/", LoginView.as_view(), name="rest_login"),
+    path("login/", views.HVTLoginView.as_view(), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),
     path("user/", UserDetailsView.as_view(), name="rest_user_details"),
-    path("password/reset/", PasswordResetView.as_view(), name="rest_password_reset"),
+    path("password/reset/", views.HVTPasswordResetView.as_view(), name="rest_password_reset"),
     path(
         "password/reset/validate/",
         views.PasswordResetTokenValidationView.as_view(),
         name="rest_password_reset_validate",
     ),
-    path("password/change/", PasswordChangeView.as_view(), name="rest_password_change"),
+    path("password/change/", views.HVTPasswordChangeView.as_view(), name="rest_password_change"),
     # Password reset confirm — single endpoint with tokens in URL (no duplicate)
     path(
         "password/reset/confirm/<str:uidb64>/<str:token>/",
@@ -46,6 +43,16 @@ urlpatterns = [
     ),
     # Registration with email verification
     path("register/", views.HVTRegisterView.as_view(), name="rest_register"),
+    path(
+        "register/verify-email/",
+        views.HVTVerifyEmailView.as_view(),
+        name="rest_verify_email",
+    ),
+    path(
+        "register/resend-email/",
+        views.HVTResendEmailVerificationView.as_view(),
+        name="rest_resend_email",
+    ),
     path("register/", include("dj_rest_auth.registration.urls")),
     # JWT token refresh
     path("token/refresh/", views.HVTTokenRefreshView.as_view(), name="token_refresh"),

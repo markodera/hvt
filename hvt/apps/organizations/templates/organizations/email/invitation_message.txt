@@ -8,6 +8,10 @@ Accept invitation:
 Invitation details:
 - Organization: {{ organization_name }}
 - Role: {{ role_label }}
+{% if project_name %}- Project: {{ project_name }}
+{% endif %}
+{% if app_role_labels %}- App roles: {{ app_role_labels|join:", " }}
+{% endif %}
 - Email: {{ invitee_email }}
 - Expires: {{ expires_at_display }}
 {% if invited_by_email %}- Invited by: {{ invited_by_email }}

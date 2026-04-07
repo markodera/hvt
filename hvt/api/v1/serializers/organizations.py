@@ -7,6 +7,8 @@ from hvt.apps.organizations.models import (
     Organization,
     Project,
     APIKey,
+    ProjectPermission,
+    ProjectRole,
     SocialProviderConfig,
     Webhook,
     WebhookDelivery,
@@ -54,6 +56,131 @@ class ProjectSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "is_default", "created_at", "updated_at"]
+
+
+class ProjectPermissionSerializer(serializers.ModelSerializer):
+    """Serializer for project-scoped app permissions."""
+
+    project = serializers.UUIDField(source="project_id", read_only=True)
+
+    class Meta:
+        model = ProjectPermission
+        fields = [
+            "id",
+            "project",
+            "slug",
+            "name",
+            "description",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "project", "created_at", "updated_at"]
+
+    def validate_slug(self, value):
+        return (value or "").strip().lower()
+
+
+class ProjectRoleSummarySerializer(serializers.ModelSerializer):
+    """Compact serializer for role assignments and access responses."""
+
+    class Meta:
+        model = ProjectRole
+        fields = ["id", "slug", "name"]
+        read_only_fields = fields
+
+
+class ProjectRoleSerializer(serializers.ModelSerializer):
+    """Serializer for project-scoped roles and their attached permissions."""
+
+    project = serializers.UUIDField(source="project_id", read_only=True)
+    permissions = ProjectPermissionSerializer(many=True, read_only=True)
+    permission_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
+
+    class Meta:
+        model = ProjectRole
+        fields = [
+            "id",
+            "project",
+            "slug",
+            "name",
+            "description",
+            "is_default_signup",
+            "permissions",
+            "permission_ids",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "project", "permissions", "created_at", "updated_at"]
+
+    def validate_slug(self, value):
+        return (value or "").strip().lower()
+
+    def _resolve_permissions(self, permission_ids):
+        project = self.context.get("project")
+        if project is None:
+            raise serializers.ValidationError("Project context is required.")
+
+        if permission_ids is None:
+            return None
+
+        permissions = list(
+            ProjectPermission.objects.filter(project=project, id__in=permission_ids)
+        )
+        found_ids = {permission.id for permission in permissions}
+        missing = [str(permission_id) for permission_id in permission_ids if permission_id not in found_ids]
+        if missing:
+            raise serializers.ValidationError(
+                {
+                    "permission_ids": [
+                        "Select valid permissions in the current project."
+                    ]
+                }
+            )
+        return permissions
+
+    def create(self, validated_data):
+        permissions = self._resolve_permissions(validated_data.pop("permission_ids", None))
+        project = self.context.get("project")
+        if project is None:
+            raise serializers.ValidationError("Project context is required.")
+
+        role = ProjectRole.objects.create(project=project, **validated_data)
+        if permissions is not None:
+            role.permissions.set(permissions)
+        return role
+
+    def update(self, instance, validated_data):
+        permissions = self._resolve_permissions(validated_data.pop("permission_ids", None))
+        instance = super().update(instance, validated_data)
+        if permissions is not None:
+            instance.permissions.set(permissions)
+        return instance
+
+
+class ProjectUserRoleAssignmentUpdateSerializer(serializers.Serializer):
+    """Replace a user's role assignments for a single project."""
+
+    role_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        allow_empty=True,
+    )
+
+
+class ProjectUserRoleAccessSerializer(serializers.Serializer):
+    """Read serializer for a user's project access view."""
+
+    user = serializers.UUIDField(read_only=True)
+    project = serializers.UUIDField(read_only=True)
+    roles = ProjectRoleSummarySerializer(many=True, read_only=True)
+    permissions = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+    )
 
 
 class SocialProviderConfigSerializer(serializers.ModelSerializer):
@@ -377,6 +504,29 @@ class OrganizationInvitationCreateSerializer(serializers.ModelSerializer):
 
     accept_url = serializers.SerializerMethodField(read_only=True)
     expires_at = serializers.DateTimeField(required=False)
+    project_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
+    project_name = serializers.CharField(
+        source="project.name",
+        read_only=True,
+        allow_null=True,
+    )
+    project_slug = serializers.CharField(
+        source="project.slug",
+        read_only=True,
+        allow_null=True,
+    )
+    app_role_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
+    app_roles = ProjectRoleSummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = OrganizationInvitation
@@ -384,6 +534,12 @@ class OrganizationInvitationCreateSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "role",
+            "project_id",
+            "project",
+            "project_name",
+            "project_slug",
+            "app_role_ids",
+            "app_roles",
             "expires_at",
             "accept_url",
             "created_at",
@@ -401,6 +557,8 @@ class OrganizationInvitationCreateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         organization = self.context["organization"]
         email = attrs.get("email", "").strip().lower()
+        project_id = attrs.pop("project_id", None)
+        app_role_ids = attrs.pop("app_role_ids", None)
 
         if OrganizationInvitation.objects.filter(
             organization=organization,
@@ -418,12 +576,41 @@ class OrganizationInvitationCreateSerializer(serializers.ModelSerializer):
                 {"email": ["The organization owner does not need an invitation."]}
             )
 
+        project = None
+        if project_id is not None:
+            try:
+                project = Project.objects.get(id=project_id, organization=organization)
+            except Project.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    {"project_id": ["Select a valid project in the current organization."]}
+                ) from exc
+
+        if app_role_ids:
+            if project is None:
+                raise serializers.ValidationError(
+                    {"project_id": ["A project is required when inviting app roles."]}
+                )
+            app_roles = list(ProjectRole.objects.filter(project=project, id__in=app_role_ids))
+            found_ids = {role.id for role in app_roles}
+            if any(role_id not in found_ids for role_id in app_role_ids):
+                raise serializers.ValidationError(
+                    {"app_role_ids": ["Select valid app roles in the selected project."]}
+                )
+            attrs["app_roles"] = app_roles
+        else:
+            attrs["app_roles"] = []
+
+        attrs["project"] = project
         return attrs
 
     def create(self, validated_data):
+        app_roles = validated_data.pop("app_roles", [])
         if "expires_at" not in validated_data:
             validated_data["expires_at"] = timezone.now() + timedelta(days=7)
-        return super().create(validated_data)
+        invitation = super().create(validated_data)
+        if app_roles:
+            invitation.app_roles.set(app_roles)
+        return invitation
 
     @extend_schema_field(serializers.URLField())
     def get_accept_url(self, obj) -> str:
@@ -437,6 +624,18 @@ class OrganizationInvitationSerializer(serializers.ModelSerializer):
     accept_url = serializers.SerializerMethodField(read_only=True)
     invited_by_email = serializers.EmailField(source="invited_by.email", read_only=True)
     accepted_by_email = serializers.EmailField(source="accepted_by.email", read_only=True)
+    project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
+    project_name = serializers.CharField(
+        source="project.name",
+        read_only=True,
+        allow_null=True,
+    )
+    project_slug = serializers.CharField(
+        source="project.slug",
+        read_only=True,
+        allow_null=True,
+    )
+    app_roles = ProjectRoleSummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = OrganizationInvitation
@@ -444,6 +643,10 @@ class OrganizationInvitationSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "role",
+            "project",
+            "project_name",
+            "project_slug",
+            "app_roles",
             "status",
             "accept_url",
             "invited_by_email",
@@ -467,12 +670,28 @@ class OrganizationInvitationPublicSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source="organization.name", read_only=True)
     organization_slug = serializers.CharField(source="organization.slug", read_only=True)
     invited_by_email = serializers.EmailField(source="invited_by.email", read_only=True)
+    project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
+    project_name = serializers.CharField(
+        source="project.name",
+        read_only=True,
+        allow_null=True,
+    )
+    project_slug = serializers.CharField(
+        source="project.slug",
+        read_only=True,
+        allow_null=True,
+    )
+    app_roles = ProjectRoleSummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = OrganizationInvitation
         fields = [
             "email",
             "role",
+            "project",
+            "project_name",
+            "project_slug",
+            "app_roles",
             "status",
             "organization_name",
             "organization_slug",

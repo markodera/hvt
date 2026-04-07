@@ -29,3 +29,20 @@ class IsCurrentOrganizationOwner(permissions.BasePermission):
             and getattr(user, "organization_id", None)
             and user.is_org_owner()
         )
+
+
+class IsCurrentOrganizationAdmin(permissions.BasePermission):
+    """
+    Allow access only to authenticated users who can manage organization users.
+    """
+
+    message = "You must be an organization owner or admin to perform this action."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return bool(
+            user
+            and getattr(user, "is_authenticated", False)
+            and getattr(user, "organization_id", None)
+            and user.can_manage_users()
+        )

@@ -2,11 +2,13 @@ from rest_framework import serializers
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.oauth2.client import OAuth2Error
 from django.core.exceptions import ImproperlyConfigured, MultipleObjectsReturned
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from requests.exceptions import RequestException
 import logging
 import sys
 from hvt.apps.authentication.models import AuditLog
+from hvt.apps.organizations.access import assign_default_signup_roles
 from hvt.apps.users.models import User
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
 from dj_rest_auth.registration.serializers import RegisterSerializer
@@ -23,9 +25,15 @@ def _sync_runtime_user_project(user: User, api_key: APIKey) -> User:
     if not api_key.project_id:
         return user
 
+    # Runtime members are project-bound and get attached to the API-key project.
     if user.project_id is None and user.role == User.Role.MEMBER:
         user.project = api_key.project
         user.save(update_fields=["project"])
+        return user
+
+    # Org-level owners/admins can be scoped into a runtime project at token issue time
+    # without mutating their dashboard membership into a project-scoped record.
+    if user.project_id is None:
         return user
 
     if user.project_id != api_key.project_id:
@@ -33,6 +41,30 @@ def _sync_runtime_user_project(user: User, api_key: APIKey) -> User:
             "These credentials do not belong to the API key project."
         )
 
+    return user
+
+
+def _hydrate_runtime_user_organization(user: User) -> User:
+    """
+    Heal legacy owner rows that own an organization but were never linked back to it.
+
+    This avoids dead-end auth failures for accounts created during earlier onboarding
+    flows where the owner relation existed but user.organization stayed null.
+    """
+    if user.organization_id:
+        return user
+
+    owned_org = user.owned_organization.first()
+    if not owned_org:
+        return user
+
+    user.organization = owned_org
+    if user.role != User.Role.OWNER:
+        user.role = User.Role.OWNER
+        user.save(update_fields=["organization", "role"])
+        return user
+
+    user.save(update_fields=["organization"])
     return user
 
 
@@ -214,6 +246,7 @@ class RuntimeRegisterSerializer(BaseRegisterSerializer):
             user.role = User.Role.MEMBER
             user.project = api_key_project
             user.save(update_fields=["organization", "role", "project"])
+            assign_default_signup_roles(user, api_key_project)
 
         _log_registration_event(request, user, organization=user.organization, project=api_key_project)
         _trigger_registration_webhook(
@@ -259,9 +292,12 @@ class RuntimeLoginSerializer(CustomLoginSerializer):
         if not api_key.has_scope("auth:runtime"):
             raise serializers.ValidationError(self.error_messages["missing_scope"])
 
-        user = attrs["user"]
+        user = _hydrate_runtime_user_organization(attrs["user"])
         if not user.organization_id:
-            raise serializers.ValidationError(self.error_messages["no_org"])
+            raise serializers.ValidationError(
+                "This email does not belong to a runtime user in any organization. "
+                "Register through /api/v1/auth/runtime/register/ with an API key first."
+            )
 
         if user.organization_id != api_key.organization_id:
             raise serializers.ValidationError(self.error_messages["wrong_org"])
@@ -286,6 +322,20 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
         adapter_class = getattr(view, "adapter_class", None)
         provider_id = getattr(adapter_class, "provider_id", "")
         return provider_id or "requested"
+
+    def _is_runtime_social_request(self) -> bool:
+        request = self.context.get("request")
+        return isinstance(getattr(request, "auth", None), APIKey)
+
+    def _unexpected_social_error_message(self, exc: Exception) -> str:
+        if not (settings.DEBUG and self._is_runtime_social_request()):
+            return "Social login failed. Please try again."
+
+        error_type = type(exc).__name__
+        error_text = str(exc).strip()
+        if error_text:
+            return f"Social login failed: {error_type}: {error_text}"
+        return f"Social login failed: {error_type}"
 
     def validate(self, attrs):
         try:
@@ -316,6 +366,19 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
         except RequestException as exc:
             raise serializers.ValidationError(
                 "Social login failed. Please try again."
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "Unexpected social login provider failure",
+                extra={
+                    "provider": self._get_provider_label(),
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "runtime_social_request": self._is_runtime_social_request(),
+                },
+            )
+            raise serializers.ValidationError(
+                self._unexpected_social_error_message(exc)
             ) from exc
 
     def set_callback_url(self, view, adapter_class):

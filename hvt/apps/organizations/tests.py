@@ -15,7 +15,10 @@ from hvt.apps.organizations.models import (
     Organization,
     Project,
     APIKey,
+    ProjectPermission,
+    ProjectRole,
     SocialProviderConfig,
+    UserProjectRole,
     Webhook,
 )
 from hvt.apps.authentication.models import AuditLog
@@ -763,6 +766,215 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
             project=self.default_project,
         ).latest("created_at")
         self.assertIn("name", audit_log.event_data["changes"])
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class ProjectAccessManagementTest(APITestCase):
+    """Project-scoped roles, permissions, and assignment management."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="access-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        self.admin = User.objects.create_user(
+            email="access-admin@example.com",
+            password="password123",
+            role=User.Role.ADMIN,
+        )
+        self.member = User.objects.create_user(
+            email="access-member@example.com",
+            password="password123",
+            role=User.Role.MEMBER,
+        )
+        self.runtime_user = User.objects.create_user(
+            email="runtime-buyer@example.com",
+            password="password123",
+            role=User.Role.MEMBER,
+        )
+        self.org = Organization.objects.create(
+            name="Access Org",
+            slug="access-org",
+            owner=self.owner,
+            allow_signup=True,
+        )
+        for user in (self.owner, self.admin, self.member, self.runtime_user):
+            user.organization = self.org
+            user.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+
+    def test_admin_can_create_project_permission(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            reverse(
+                "project_permission_list_create",
+                kwargs={"project_pk": self.default_project.id},
+            ),
+            {
+                "slug": "orders.read.own",
+                "name": "Read Own Orders",
+                "description": "Allow a buyer to read only their own orders.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            ProjectPermission.objects.filter(
+                project=self.default_project,
+                slug="orders.read.own",
+            ).exists()
+        )
+
+    def test_admin_can_create_role_with_permissions(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            reverse(
+                "project_role_list_create",
+                kwargs={"project_pk": self.default_project.id},
+            ),
+            {
+                "slug": "buyer",
+                "name": "Buyer",
+                "is_default_signup": True,
+                "permission_ids": [str(permission.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        role = ProjectRole.objects.get(project=self.default_project, slug="buyer")
+        self.assertEqual(list(role.permissions.values_list("slug", flat=True)), ["orders.read.own"])
+
+    def test_member_cannot_manage_project_roles(self):
+        self.client.force_authenticate(user=self.member)
+
+        response = self.client.post(
+            reverse(
+                "project_role_list_create",
+                kwargs={"project_pk": self.default_project.id},
+            ),
+            {
+                "slug": "buyer",
+                "name": "Buyer",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_can_replace_user_project_roles(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.put(
+            reverse(
+                "project_user_role_assignment",
+                kwargs={
+                    "project_pk": self.default_project.id,
+                    "user_pk": self.runtime_user.id,
+                },
+            ),
+            {"role_ids": [str(role.id)]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["permissions"], ["orders.read.own"])
+        self.assertEqual(
+            response.data["roles"][0]["slug"],
+            "buyer",
+        )
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=self.runtime_user, role=role).exists()
+        )
+
+    def test_current_project_access_returns_effective_permissions(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        UserProjectRole.objects.create(user=self.member, role=role, assigned_by=self.owner)
+        self.client.force_authenticate(user=self.member)
+
+        response = self.client.get(
+            reverse(
+                "current_project_access",
+                kwargs={"project_pk": self.default_project.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["permissions"], ["orders.read.own"])
+        self.assertEqual(response.data["roles"][0]["slug"], "buyer")
+
+    def test_role_delete_is_blocked_when_assigned(self):
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        UserProjectRole.objects.create(user=self.runtime_user, role=role, assigned_by=self.owner)
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.delete(
+            reverse(
+                "project_role_detail",
+                kwargs={"project_pk": self.default_project.id, "pk": role.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(ProjectRole.objects.filter(id=role.id).exists())
+
+    def test_permission_delete_is_blocked_when_linked_to_role(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.delete(
+            reverse(
+                "project_permission_detail",
+                kwargs={"project_pk": self.default_project.id, "pk": permission.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(ProjectPermission.objects.filter(id=permission.id).exists())
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
