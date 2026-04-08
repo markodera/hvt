@@ -39,6 +39,7 @@ def _validate_refresh_context(refresh_token: RefreshToken):
     """Load and validate the current user context for a refresh token."""
     from hvt.apps.users.models import User
     from hvt.apps.organizations.models import Project
+    from hvt.apps.organizations.access import user_has_project_access
 
     user_id = refresh_token.get("user_id")
     token_org_id = refresh_token.get("org_id")
@@ -80,7 +81,7 @@ def _validate_refresh_context(refresh_token: RefreshToken):
             "Token project does not belong to the current user organization."
         )
 
-    if user.project_id and str(user.project_id) != str(project.id):
+    if not user_has_project_access(user, project):
         raise exceptions.AuthenticationFailed(
             "Token project does not match the current user project."
         )
@@ -182,6 +183,7 @@ class _OrgClaimVerificationMixin:
 
     def get_user(self, validated_token):
         from hvt.apps.organizations.models import Project
+        from hvt.apps.organizations.access import user_has_project_access
 
         user = super().get_user(validated_token)
         token_org_id = validated_token.get("org_id")
@@ -210,7 +212,7 @@ class _OrgClaimVerificationMixin:
                     "Token project does not belong to the current user organization."
                 )
 
-            if user.project_id and str(user.project_id) != str(project.id):
+            if not user_has_project_access(user, project):
                 raise InvalidToken("Token project does not match the current user project.")
 
         return user

@@ -52,6 +52,27 @@ def get_user_project_access(user, project) -> dict:
     }
 
 
+def user_has_project_access(user, project) -> bool:
+    """Return whether the user can access the given project within the same org."""
+    if not user or not project:
+        return False
+
+    if getattr(user, "organization_id", None) != getattr(project, "organization_id", None):
+        return False
+
+    # Org owners/admins can access all projects in their org.
+    if getattr(user, "role", None) in {"owner", "admin"}:
+        return True
+
+    if getattr(user, "project_id", None) == getattr(project, "id", None):
+        return True
+
+    return UserProjectRole.objects.filter(
+        user=user,
+        role__project=project,
+    ).exists()
+
+
 def assign_default_signup_roles(user, project, assigned_by=None) -> list[str]:
     """Attach all default signup roles for the project to the user."""
     if not user or not project:

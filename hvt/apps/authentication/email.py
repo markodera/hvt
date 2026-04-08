@@ -21,14 +21,32 @@ def _resolve_sender_identity() -> tuple[str, str]:
 
 def build_email_context(context: Optional[dict] = None) -> dict:
     sender_name, sender_email = _resolve_sender_identity()
+
+    project_name = (context or {}).get("project_name")
+    if isinstance(project_name, str):
+        project_name = project_name.strip() or None
+
+    brand_name = sender_name or "HVT"
+    from_display_name = sender_name or "HVT"
+
+    if project_name:
+        brand_name = f"{brand_name} on behalf of {project_name}"
+        from_display_name = f"{from_display_name} on behalf of {project_name}"
+
+    product_name = project_name or "HVT"
+    account_name = f"{project_name} account" if project_name else "HVT account"
+
     base_context = {
-        "brand_name": sender_name or "HVT",
+        "brand_name": brand_name,
         "brand_domain": "hvts.app",
+        "project_name": project_name,
+        "product_name": product_name,
+        "account_name": account_name,
         "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
         "docs_url": getattr(settings, "DOCS_URL", "https://docs.hvts.app"),
         "support_email": sender_email,
         "from_email": sender_email,
-        "from_display_name": sender_name,
+        "from_display_name": from_display_name,
         "current_year": timezone.now().year,
     }
     if context:

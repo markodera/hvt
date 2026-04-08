@@ -273,10 +273,6 @@ class UserProjectRole(models.Model):
                 raise ValidationError(
                     "Users can only be assigned project roles within their organization."
                 )
-            if self.user.project_id and self.user.project_id != self.role.project_id:
-                raise ValidationError(
-                    "Project-scoped users can only receive roles in their bound project."
-                )
         if (
             self.assigned_by_id
             and self.role_id
@@ -441,6 +437,7 @@ class APIKey(models.Model):
     # Status
     is_active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
+    expired_webhook_sent_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
 
     # Timestamp
@@ -490,9 +487,23 @@ class APIKey(models.Model):
         """Check if the key is active and not expired."""
         if not self.is_active:
             return False
-        if self.expires_at and timezone.now() > self.expires_at:
+        if self.is_expired:
             return False
         return True
+
+    @property
+    def is_expired(self) -> bool:
+        """Return True once the expiry instant has been reached."""
+        return bool(self.expires_at and timezone.now() >= self.expires_at)
+
+    @property
+    def status(self) -> str:
+        """Return the dashboard/API lifecycle state for this key."""
+        if not self.is_active:
+            return "revoked"
+        if self.is_expired:
+            return "expired"
+        return "active"
 
     @property
     def is_test(self):
@@ -650,8 +661,20 @@ class Webhook(models.Model):
         USER_UPDATED = "user.updated", "User Updated"
         USER_DELETED = "user.deleted", "User Deleted"
         USER_LOGIN = "user.login", "User Login"
+        USER_ROLE_CHANGED = "user.role.changed", "User Role Changed"
         API_KEY_CREATED = "api_key.created", "API Key Created"
+        API_KEY_EXPIRED = "api_key.expired", "API Key Expired"
         API_KEY_REVOKED = "api_key.revoked", "API Key Revoked"
+        ORG_INVITATION_CREATED = "org.invitation.created", "Organization Invitation Created"
+        ORG_INVITATION_ACCEPTED = "org.invitation.accepted", "Organization Invitation Accepted"
+        ORG_INVITATION_REVOKED = "org.invitation.revoked", "Organization Invitation Revoked"
+        ORG_INVITATION_RESENT = "org.invitation.resent", "Organization Invitation Resent"
+        PROJECT_CREATED = "project.created", "Project Created"
+        PROJECT_UPDATED = "project.updated", "Project Updated"
+        PROJECT_DELETED = "project.deleted", "Project Deleted"
+        PROJECT_SOCIAL_PROVIDER_CREATED = "project.social_provider.created", "Project Social Provider Created"
+        PROJECT_SOCIAL_PROVIDER_UPDATED = "project.social_provider.updated", "Project Social Provider Updated"
+        PROJECT_SOCIAL_PROVIDER_DELETED = "project.social_provider.deleted", "Project Social Provider Deleted"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(

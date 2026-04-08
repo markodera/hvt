@@ -61,16 +61,36 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             context: Context dictionary for the email template
         """
         try:
-            email_context = build_email_context({"email": email, **context})
+            # Extract App/Project name if this is a runtime auth flow
+            project_name = None
+            request = context.get('request')
+            if request:
+                api_key = getattr(request, 'auth', None)
+                if api_key and hasattr(api_key, 'project') and api_key.project:
+                    project_name = api_key.project.name
+
+            email_context = build_email_context({
+                "email": email, 
+                "project_name": project_name, 
+                **context
+            })
+            
             subject, text_body, html_body = render_email_template(
                 template_prefix,
                 email_context,
             )
+            
+            # Format the sender identity like "HVT Auth on behalf of AppName <noreply@...>"
+            from_name = email_context.get("from_display_name") or "HVT"
+            from_address = email_context.get("from_email") or "noreply@notify.hvts.app"
+            from_header = f"{from_name} <{from_address}>"
+
             self.email_service.send(
                 to=email,
                 subject=subject,
                 html=html_body,
                 text=text_body,
+                from_email=from_header,
             )
             logger.info(
                 "Account email queued via Resend",
@@ -138,15 +158,15 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         user = super().populate_user(request, sociallogin, data)
 
         # Set email
-        user.email = data.get("email", "")
+        user.email = data.get("email") or ""
 
         # Set name fields from provider data
-        user.first_name = data.get("first_name", "")
-        user.last_name = data.get("last_name", "")
+        user.first_name = data.get("first_name") or ""
+        user.last_name = data.get("last_name") or ""
 
         # If provider gives full name but not first/last split it
         if not user.first_name and not user.last_name:
-            full_name = data.get("name", "")
+            full_name = data.get("name") or ""
             if full_name:
                 parts = full_name.split(" ", 1)
                 user.first_name = parts[0]
@@ -212,6 +232,10 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
     def save_user(self, request, sociallogin, form=None):
         user = super().save_user(request, sociallogin, form)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"DEBUG SAVE_USER request type: {type(request)}")
+        logger.error(f"DEBUG SAVE_USER request.auth: {getattr(request, 'auth', 'MISSING')}")
         api_key = getattr(request, "auth", None)
         update_fields = []
         if isinstance(api_key, APIKey):

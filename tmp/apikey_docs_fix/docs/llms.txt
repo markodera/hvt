@@ -1,0 +1,32 @@
+# HVT Documentation
+
+Official documentation for HVT, the auth and access platform behind hvts.app.
+
+Primary docs site: https://docs.hvts.app/
+Primary app: https://hvts.app/
+OpenAPI schema: https://docs.hvts.app/schema.yaml
+Sitemap: https://docs.hvts.app/sitemap.xml
+
+## Start here
+- https://docs.hvts.app/introduction
+- https://docs.hvts.app/quickstart
+- https://docs.hvts.app/concepts
+
+## Guides
+- https://docs.hvts.app/guides/projects
+- https://docs.hvts.app/guides/auth
+- https://docs.hvts.app/guides/runtime-roles
+- https://docs.hvts.app/guides/sdk
+- https://docs.hvts.app/guides/webhooks
+- https://docs.hvts.app/guides/audit-logs
+
+## Reference
+- https://docs.hvts.app/api
+- https://docs.hvts.app/sdk/hvtclient
+- https://docs.hvts.app/sdk/auth
+- https://docs.hvts.app/sdk/errors
+
+## Notes
+- HVT separates platform administration, control-plane organization roles, and project-scoped app roles.
+- Runtime access should be enforced by permission slug plus record scope, not by role name alone.
+- Runtime sign-up uses `/api/v1/auth/runtime/register/`; control-plane sign-up uses `/api/v1/auth/register/`.

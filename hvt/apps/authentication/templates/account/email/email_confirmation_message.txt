@@ -1,6 +1,10 @@
-VERIFY YOUR EMAIL FOR HVT
+VERIFY YOUR EMAIL FOR {{ product_name }}
 
+{% if project_name %}
+Confirm this address to finish creating your {{ account_name }} and continue signing in to {{ project_name }}.
+{% else %}
 Confirm this address to finish creating your HVT account and continue into organization setup, projects, API keys, runtime auth, audit logs, and webhooks.
+{% endif %}
 
 {% if code %}
 Verification code:
@@ -13,9 +17,15 @@ Verify email:
 {% endif %}
 
 What happens next:
+{% if project_name %}
+- Your {{ account_name }} becomes active
+- You can continue signing in to {{ project_name }}
+- HVT securely handles identity on behalf of {{ project_name }}
+{% else %}
 - Your HVT account becomes active
 - You can create or join an organization
 - You can start configuring projects, keys, and sign-in flows
+{% endif %}
 
 If you did not create this account, you can safely ignore this email.
 

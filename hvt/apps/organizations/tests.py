@@ -10,6 +10,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient, APIRequestFactory
 from rest_framework import status
 from rest_framework_simplejwt.tokens import AccessToken
+from unittest.mock import patch
 
 from hvt.apps.organizations.models import (
     Organization,
@@ -652,6 +653,42 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("unsupported api key scopes", str(response.data).lower())
 
+    def test_api_key_creation_rejects_past_expiry(self):
+        response = self.client.post(
+            reverse("apikey_list_create"),
+            {
+                "name": "Expired On Arrival",
+                "scopes": ["api_keys:read"],
+                "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("expires_at", response.data["detail"])
+
+    def test_api_key_list_marks_expired_key_as_expired(self):
+        prefix, _, hashed_key = APIKey.generate_key(environment="test")
+        expired_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Expired Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["api_keys:read"],
+            expires_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        response = self.client.get(reverse("apikey_list_create"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        listed_key = next(item for item in response.data["results"] if item["id"] == str(expired_key.id))
+        self.assertEqual(listed_key["status"], "expired")
+        self.assertTrue(listed_key["is_expired"])
+        self.assertFalse(listed_key["is_valid"])
+
     def test_api_key_scope_is_enforced_for_users_read(self):
         prefix, full_key, hashed_key = APIKey.generate_key(environment="test")
         APIKey.objects.create(
@@ -766,6 +803,33 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
             project=self.default_project,
         ).latest("created_at")
         self.assertIn("name", audit_log.event_data["changes"])
+
+    @patch("hvt.apps.organizations.views.trigger_webhook_event")
+    def test_project_lifecycle_triggers_webhooks(self, mock_trigger):
+        create_response = self.client.post(
+            reverse("project_list_create"),
+            {"name": "Storefront Prod", "slug": "storefront-prod", "allow_signup": True},
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        project_id = create_response.data["id"]
+
+        update_response = self.client.patch(
+            reverse("project_detail", kwargs={"pk": project_id}),
+            {"name": "Storefront Production"},
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+
+        delete_response = self.client.delete(
+            reverse("project_detail", kwargs={"pk": project_id}),
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        called_events = [call.kwargs["event_type"] for call in mock_trigger.call_args_list]
+        self.assertIn("project.created", called_events)
+        self.assertIn("project.updated", called_events)
+        self.assertIn("project.deleted", called_events)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
@@ -1092,3 +1156,45 @@ class ProjectSocialProviderConfigTest(APITestCase):
         ).latest("created_at")
         self.assertEqual(audit_log.event_data["provider"], "google")
         self.assertIn("client_id", audit_log.event_data["changes"])
+
+    @patch("hvt.apps.organizations.views.trigger_webhook_event")
+    def test_social_provider_lifecycle_triggers_webhooks(self, mock_trigger):
+        create_response = self.client.post(
+            reverse(
+                "social_provider_config_list_create",
+                kwargs={"project_pk": self.default_project.id},
+            ),
+            {
+                "provider": "google",
+                "client_id": "google-client-id",
+                "client_secret": "google-secret-value",
+                "redirect_uris": ["http://localhost:3000/auth/google/callback"],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        config_id = create_response.data["id"]
+
+        update_response = self.client.patch(
+            reverse(
+                "social_provider_config_detail",
+                kwargs={"project_pk": self.default_project.id, "pk": config_id},
+            ),
+            {"client_id": "updated-client-id"},
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+
+        delete_response = self.client.delete(
+            reverse(
+                "social_provider_config_detail",
+                kwargs={"project_pk": self.default_project.id, "pk": config_id},
+            )
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        called_events = [call.kwargs["event_type"] for call in mock_trigger.call_args_list]
+        self.assertIn("project.social_provider.created", called_events)
+        self.assertIn("project.social_provider.updated", called_events)
+        self.assertIn("project.social_provider.deleted", called_events)

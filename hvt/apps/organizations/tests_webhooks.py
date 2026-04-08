@@ -7,8 +7,11 @@ import hashlib
 import hmac
 import json
 import uuid
+from datetime import timedelta
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase, APIClient
@@ -20,6 +23,7 @@ from hvt.apps.organizations.models import (
     Webhook,
     WebhookDelivery,
 )
+from hvt.apps.organizations.api_key_expiry import emit_api_key_expiry_webhook
 from hvt.apps.organizations.webhooks import (
     generate_webhook_signature,
     send_webhook,
@@ -338,6 +342,53 @@ class TriggerWebhookEventTest(TestCase):
         mock_send.assert_called_once()
 
 
+class APIKeyExpiryWebhookTest(TestCase):
+    """Tests for emitting api_key.expired exactly once."""
+
+    def setUp(self):
+        self.org, self.owner = _create_org_and_owner()
+        self.project = self.org.ensure_default_project()
+        prefix, self.full_key, hashed_key = APIKey.generate_key(environment="test")
+        self.api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Expired runtime key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+            expires_at=timezone.now() - timedelta(minutes=5),
+        )
+
+    @patch("hvt.apps.organizations.api_key_expiry.trigger_webhook_event")
+    def test_emit_api_key_expired_webhook_only_once(self, mock_trigger):
+        emitted = emit_api_key_expiry_webhook(self.api_key)
+
+        self.assertTrue(emitted)
+        self.api_key.refresh_from_db()
+        self.assertIsNotNone(self.api_key.expired_webhook_sent_at)
+        mock_trigger.assert_called_once()
+        self.assertEqual(
+            mock_trigger.call_args.kwargs["event_type"],
+            Webhook.EventType.API_KEY_EXPIRED,
+        )
+
+        mock_trigger.reset_mock()
+        emitted_again = emit_api_key_expiry_webhook(self.api_key)
+        self.assertFalse(emitted_again)
+        mock_trigger.assert_not_called()
+
+    @patch("hvt.apps.organizations.management.commands.emit_api_key_expiry_webhooks.emit_api_key_expiry_webhook")
+    def test_emit_api_key_expiry_webhooks_command_processes_matching_keys(self, mock_emit):
+        out = StringIO()
+
+        call_command("emit_api_key_expiry_webhooks", stdout=out)
+
+        self.assertIn("Found 1 expired API key", out.getvalue())
+        mock_emit.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Login Signal Tests
 # ---------------------------------------------------------------------------
@@ -411,6 +462,20 @@ class WebhookAPITest(APITestCase):
         resp = self.client.post(self.base_url, data, format="json")
         self.assertEqual(resp.status_code, http_status.HTTP_201_CREATED)
         self.assertTrue(len(resp.data["secret"]) > 0)
+
+    def test_create_webhook_accepts_expanded_event_catalogue(self):
+        data = {
+            "url": "https://example.com/hook",
+            "events": [
+                "project.updated",
+                "org.invitation.created",
+                "api_key.expired",
+                "user.role.changed",
+            ],
+        }
+        resp = self.client.post(self.base_url, data, format="json")
+        self.assertEqual(resp.status_code, http_status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["events"], data["events"])
 
     def test_list_webhooks_returns_created(self):
         _create_webhook(self.org, self.owner)

@@ -16,6 +16,8 @@ single error shape regardless of which endpoint they call.
 
 from __future__ import annotations
 
+import math
+
 from rest_framework.views import exception_handler as drf_exception_handler
 from rest_framework.exceptions import (
     APIException,
@@ -85,9 +87,12 @@ def hvt_exception_handler(exc: Exception, context: dict) -> Response | None:
 
     # For throttled responses, include retry-after info if available
     if isinstance(exc, Throttled) and exc.wait is not None:
+        retry_after_seconds = max(1, int(math.ceil(exc.wait)))
+        retry_after_human = _format_retry_after(retry_after_seconds)
         detail = {
-            "message": detail if isinstance(detail, str) else str(detail),
-            "retry_after_seconds": int(exc.wait),
+            "message": f"Too many requests. Try again in {retry_after_human}.",
+            "retry_after_seconds": retry_after_seconds,
+            "retry_after_human": retry_after_human,
         }
 
     response.data = {
@@ -129,3 +134,26 @@ def _normalise_detail(data):
         return data
 
     return data
+
+
+def _format_retry_after(seconds: int) -> str:
+    """Return a compact human-readable retry window for throttled responses."""
+    remaining = max(1, int(seconds))
+    units = [
+        (86400, "day"),
+        (3600, "hour"),
+        (60, "minute"),
+        (1, "second"),
+    ]
+
+    parts = []
+    for unit_seconds, unit_name in units:
+        count, remaining = divmod(remaining, unit_seconds)
+        if not count:
+            continue
+        label = unit_name if count == 1 else f"{unit_name}s"
+        parts.append(f"{count} {label}")
+        if len(parts) == 2:
+            break
+
+    return " ".join(parts) if parts else "1 second"

@@ -8,9 +8,9 @@ from requests.exceptions import RequestException
 import logging
 import sys
 from hvt.apps.authentication.models import AuditLog
-from hvt.apps.organizations.access import assign_default_signup_roles
+from hvt.apps.organizations.access import assign_default_signup_roles, user_has_project_access
 from hvt.apps.users.models import User
-from hvt.apps.organizations.models import APIKey, SocialProviderConfig
+from hvt.apps.organizations.models import APIKey, SocialProviderConfig, UserProjectRole
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.registration.serializers import SocialLoginSerializer
 from dj_rest_auth.serializers import LoginSerializer
@@ -25,18 +25,19 @@ def _sync_runtime_user_project(user: User, api_key: APIKey) -> User:
     if not api_key.project_id:
         return user
 
-    # Runtime members are project-bound and get attached to the API-key project.
-    if user.project_id is None and user.role == User.Role.MEMBER:
-        user.project = api_key.project
-        user.save(update_fields=["project"])
-        return user
+    # Backward compatibility for legacy member rows created before project access
+    # became role-driven: bind first-time runtime login to the API-key project.
+    if user.role == User.Role.MEMBER and user.project_id is None:
+        has_role_assignments = UserProjectRole.objects.filter(
+            user=user,
+            role__project__organization_id=api_key.organization_id,
+        ).exists()
+        if not has_role_assignments:
+            user.project = api_key.project
+            user.save(update_fields=["project"])
+            return user
 
-    # Org-level owners/admins can be scoped into a runtime project at token issue time
-    # without mutating their dashboard membership into a project-scoped record.
-    if user.project_id is None:
-        return user
-
-    if user.project_id != api_key.project_id:
+    if not user_has_project_access(user, api_key.project):
         raise serializers.ValidationError(
             "These credentials do not belong to the API key project."
         )
@@ -430,6 +431,23 @@ class RuntimeSocialLoginSerializer(CustomSocialLoginSerializer):
 
         attrs = super().validate(attrs)
         user = attrs["user"]
+
+        # If dj-rest-auth and allauth caching returns a stale user instance that doesn't reflect 
+        # the save_user modifications, safely refresh it from the database.
+        if user.pk and not user.organization_id:
+            user.refresh_from_db()
+
+        # Failsafe: if allauth stripped the DRF request down to a plain HttpRequest deep in its stack,
+        # the CustomSocialAccountAdapter.save_user would have failed to pull request.auth to assign
+        # the organization natively. If the user was just created and still lacks an org, we assign it here.
+        if not user.organization_id and user.pk:
+            user.organization = api_key.organization
+            user.project = api_key.project
+            user.role = user.Role.MEMBER
+            user.save(update_fields=["organization", "project", "role"])
+
+        # Heal API-bound users that originated from the dashboard without an organization link
+        user = _hydrate_runtime_user_organization(user)
 
         if not user.organization_id:
             raise serializers.ValidationError(self.error_messages["no_org"])

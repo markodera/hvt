@@ -303,6 +303,11 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "key", "created_at"]
 
+    def validate_expires_at(self, value):
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError("Expiration must be in the future.")
+        return value
+
     def validate_scopes(self, value):
         normalized = []
         for scope in value or []:
@@ -375,6 +380,9 @@ class APIKeyListSerializer(serializers.ModelSerializer):
     environment_display = serializers.CharField(
         source="get_environment_display", read_only=True
     )
+    status = serializers.CharField(read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
+    is_valid = serializers.BooleanField(read_only=True)
     project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
     project_name = serializers.CharField(
         source="project.name",
@@ -400,6 +408,9 @@ class APIKeyListSerializer(serializers.ModelSerializer):
             "project_slug",
             "scopes",
             "is_active",
+            "status",
+            "is_expired",
+            "is_valid",
             "expires_at",
             "last_used_at",
             "created_at",
@@ -449,6 +460,22 @@ class WebhookSerializer(serializers.ModelSerializer):
             "failure_count",
             "consecutive_failures",
         ]
+
+    def validate_events(self, value):
+        normalized = []
+        for event_name in value or []:
+            cleaned = str(event_name).strip()
+            if cleaned and cleaned not in normalized:
+                normalized.append(cleaned)
+
+        allowed_events = set(Webhook.EventType.values)
+        invalid_events = [event_name for event_name in normalized if event_name not in allowed_events]
+        if invalid_events:
+            raise serializers.ValidationError(
+                f"Unsupported webhook events: {', '.join(invalid_events)}."
+            )
+
+        return normalized
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

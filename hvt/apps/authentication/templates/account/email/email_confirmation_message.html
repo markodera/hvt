@@ -1,7 +1,7 @@
 {% extends "emails/base_email.html" %}
 
-{% block title %}Verify your email for HVT{% endblock %}
-{% block preview %}Confirm your email to activate your HVT account and continue setup.{% endblock %}
+{% block title %}Verify your email for {{ product_name }}{% endblock %}
+{% block preview %}Confirm your email to activate your {{ account_name }} and continue setup.{% endblock %}
 {% block eyebrow %}
 <div style="display:inline-block; margin:0 0 14px 0; padding:6px 10px; border-radius:999px; border:1px solid #3f3f46; background:#18181b; color:#c4b5fd; font-family:Inter, Arial, sans-serif; font-size:11px; line-height:1; font-weight:600; letter-spacing:0.12em; text-transform:uppercase;">
     Account verification
@@ -9,7 +9,11 @@
 {% endblock %}
 {% block heading %}Verify your email{% endblock %}
 {% block body %}
+{% if project_name %}
+<p style="margin:0 0 16px 0;">Confirm this address to finish creating your {{ account_name }} and continue signing in to {{ project_name }}.</p>
+{% else %}
 <p style="margin:0 0 16px 0;">Confirm this address to finish creating your HVT account and unlock organization setup, projects, API keys, runtime auth, audit logs, and webhooks.</p>
+{% endif %}
 
 {% if code %}
 <div style="margin:0 0 18px 0; padding:18px; border-radius:16px; border:1px solid #27272a; background:#18181b;">
@@ -30,9 +34,15 @@
 <div style="margin:0 0 18px 0; padding:16px; border-radius:16px; border:1px solid #27272a; background:#111111;">
     <div style="margin:0 0 8px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">What happens next</div>
     <ul style="margin:0; padding-left:18px; color:#d4d4d8;">
+        {% if project_name %}
+        <li style="margin:0 0 6px 0;">Your {{ account_name }} becomes active.</li>
+        <li style="margin:0 0 6px 0;">You can continue signing in to {{ project_name }}.</li>
+        <li style="margin:0;">HVT securely handles identity on behalf of {{ project_name }}.</li>
+        {% else %}
         <li style="margin:0 0 6px 0;">Your HVT account becomes active.</li>
         <li style="margin:0 0 6px 0;">You can create or join an organization.</li>
         <li style="margin:0;">You can start configuring projects, keys, and sign-in flows.</li>
+        {% endif %}
     </ul>
 </div>
 

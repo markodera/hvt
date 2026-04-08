@@ -89,6 +89,41 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertIn("/invite?token=", response.data["accept_url"])
         mock_send_invitation_email.assert_called_once()
 
+    @patch("hvt.apps.organizations.views.trigger_webhook_event")
+    @patch("hvt.apps.organizations.views._send_invitation_email", return_value=True)
+    def test_invitation_lifecycle_triggers_owner_webhooks(
+        self,
+        mock_send_invitation_email,
+        mock_trigger_webhook_event,
+    ):
+        self.client.force_authenticate(user=self.owner)
+
+        create_response = self.client.post(
+            reverse("organization_invitation_list_create"),
+            {
+                "email": "notify-invitee@example.com",
+                "role": "member",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        invitation = OrganizationInvitation.objects.get(email="notify-invitee@example.com")
+
+        resend_response = self.client.post(
+            reverse("organization_invitation_resend", kwargs={"pk": invitation.id}),
+        )
+        self.assertEqual(resend_response.status_code, status.HTTP_200_OK)
+
+        revoke_response = self.client.delete(
+            reverse("organization_invitation_revoke", kwargs={"pk": invitation.id}),
+        )
+        self.assertEqual(revoke_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        called_events = [call.kwargs["event_type"] for call in mock_trigger_webhook_event.call_args_list]
+        self.assertIn("org.invitation.created", called_events)
+        self.assertIn("org.invitation.resent", called_events)
+        self.assertIn("org.invitation.revoked", called_events)
+
     @patch("hvt.apps.organizations.views._send_invitation_email", return_value=True)
     def test_owner_can_create_invitation_with_project_app_roles(self, mock_send_invitation_email):
         permission = ProjectPermission.objects.create(
@@ -348,6 +383,31 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertEqual(invitation.accepted_by, invitee)
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(response.data["status"], "accepted")
+
+    @patch("hvt.apps.organizations.views.trigger_webhook_event")
+    def test_accept_invitation_triggers_webhook(self, mock_trigger_webhook_event):
+        invitee = User.objects.create_user(
+            email="accept-webhook@example.com",
+            password="password123",
+        )
+        invitation = OrganizationInvitation.objects.create(
+            organization=self.org,
+            email=invitee.email,
+            role=OrganizationInvitation.Role.MEMBER,
+            invited_by=self.owner,
+            expires_at=self.invitation_expiry,
+        )
+
+        self.client.force_authenticate(user=invitee)
+        response = self.client.post(
+            reverse("organization_invitation_accept"),
+            {"token": invitation.token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        called_events = [call.kwargs["event_type"] for call in mock_trigger_webhook_event.call_args_list]
+        self.assertIn("org.invitation.accepted", called_events)
 
     def test_accept_invitation_assigns_project_and_app_roles(self):
         permission = ProjectPermission.objects.create(

@@ -3,7 +3,12 @@ from django.test import TestCase
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.test.utils import override_settings
 
-from hvt.apps.authentication.email import ResendEmailBackend, ResendEmailService
+from hvt.apps.authentication.email import (
+    ResendEmailBackend,
+    ResendEmailService,
+    build_email_context,
+    render_email_template,
+)
 
 
 class ResendEmailBackendTest(TestCase):
@@ -143,3 +148,54 @@ class ResendEmailBackendTest(TestCase):
 
         call_args = mock_send.call_args[0][0]
         self.assertEqual(call_args["from_"], "fallback@example.com")
+
+    def test_build_email_context_runtime_project_sets_app_fields(self):
+        """Runtime project name should drive user-facing app text in templates."""
+        context = build_email_context({"project_name": "Acme Store"})
+
+        self.assertEqual(context["project_name"], "Acme Store")
+        self.assertEqual(context["product_name"], "Acme Store")
+        self.assertEqual(context["account_name"], "Acme Store account")
+        self.assertIn("on behalf of Acme Store", context["brand_name"])
+
+    def test_render_email_template_uses_project_name_in_subject(self):
+        """Verification subject should use project name during runtime auth flows."""
+        subject, text_body, _ = render_email_template(
+            "account/email/email_confirmation",
+            {"project_name": "Acme Store"},
+        )
+
+        self.assertEqual(subject, "Verify your email for Acme Store")
+        self.assertIn("Acme Store account", text_body)
+
+    def test_password_reset_template_uses_project_name_when_available(self):
+        """Password reset copy should use runtime app name when project context exists."""
+        subject, text_body, _ = render_email_template(
+            "account/email/password_reset_key",
+            {
+                "project_name": "Acme Store",
+                "password_reset_url": "https://app.example/reset/token",
+            },
+        )
+
+        self.assertEqual(subject, "Reset your Acme Store password")
+        self.assertIn("Acme Store account", text_body)
+
+    def test_invitation_template_uses_project_name_when_available(self):
+        """Invitation copy should highlight project/app context when provided."""
+        subject, text_body, _ = render_email_template(
+            "organizations/email/invitation",
+            {
+                "organization_name": "Acme Org",
+                "role_label": "Member",
+                "project_name": "Acme Store",
+                "accept_url": "https://app.example/invite?token=abc",
+                "invitee_email": "dev@example.com",
+                "expires_at_display": "April 08, 2026 at 12:00 UTC",
+                "app_role_labels": ["buyer"],
+                "invited_by_email": "owner@example.com",
+            },
+        )
+
+        self.assertEqual(subject, "You're invited to join Acme Org for Acme Store")
+        self.assertIn("for Acme Store as a Member", text_body)

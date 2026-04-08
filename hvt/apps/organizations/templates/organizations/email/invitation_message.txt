@@ -1,6 +1,14 @@
+{% if project_name %}
+YOU'RE INVITED TO JOIN {{ organization_name|upper }} FOR {{ project_name|upper }}
+{% else %}
 YOU'RE INVITED TO JOIN {{ organization_name }} ON HVT
+{% endif %}
 
+{% if project_name %}
+You've been invited to join {{ organization_name }} for {{ project_name }} as a {{ role_label }}.
+{% else %}
 You've been invited to join {{ organization_name }} on HVT as a {{ role_label }}.
+{% endif %}
 
 Accept invitation:
 {{ accept_url }}
@@ -24,5 +32,5 @@ If you were not expecting this invitation, you can safely ignore this email.
 Docs: {{ docs_url }}
 Support: {{ support_email }}
 
-Sent by HVT
+Sent by {{ brand_name }}
 {{ brand_domain }}

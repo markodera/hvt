@@ -425,6 +425,18 @@ class ProjectListCreateView(generics.ListCreateAPIView):
             },
             success=True,
         )
+        trigger_webhook_event(
+            organization=project.organization,
+            project=project,
+            event_type=Webhook.EventType.PROJECT_CREATED,
+            payload={
+                "project_id": str(project.id),
+                "name": project.name,
+                "slug": project.slug,
+                "allow_signup": project.allow_signup,
+                "is_default": project.is_default,
+            },
+        )
 
 
 @extend_schema_view(
@@ -481,6 +493,17 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
                 event_data={"changes": changes},
                 success=True,
             )
+            trigger_webhook_event(
+                organization=updated_project.organization,
+                project=updated_project,
+                event_type=Webhook.EventType.PROJECT_UPDATED,
+                payload={
+                    "project_id": str(updated_project.id),
+                    "name": updated_project.name,
+                    "slug": updated_project.slug,
+                    "changes": changes,
+                },
+            )
 
     def perform_destroy(self, instance):
         if instance.is_default:
@@ -529,6 +552,16 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "slug": instance.slug,
             },
             success=True,
+        )
+        trigger_webhook_event(
+            organization=instance.organization,
+            project=instance,
+            event_type=Webhook.EventType.PROJECT_DELETED,
+            payload={
+                "project_id": str(instance.id),
+                "name": instance.name,
+                "slug": instance.slug,
+            },
         )
         instance.delete()
 
@@ -862,6 +895,17 @@ class SocialProviderConfigListCreateView(generics.ListCreateAPIView):
             },
             success=True,
         )
+        trigger_webhook_event(
+            organization=project.organization,
+            project=project,
+            event_type=Webhook.EventType.PROJECT_SOCIAL_PROVIDER_CREATED,
+            payload={
+                "social_provider_config_id": str(config.id),
+                "provider": config.provider,
+                "is_active": config.is_active,
+                "redirect_uris": config.redirect_uris,
+            },
+        )
 
 
 @extend_schema_view(
@@ -918,6 +962,16 @@ class SocialProviderConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
                 },
                 success=True,
             )
+            trigger_webhook_event(
+                organization=updated_config.organization,
+                project=updated_config.project,
+                event_type=Webhook.EventType.PROJECT_SOCIAL_PROVIDER_UPDATED,
+                payload={
+                    "social_provider_config_id": str(updated_config.id),
+                    "provider": updated_config.provider,
+                    "changes": changes,
+                },
+            )
 
     def perform_destroy(self, instance):
         AuditLog.log(
@@ -931,6 +985,15 @@ class SocialProviderConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "provider": instance.provider,
             },
             success=True,
+        )
+        trigger_webhook_event(
+            organization=instance.organization,
+            project=instance.project,
+            event_type=Webhook.EventType.PROJECT_SOCIAL_PROVIDER_DELETED,
+            payload={
+                "social_provider_config_id": str(instance.id),
+                "provider": instance.provider,
+            },
         )
         instance.delete()
 
@@ -1241,6 +1304,21 @@ class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
             },
             success=True,
         )
+        trigger_webhook_event(
+            organization=self.request.user.organization,
+            project=invitation.project,
+            event_type=Webhook.EventType.ORG_INVITATION_CREATED,
+            payload={
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
+                "expires_at": invitation.expires_at.isoformat(),
+                "email_sent": email_sent,
+            },
+        )
 
 
 @extend_schema_view(
@@ -1296,6 +1374,21 @@ class OrganizationInvitationResendView(generics.GenericAPIView):
                 "email_sent": email_sent,
             },
             success=True,
+        )
+        trigger_webhook_event(
+            organization=request.user.organization,
+            project=invitation.project,
+            event_type=Webhook.EventType.ORG_INVITATION_RESENT,
+            payload={
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
+                "expires_at": invitation.expires_at.isoformat(),
+                "email_sent": email_sent,
+            },
         )
 
         invitation.refresh_from_db()
@@ -1353,6 +1446,19 @@ class OrganizationInvitationRevokeView(generics.DestroyAPIView):
                 "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
             },
             success=True,
+        )
+        trigger_webhook_event(
+            organization=request.user.organization,
+            project=invitation.project,
+            event_type=Webhook.EventType.ORG_INVITATION_REVOKED,
+            payload={
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": list(invitation.app_roles.values_list("slug", flat=True)),
+            },
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1468,6 +1574,21 @@ class OrganizationInvitationAcceptView(APIView):
                 "app_roles": [role.slug for role in invited_app_roles],
             },
             success=True,
+        )
+        trigger_webhook_event(
+            organization=invitation.organization,
+            project=invitation.project,
+            event_type=Webhook.EventType.ORG_INVITATION_ACCEPTED,
+            payload={
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "accepted_by_user_id": str(request.user.id),
+                "accepted_by_email": request.user.email,
+                "role": invitation.role,
+                "project_id": str(invitation.project_id) if invitation.project_id else None,
+                "project_slug": invitation.project.slug if invitation.project_id else "",
+                "app_roles": [role.slug for role in invited_app_roles],
+            },
         )
         AuditLog.log(
             event_type=AuditLog.EventType.ORG_MEMBER_ADDED,

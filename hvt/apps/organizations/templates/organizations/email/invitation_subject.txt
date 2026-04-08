@@ -1,1 +1,5 @@
+{% if project_name %}
+You're invited to join {{ organization_name }} for {{ project_name }}
+{% else %}
 You're invited to join {{ organization_name }} on HVT
+{% endif %}

@@ -35,6 +35,7 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
     def validate_key(self, key: str):
         """Validate the API key and return (user, auth_info)."""
+        from hvt.apps.organizations.api_key_expiry import emit_api_key_expiry_webhook
 
         # Check key format (hvt_test_xxx or hvt_live_xxx)
         if not (key.startswith("hvt_test_") or key.startswith("hvt_live_")):
@@ -75,6 +76,11 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
         if not api_key_obj.verify_key(key):
             logger.warning(f"[APIKeyAuthentication] Hash mismatch for: {prefix}")
             raise exceptions.AuthenticationFailed("Invalid API key.")
+
+        if api_key_obj.is_expired:
+            emit_api_key_expiry_webhook(api_key_obj)
+            logger.warning(f"[APIKeyAuthentication] Key inactive/expired: {prefix}")
+            raise exceptions.AuthenticationFailed("API key is inactive or expired.")
 
         # Check if key is valid (active + not expired)
         if not api_key_obj.is_valid:

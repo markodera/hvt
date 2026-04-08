@@ -2,6 +2,9 @@
 
 Zero-dependency frontend/server SDK for HVT.
 
+- App: https://hvts.app
+- Docs: https://docs.hvts.app
+
 ## Build
 
 From the repo root:
@@ -51,6 +54,8 @@ const session = await client.runtime.login({
 
 - JWT takes priority over `X-API-Key` if both are sent. Do not send both at once.
 - Cookie auth is supported. The client defaults to `credentials: "include"`.
+- The client now auto-refreshes expired JWT sessions on the next authenticated request and retries once before surfacing a `401`.
+- Failed refreshes clear the in-memory access token and dispatch `auth:logout` by default so apps can react consistently.
 - API keys are now scope-gated for reads. The UI should not assume any API key can read every control-plane endpoint.
 - API keys and webhooks are project-aware. The UI should surface `project`, `project_name`, and `project_slug`.
 - Runtime auth requires the `auth:runtime` scope.

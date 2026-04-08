@@ -480,6 +480,7 @@ class JWTOrgClaimHardeningTest(APITestCase):
     """Regression tests for org-aware JWT claim handling."""
 
     def setUp(self):
+        cache.clear()
         from allauth.account.models import EmailAddress
 
         self.user = User.objects.create_user(
@@ -787,6 +788,7 @@ class RuntimeLoginFlowTest(APITestCase):
     """Runtime login flow scoped by API key organization."""
 
     def setUp(self):
+        cache.clear()
         from allauth.account.models import EmailAddress
 
         self.owner = User.objects.create_user(
@@ -922,6 +924,45 @@ class RuntimeLoginFlowTest(APITestCase):
             "These credentials do not belong to the API key project.",
         )
 
+    def test_runtime_login_allows_project_role_assignment_on_api_key_project(self):
+        other_project = Project.objects.create(
+            organization=self.org,
+            name="Storefront Staging",
+            slug="storefront-staging",
+            allow_signup=True,
+        )
+        self.runtime_user.project = other_project
+        self.runtime_user.save(update_fields=["project"])
+
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=role,
+            assigned_by=self.owner,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["project_id"], str(self.default_project.id))
+        self.assertEqual(access_token["app_roles"], ["buyer"])
+
     def test_runtime_login_requires_verified_email(self):
         response = self.client.post(
             "/api/v1/auth/runtime/login/",
@@ -982,6 +1023,69 @@ class RuntimeLoginFlowTest(APITestCase):
         access_token = AccessToken(response.cookies["auth-token"].value)
         self.assertEqual(access_token["app_roles"], ["buyer"])
         self.assertEqual(access_token["app_permissions"], ["orders.read.own"])
+
+    def test_same_user_can_login_with_two_project_api_keys_when_assigned_roles(self):
+        second_project = Project.objects.create(
+            organization=self.org,
+            name="Internal Ops",
+            slug="internal-ops",
+            allow_signup=True,
+        )
+
+        role_external = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="external-user",
+            name="External User",
+        )
+        role_internal = ProjectRole.objects.create(
+            project=second_project,
+            slug="internal-user",
+            name="Internal User",
+        )
+
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=role_external,
+            assigned_by=self.owner,
+        )
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=role_internal,
+            assigned_by=self.owner,
+        )
+
+        second_prefix, second_full_key, second_hashed_key = APIKey.generate_key()
+        APIKey.objects.create(
+            organization=self.org,
+            project=second_project,
+            name="Internal Runtime Login Key",
+            prefix=second_prefix,
+            hashed_key=second_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        first_project_response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+        self.assertEqual(first_project_response.status_code, status.HTTP_200_OK)
+        first_token = AccessToken(first_project_response.cookies["auth-token"].value)
+        self.assertEqual(first_token["project_id"], str(self.default_project.id))
+        self.assertEqual(first_token["project_slug"], self.default_project.slug)
+
+        second_project_response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=second_full_key,
+        )
+        self.assertEqual(second_project_response.status_code, status.HTTP_200_OK)
+        second_token = AccessToken(second_project_response.cookies["auth-token"].value)
+        self.assertEqual(second_token["project_id"], str(second_project.id))
+        self.assertEqual(second_token["project_slug"], second_project.slug)
 
     def test_runtime_login_heals_owner_missing_organization_link(self):
         from allauth.account.models import EmailAddress
@@ -1295,6 +1399,8 @@ class SensitiveAuthThrottlingTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
         self.assertEqual(response.data["code"], "throttled")
         self.assertIn("retry_after_seconds", response.data["detail"])
+        self.assertIn("retry_after_human", response.data["detail"])
+        self.assertIn("Try again in", response.data["detail"]["message"])
 
     def test_login_is_rate_limited(self):
         with override_settings(

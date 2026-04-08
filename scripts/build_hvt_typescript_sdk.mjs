@@ -2,7 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-const repoRoot = process.cwd();
+// Handle both repo root and sdk/typescript directory as working directory
+let repoRoot = process.cwd();
+if (repoRoot.endsWith("sdk/typescript") || repoRoot.endsWith("sdk\\typescript")) {
+  repoRoot = path.join(repoRoot, "..", "..");
+}
 const sdkRoot = path.join(repoRoot, "sdk", "typescript");
 const sourceRoot = path.join(sdkRoot, "src");
 const distRoot = path.join(sdkRoot, "dist");
