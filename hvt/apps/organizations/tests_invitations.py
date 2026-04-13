@@ -10,6 +10,7 @@ from unittest.mock import patch
 from hvt.apps.organizations.models import (
     Organization,
     OrganizationInvitation,
+    Project,
     ProjectPermission,
     ProjectRole,
     UserProjectRole,
@@ -566,6 +567,61 @@ class OrganizationInvitationAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         invitee.refresh_from_db()
         self.assertEqual(invitee.organization, existing_org)
+
+    def test_accept_same_org_project_invitation_preserves_org_and_grants_project_access(self):
+        project_user = User.objects.create_user(
+            email="same-org-project@example.com",
+            password="password123",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        secondary_project = Project.objects.create(
+            organization=self.org,
+            name="Secondary Storefront",
+            slug="secondary-storefront",
+            allow_signup=True,
+        )
+        permission = ProjectPermission.objects.create(
+            project=secondary_project,
+            slug="orders.read.secondary",
+            name="Read Secondary Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=secondary_project,
+            slug="secondary-buyer",
+            name="Secondary Buyer",
+        )
+        role.permissions.add(permission)
+
+        invitation = OrganizationInvitation.objects.create(
+            organization=self.org,
+            project=secondary_project,
+            email=project_user.email,
+            role=OrganizationInvitation.Role.MEMBER,
+            invited_by=self.owner,
+            expires_at=self.invitation_expiry,
+        )
+        invitation.app_roles.add(role)
+
+        self.client.force_authenticate(user=project_user)
+        response = self.client.post(
+            reverse("organization_invitation_accept"),
+            {"token": invitation.token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        project_user.refresh_from_db()
+        self.assertEqual(project_user.organization, self.org)
+        self.assertEqual(project_user.project, self.default_project)
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=project_user, role=role).exists()
+        )
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["org_id"], str(self.org.id))
+        self.assertEqual(access_token["project_id"], str(secondary_project.id))
+        self.assertEqual(access_token["app_roles"], ["secondary-buyer"])
 
     def test_revoked_invitation_cannot_be_accepted(self):
         invitee = User.objects.create_user(

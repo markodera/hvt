@@ -9,7 +9,32 @@ from . import views
 urlpatterns = [
     # dj-rest-auth endpoints (explicit to avoid schema collisions)
     path("runtime/register/", views.HVTRuntimeRegisterView.as_view(), name="runtime_register"),
+    path(
+        "runtime/register/verify-email/",
+        views.HVTVerifyEmailView.as_view(),
+        name="runtime_verify_email",
+    ),
+    path(
+        "runtime/register/resend-email/",
+        views.HVTRuntimeResendEmailVerificationView.as_view(),
+        name="runtime_resend_email",
+    ),
     path("runtime/login/", views.RuntimeLoginView.as_view(), name="runtime_login"),
+    path(
+        "runtime/password/reset/",
+        views.HVTRuntimePasswordResetView.as_view(),
+        name="runtime_password_reset",
+    ),
+    path(
+        "runtime/password/reset/validate/",
+        views.PasswordResetTokenValidationView.as_view(),
+        name="runtime_password_reset_validate",
+    ),
+    path(
+        "runtime/password/reset/confirm/<str:uidb64>/<str:token>/",
+        views.HVTPasswordResetConfirmView.as_view(),
+        name="runtime_password_reset_confirm",
+    ),
     path(
         "runtime/social/providers/",
         views.RuntimeSocialProviderListView.as_view(),

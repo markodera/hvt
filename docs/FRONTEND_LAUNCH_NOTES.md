@@ -1,5 +1,7 @@
 # Frontend Launch Notes
 
+See [RUNTIME_FRONTEND_HANDOFF.md](/c:/Users/MARK/Documents/GitHub/hvt/docs/RUNTIME_FRONTEND_HANDOFF.md) for the current backend contract, frontend branching rules, and remaining launch blockers around runtime auth.
+
 ## Core Product Decisions
 
 - Launch is single-organization for now.
@@ -31,6 +33,7 @@
 ## UX Implications
 
 - API key creation UI should include project selection.
+- Project creation/edit UI should expose an optional runtime frontend URL for project-scoped email links.
 - Webhook creation UI should include project selection and show project metadata.
 - Audit log screens should assume API-key views may be narrower than org-admin JWT views.
 - Runtime auth setup UI should clearly label `auth:runtime` as required for runtime login and runtime social auth.
@@ -40,6 +43,12 @@
 
 - Cookie refresh now re-sets auth cookies on `/api/v1/auth/token/refresh/`.
 - Frontend using cookie auth can rely on refresh responses to rotate cookies correctly.
+- Runtime password reset now exists at:
+  - `POST /api/v1/auth/runtime/password/reset/`
+  - `POST /api/v1/auth/runtime/password/reset/validate/`
+  - `POST /api/v1/auth/runtime/password/reset/confirm/<uidb64>/<token>/`
+- Runtime resend verification now exists at `POST /api/v1/auth/runtime/register/resend-email/`.
+- Runtime verification/reset emails use the project-level frontend URL when configured.
 - Public invite accept flows can use:
   - `GET /api/v1/organizations/invitations/lookup/?token=...`
   - `POST /api/v1/organizations/invitations/accept/`

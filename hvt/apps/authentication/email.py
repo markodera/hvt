@@ -1,5 +1,6 @@
 from typing import Optional, Any
 from email.utils import parseaddr
+from urllib.parse import urlencode, urljoin
 import resend
 from django.conf import settings
 from django.template import TemplateDoesNotExist
@@ -19,10 +20,40 @@ def _resolve_sender_identity() -> tuple[str, str]:
     return sender_name, sender_email
 
 
+def resolve_frontend_url(*, request=None, project=None) -> str:
+    runtime_project = project
+    if runtime_project is None and request is not None:
+        runtime_project = getattr(getattr(request, "auth", None), "project", None)
+
+    project_url = (getattr(runtime_project, "frontend_url", "") or "").strip().rstrip("/")
+    if project_url:
+        return project_url
+    return getattr(settings, "FRONTEND_URL", "").rstrip("/")
+
+
+def build_frontend_url(path: str, *, request=None, project=None, query: Optional[dict] = None) -> str:
+    base_url = resolve_frontend_url(request=request, project=project)
+    url = urljoin(f"{base_url}/", path.lstrip("/"))
+    if query:
+        query_string = urlencode(
+            {
+                key: value
+                for key, value in query.items()
+                if value not in (None, "")
+            },
+            doseq=True,
+        )
+        if query_string:
+            return f"{url}?{query_string}"
+    return url
+
+
 def build_email_context(context: Optional[dict] = None) -> dict:
     sender_name, sender_email = _resolve_sender_identity()
+    request = (context or {}).get("request")
+    project = (context or {}).get("project")
 
-    project_name = (context or {}).get("project_name")
+    project_name = (context or {}).get("project_name") or getattr(project, "name", None)
     if isinstance(project_name, str):
         project_name = project_name.strip() or None
 
@@ -42,7 +73,7 @@ def build_email_context(context: Optional[dict] = None) -> dict:
         "project_name": project_name,
         "product_name": product_name,
         "account_name": account_name,
-        "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
+        "frontend_url": resolve_frontend_url(request=request, project=project),
         "docs_url": getattr(settings, "DOCS_URL", "https://docs.hvts.app"),
         "support_email": sender_email,
         "from_email": sender_email,
