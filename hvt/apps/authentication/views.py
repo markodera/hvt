@@ -1,6 +1,7 @@
 from urllib.parse import urljoin
 
 from rest_framework import generics, permissions, serializers, status, views
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.response import Response
 from django.conf import settings
 from django.utils.encoding import force_str
@@ -23,6 +24,7 @@ from dj_rest_auth.registration.views import (
     VerifyEmailView,
 )
 from allauth.account import app_settings as allauth_account_settings
+from allauth.account.models import EmailAddress
 from allauth.account.utils import complete_signup
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -45,6 +47,10 @@ from hvt.api.v1.serializers.users import (
     RuntimeRegisterSerializer,
 )
 from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+from hvt.apps.authentication.serializers import (
+    RuntimePasswordResetSerializer,
+    RuntimeResendEmailVerificationSerializer,
+)
 from hvt.apps.authentication.throttling import (
     BurstRateThrottle,
     EmailVerificationIPRateThrottle,
@@ -62,7 +68,9 @@ from hvt.apps.authentication.throttling import (
     ResendVerificationEmailRateThrottle,
     ResendVerificationIPRateThrottle,
     RuntimeLoginAPIKeyThrottle,
+    RuntimePasswordResetAPIKeyThrottle,
     RuntimeRegisterAPIKeyThrottle,
+    RuntimeResendVerificationAPIKeyThrottle,
     RuntimeSocialLoginAPIKeyThrottle,
     SocialLoginIPRateThrottle,
 )
@@ -201,6 +209,20 @@ RUNTIME_REGISTER_THROTTLES = [
     RuntimeRegisterAPIKeyThrottle,
     RegisterIPRateThrottle,
     RegisterEmailRateThrottle,
+]
+RUNTIME_PASSWORD_RESET_REQUEST_THROTTLES = [
+    BurstRateThrottle,
+    OrganizationRateThrottle,
+    RuntimePasswordResetAPIKeyThrottle,
+    PasswordResetIPRateThrottle,
+    PasswordResetEmailRateThrottle,
+]
+RUNTIME_RESEND_EMAIL_THROTTLES = [
+    BurstRateThrottle,
+    OrganizationRateThrottle,
+    RuntimeResendVerificationAPIKeyThrottle,
+    ResendVerificationIPRateThrottle,
+    ResendVerificationEmailRateThrottle,
 ]
 RUNTIME_SOCIAL_LOGIN_THROTTLES = [
     BurstRateThrottle,
@@ -424,8 +446,41 @@ class HVTTokenRefreshView(TokenRefreshView):
         return response
 
 
+class RuntimeAPIKeyScopedRequestMixin:
+    """Shared API-key validation for runtime public endpoints."""
+
+    def require_runtime_api_key(self, request) -> APIKey:
+        api_key = getattr(request, "auth", None)
+        if not isinstance(api_key, APIKey):
+            raise NotAuthenticated("A valid X-API-Key header is required.")
+        if not api_key.has_scope("auth:runtime"):
+            raise PermissionDenied(
+                "This API key does not have the required auth:runtime scope."
+            )
+        return api_key
+
+
 class HVTPasswordResetView(PasswordResetView):
     throttle_classes = PASSWORD_RESET_REQUEST_THROTTLES
+
+
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Auth"],
+        summary="Runtime password reset request",
+        description=(
+            "Request a password reset email for an end user within the organization "
+            "and project resolved from the provided X-API-Key."
+        ),
+    ),
+)
+class HVTRuntimePasswordResetView(RuntimeAPIKeyScopedRequestMixin, PasswordResetView):
+    serializer_class = RuntimePasswordResetSerializer
+    throttle_classes = RUNTIME_PASSWORD_RESET_REQUEST_THROTTLES
+
+    def post(self, request, *args, **kwargs):
+        self.require_runtime_api_key(request)
+        return super().post(request, *args, **kwargs)
 
 
 class HVTPasswordResetConfirmView(PasswordResetConfirmView):
@@ -508,6 +563,50 @@ class HVTVerifyEmailView(VerifyEmailView):
 
 class HVTResendEmailVerificationView(ResendEmailVerificationView):
     throttle_classes = RESEND_EMAIL_THROTTLES
+
+
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Auth"],
+        summary="Runtime resend verification email",
+        description=(
+            "Resend an email verification message for a runtime user within the "
+            "organization and project resolved from the provided X-API-Key."
+        ),
+        request=RuntimeResendEmailVerificationSerializer,
+    ),
+)
+class HVTRuntimeResendEmailVerificationView(
+    RuntimeAPIKeyScopedRequestMixin,
+    generics.GenericAPIView,
+):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = RuntimeResendEmailVerificationSerializer
+    throttle_classes = RUNTIME_RESEND_EMAIL_THROTTLES
+
+    def post(self, request, *args, **kwargs):
+        from hvt.apps.authentication.serializers import _user_matches_runtime_api_key
+
+        api_key = self.require_runtime_api_key(request)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email_value = serializer.validated_data["email"]
+        email_address = next(
+            (
+                item
+                for item in EmailAddress.objects.select_related("user").filter(
+                    email__iexact=email_value,
+                    verified=False,
+                )
+                if _user_matches_runtime_api_key(item.user, api_key)
+            ),
+            None,
+        )
+        if email_address:
+            email_address.send_confirmation(request)
+
+        return Response({"detail": "ok"}, status=status.HTTP_200_OK)
 
 
 class HVTPasswordChangeView(PasswordChangeView):

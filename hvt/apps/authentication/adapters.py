@@ -7,7 +7,12 @@ import logging
 
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
 from hvt.apps.organizations.access import assign_default_signup_roles
-from .email import ResendEmailService, build_email_context, render_email_template
+from .email import (
+    ResendEmailService,
+    build_email_context,
+    build_frontend_url,
+    render_email_template,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -22,8 +27,16 @@ class FrontendAccountAdapter(DefaultAccountAdapter):
         """
         Constructs the email confirmation URL pointing to the frontend app.
         """
-        # settings.FRONTEND_URL should be set in settings.py (e.g., http://localhost:5173)
-        return f"{settings.FRONTEND_URL}/auth/verify-email/{emailconfirmation.key}"
+        project = getattr(getattr(request, "auth", None), "project", None) if request else None
+        query = None
+        if project:
+            query = {"runtime": "1", "project": project.slug}
+        return build_frontend_url(
+            f"/auth/verify-email/{emailconfirmation.key}",
+            request=request,
+            project=project,
+            query=query,
+        )
 
     def get_reset_password_from_key_url(self, key):
         """
@@ -32,8 +45,8 @@ class FrontendAccountAdapter(DefaultAccountAdapter):
         """
         uid, separator, token = str(key).partition("-")
         if separator and uid and token:
-            return f"{settings.FRONTEND_URL}/auth/password-reset/{uid}/{token}"
-        return f"{settings.FRONTEND_URL}/auth/password-reset/{key}"
+            return build_frontend_url(f"/auth/password-reset/{uid}/{token}")
+        return build_frontend_url(f"/auth/password-reset/{key}")
 
 
 class ResendAccountAdapter(FrontendAccountAdapter):
@@ -63,14 +76,17 @@ class ResendAccountAdapter(FrontendAccountAdapter):
         try:
             # Extract App/Project name if this is a runtime auth flow
             project_name = None
+            project = None
             request = context.get('request')
             if request:
                 api_key = getattr(request, 'auth', None)
                 if api_key and hasattr(api_key, 'project') and api_key.project:
+                    project = api_key.project
                     project_name = api_key.project.name
 
             email_context = build_email_context({
                 "email": email, 
+                "project": project,
                 "project_name": project_name, 
                 **context
             })
