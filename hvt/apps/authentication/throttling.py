@@ -183,6 +183,10 @@ class RuntimeRegisterAPIKeyThrottle(APIKeyScopeRateThrottle):
     scope = "auth_runtime_register_api_key"
 
 
+class RuntimePasswordResetAPIKeyThrottle(APIKeyScopeRateThrottle):
+    scope = "auth_runtime_password_reset_api_key"
+
+
 class PasswordResetIPRateThrottle(IPAddressRateThrottle):
     scope = "auth_password_reset_ip"
 
@@ -213,6 +217,10 @@ class ResendVerificationIPRateThrottle(IPAddressRateThrottle):
 
 class ResendVerificationEmailRateThrottle(EmailFieldRateThrottle):
     scope = "auth_resend_verification_email"
+
+
+class RuntimeResendVerificationAPIKeyThrottle(APIKeyScopeRateThrottle):
+    scope = "auth_runtime_resend_verification_api_key"
 
 
 class SocialLoginIPRateThrottle(IPAddressRateThrottle):

@@ -43,6 +43,9 @@ class OrganizationSerializer(serializers.ModelSerializer):
 class ProjectSerializer(serializers.ModelSerializer):
     """Serializer for organization projects."""
 
+    def validate_frontend_url(self, value):
+        return (value or "").strip().rstrip("/")
+
     class Meta:
         model = Project
         fields = [
@@ -52,6 +55,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "is_default",
             "is_active",
             "allow_signup",
+            "frontend_url",
             "created_at",
             "updated_at",
         ]

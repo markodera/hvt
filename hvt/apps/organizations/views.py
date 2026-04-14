@@ -26,9 +26,11 @@ from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import IsOrgOwnerOrAPIKey, IsOrgAdminOrAPIKey, IsOrgMemberOrAPIKey
 from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
 from hvt.apps.organizations.access import (
+    assign_default_signup_roles,
     get_user_project_permission_slugs,
     get_user_project_roles,
     sync_user_project_roles,
+    user_has_project_access,
 )
 from hvt.apps.organizations.permissions import (
     IsOrganizationOwner,
@@ -774,8 +776,6 @@ class ProjectUserRoleAssignmentView(APIView):
             User.objects.filter(organization=self.request.user.organization),
             pk=self.kwargs["user_pk"],
         )
-        if user.project_id and user.project_id != project.id:
-            raise NotFound("User is not available in this project.")
         return user
 
     def get(self, request, *args, **kwargs):
@@ -834,7 +834,7 @@ class CurrentProjectAccessView(APIView):
 
     def get(self, request, *args, **kwargs):
         project = _get_current_project_or_404(request, kwargs["project_pk"])
-        if request.user.project_id and request.user.project_id != project.id:
+        if not user_has_project_access(request.user, project):
             raise NotFound("Project not found.")
 
         payload = _serialize_user_project_access(request.user, project)
@@ -1532,28 +1532,53 @@ class OrganizationInvitationAcceptView(APIView):
                 {"detail": "This invitation is for a different email address."}
             )
 
-        if request.user.organization_id:
+        if (
+            request.user.organization_id
+            and request.user.organization_id != invitation.organization_id
+        ):
             raise serializers.ValidationError(
-                {"detail": "You already belong to an organization."}
+                {"detail": "You already belong to a different organization."}
             )
 
         invited_app_roles = list(invitation.app_roles.all())
         with transaction.atomic():
-            request.user.organization = invitation.organization
-            request.user.role = invitation.role
-            update_fields = ["organization", "role"]
-            if invitation.project_id and invitation.role == User.Role.MEMBER:
+            update_fields = []
+            is_new_org_membership = request.user.organization_id is None
+            if is_new_org_membership:
+                request.user.organization = invitation.organization
+                request.user.role = invitation.role
+                update_fields.extend(["organization", "role"])
+                if invitation.project_id and invitation.role == User.Role.MEMBER:
+                    request.user.project = invitation.project
+                    update_fields.append("project")
+            elif (
+                invitation.project_id
+                and invitation.role == User.Role.MEMBER
+                and request.user.project_id is None
+            ):
+                # Preserve existing project affinity when present, but seed legacy
+                # users that never had a primary project so user.project-based access
+                # does not remain empty.
                 request.user.project = invitation.project
                 update_fields.append("project")
-            request.user.save(update_fields=update_fields)
+
+            if update_fields:
+                request.user.save(update_fields=update_fields)
 
             if invitation.project_id:
-                sync_user_project_roles(
-                    request.user,
-                    invitation.project,
-                    invited_app_roles,
-                    assigned_by=invitation.invited_by,
-                )
+                if invited_app_roles:
+                    sync_user_project_roles(
+                        request.user,
+                        invitation.project,
+                        invited_app_roles,
+                        assigned_by=invitation.invited_by,
+                    )
+                else:
+                    assign_default_signup_roles(
+                        request.user,
+                        invitation.project,
+                        assigned_by=invitation.invited_by,
+                    )
 
             invitation.accepted_by = request.user
             invitation.accepted_at = timezone.now()

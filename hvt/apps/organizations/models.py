@@ -77,6 +77,15 @@ class Project(models.Model):
     is_default = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     allow_signup = models.BooleanField(default=True)
+    frontend_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional frontend base URL for this runtime app. "
+            "Used for project-scoped verification and password reset links."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -97,6 +106,11 @@ class Project(models.Model):
 
     def __str__(self):
         return f"{self.organization.name} / {self.name}"
+
+    def save(self, *args, **kwargs):
+        if isinstance(self.frontend_url, str):
+            self.frontend_url = self.frontend_url.strip().rstrip("/")
+        return super().save(*args, **kwargs)
 
 
 class ProjectPermission(models.Model):
