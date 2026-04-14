@@ -1329,6 +1329,336 @@ class PasswordResetFlowTest(APITestCase):
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class RuntimePasswordResetFlowTest(APITestCase):
+    """Runtime password reset should respect API-key project scoping."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="runtime-reset-owner@example.com",
+            password="Strongpass123!",
+            role=User.Role.OWNER,
+        )
+        self.org = Organization.objects.create(
+            name="Runtime Reset Org",
+            slug="runtime-reset-org",
+            owner=self.owner,
+            allow_signup=True,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+
+        self.default_project = self.org.ensure_default_project()
+        self.default_project.frontend_url = "https://storefront.example.com/"
+        self.default_project.save(update_fields=["frontend_url"])
+        self.other_project = Project.objects.create(
+            organization=self.org,
+            name="Operations Console",
+            slug="ops-console",
+            allow_signup=True,
+            frontend_url="https://ops.example.com",
+        )
+
+        prefix, self.full_key, hashed_key = APIKey.generate_key()
+        self.api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Runtime Reset Key",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        self.runtime_user = User.objects.create_user(
+            email="buyer@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=self.runtime_user,
+            email=self.runtime_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        self.other_project_user = User.objects.create_user(
+            email="ops-user@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.other_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=self.other_project_user,
+            email=self.other_project_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        self.cross_project_user = User.objects.create_user(
+            email="cross-project@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.other_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=self.cross_project_user,
+            email=self.cross_project_user.email,
+            verified=True,
+            primary=True,
+        )
+        buyer_role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        UserProjectRole.objects.create(
+            user=self.cross_project_user,
+            role=buyer_role,
+            assigned_by=self.owner,
+        )
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_password_reset_sends_project_frontend_link(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": self.runtime_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, args, _ = mock_send_mail.mock_calls[0]
+        self.assertEqual(args[1], self.runtime_user.email)
+        password_reset_url = args[2]["password_reset_url"]
+        self.assertTrue(
+            password_reset_url.startswith(
+                "https://storefront.example.com/auth/password-reset/"
+            )
+        )
+        self.assertIn("runtime=1", password_reset_url)
+        self.assertIn("project=default", password_reset_url)
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_password_reset_ignores_user_outside_api_key_project(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": self.other_project_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_not_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_password_reset_allows_project_role_assignment_access(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": self.cross_project_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, args, _ = mock_send_mail.mock_calls[0]
+        self.assertEqual(args[1], self.cross_project_user.email)
+
+    def test_runtime_password_reset_requires_runtime_scope(self):
+        self.api_key.scopes = ["users:read"]
+        self.api_key.save(update_fields=["scopes"])
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": self.runtime_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.data["detail"],
+            "This API key does not have the required auth:runtime scope.",
+        )
+
+    def test_runtime_password_reset_confirm_alias_resets_password(self):
+        from allauth.account.forms import default_token_generator
+        from allauth.account.utils import user_pk_to_url_str
+
+        uid = user_pk_to_url_str(self.runtime_user)
+        token = default_token_generator.make_token(self.runtime_user)
+
+        response = self.client.post(
+            f"/api/v1/auth/runtime/password/reset/confirm/{uid}/{token}/",
+            {
+                "new_password1": "Updatedpass123!",
+                "new_password2": "Updatedpass123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.runtime_user.refresh_from_db()
+        self.assertTrue(self.runtime_user.check_password("Updatedpass123!"))
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class RuntimeEmailVerificationFlowTest(APITestCase):
+    """Runtime verification emails should use project-scoped frontend context."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="runtime-verify-owner@example.com",
+            password="Strongpass123!",
+            role=User.Role.OWNER,
+        )
+        self.org = Organization.objects.create(
+            name="Runtime Verify Org",
+            slug="runtime-verify-org",
+            owner=self.owner,
+            allow_signup=True,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+        self.default_project.frontend_url = "https://storefront.example.com/"
+        self.default_project.save(update_fields=["frontend_url"])
+        self.other_project = Project.objects.create(
+            organization=self.org,
+            name="Operations Console",
+            slug="ops-console",
+            allow_signup=True,
+            frontend_url="https://ops.example.com",
+        )
+
+        prefix, self.full_key, hashed_key = APIKey.generate_key()
+        self.api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Runtime Verify Key",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_register_verification_email_uses_project_frontend_url(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "new-runtime-user@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        mock_send_mail.assert_called_once()
+        _, args, _ = mock_send_mail.mock_calls[0]
+        activate_url = args[2]["activate_url"]
+        self.assertTrue(
+            activate_url.startswith("https://storefront.example.com/auth/verify-email/")
+        )
+        self.assertIn("runtime=1", activate_url)
+        self.assertIn("project=default", activate_url)
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_resend_verification_email_is_scoped_to_api_key_project(self, mock_send_mail):
+        runtime_user = User.objects.create_user(
+            email="pending-runtime@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=runtime_user,
+            email=runtime_user.email,
+            verified=False,
+            primary=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/resend-email/",
+            {"email": runtime_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, args, _ = mock_send_mail.mock_calls[0]
+        activate_url = args[2]["activate_url"]
+        self.assertTrue(
+            activate_url.startswith("https://storefront.example.com/auth/verify-email/")
+        )
+        self.assertIn("runtime=1", activate_url)
+        self.assertIn("project=default", activate_url)
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_resend_verification_ignores_user_outside_api_key_project(self, mock_send_mail):
+        other_user = User.objects.create_user(
+            email="pending-ops@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.other_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=other_user,
+            email=other_user.email,
+            verified=False,
+            primary=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/resend-email/",
+            {"email": other_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_not_called()
+
+    def test_runtime_verify_email_alias_marks_email_as_verified(self):
+        from allauth.account.models import EmailConfirmationHMAC
+
+        runtime_user = User.objects.create_user(
+            email="verify-runtime@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        email_address = EmailAddress.objects.create(
+            user=runtime_user,
+            email=runtime_user.email,
+            verified=False,
+            primary=True,
+        )
+        key = EmailConfirmationHMAC(email_address).key
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/verify-email/",
+            {"key": key},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        email_address.refresh_from_db()
+        self.assertTrue(email_address.verified)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class SensitiveAuthThrottlingTest(APITestCase):
     """Sensitive auth endpoints should apply dedicated throttles."""
 

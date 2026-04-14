@@ -1,435 +1,127 @@
-# HVT – Open-Source Authentication Platform
+# HVT
 
-> **"We remove authentication from your list of problems."**
+HVT is an open-source authentication platform built with Django and Django REST Framework. It provides a control plane for organizations, projects, API keys, invites, webhooks, and audit logs, plus a runtime auth plane for customer-facing applications.
 
-## What Is HVT?
+## Current Scope
 
-HVT is an **open-source, self-hostable authentication platform** for developers who want to ship fast without building auth from scratch.
+- email and password authentication
+- JWT access and refresh tokens
+- registration, email verification, and password reset
+- Google and GitHub social login
+- organizations, projects, and API keys
+- project-scoped runtime auth with shared identity across projects
+- invitations, project roles, permissions, and audit logs
+- webhook delivery for organization events
 
-**Think:** Auth0 for startups, but open-source and affordable.
+## Project Model
 
----
+HVT separates two concerns:
 
-## The Problem
+- control plane: the dashboard and admin-facing APIs used to manage organizations, projects, API keys, social providers, invites, and webhooks
+- runtime plane: project-scoped auth flows that your application uses for sign-up, sign-in, social login, verify-email, and password reset
 
-Most developers waste **weeks** rebuilding the same authentication infrastructure:
+User accounts are shared at the organization level, while runtime access is enforced per project through direct membership or assigned project roles.
 
-* Email + password auth
-* Social login (Google, GitHub, etc.)
-* Token handling (JWT)
-* Email verification
-* Password resets
-* User management
+## Repository Layout
 
-**Existing solutions:**
-* **Firebase** → Closed-source, Google ecosystem lock-in, frontend-heavy
-* **Auth0/Clerk** → Expensive ($25+/month), closed-source, pricing scales with users
-* **DIY with Django/Passport** → Time-consuming, error-prone, hard to maintain
+- `hvt/`: Django project and application code
+- `docs/`: setup, deployment, webhook, and frontend handoff guides
+- `sdk/`: pointers to standalone SDK repositories
+- `scripts/`: maintenance and build scripts
+- `.github/`: CI and contribution templates
 
-**We're building a better alternative:**
-* ✅ Open-source (no vendor lock-in)
-* ✅ Self-hostable (data stays with you)
-* ✅ Affordable hosted option (predictable pricing)
-* ✅ REST API-first (works with any stack)
-* ✅ Simple & opinionated (just auth, done right)
+## Quick Start
 
----
-
-## Who This Is For
-
-We are **not** targeting:
-* Complex enterprise RBAC systems
-* Banks or government systems
-* Massive multi-tenant IAM products
-
-We **are** targeting:
-* 🎯 Solo founders
-* 🎯 Early-stage startups
-* 🎯 Indie hackers
-* 🎯 Small engineering teams
-* 🎯 Products with simple onboarding needs
-
-If you say:
-> "I don't want to think about auth anymore"
-
-You're our customer.
-
----
-
-## How It Works (Data Model)
-
-### We Store Your Users' Authentication Data
-
-Unlike a library (Passport.js, NextAuth), HVT is a **hosted service**:
-
-**What we store in our database:**
-* User credentials (email, hashed passwords)
-* Social login connections (Google, GitHub)
-* Email verification status
-* Basic profile data (first_name, last_name)
-
-**What you store in your database:**
-* App-specific user data (subscription plans, preferences, etc.)
-* A reference to our user: `hvt_user_id`
-
-**Example:**
-```javascript
-// Your app calls our API
-const response = await fetch('https://hvt-api.com/v1/auth/register', {
-  headers: { 'Authorization': 'Bearer hvt_live_abc123' },
-  body: JSON.stringify({ email: 'user@example.com', password: '***' })
-});
-
-// We return: { user_id: 'usr_xyz789', token: 'jwt_token_here' }
-
-// You store in YOUR database:
-// { hvt_user_id: 'usr_xyz789', subscription: 'pro', tasks_count: 42 }
-```
-
-**Benefits:**
-* No password management headaches
-* No email delivery infrastructure
-* No OAuth provider setup
-* Just consume verified user identity
-
----
-
-## How People Use HVT (3 Modes)
-
-### Mode 1: Hosted (Recommended for Most)
-
-Use our managed service:
-1. Sign up and create an organization
-2. Generate an API key from dashboard
-3. Call our REST API from your backend
-4. We handle auth, you get verified users
-
-**Perfect for:**
-* MVPs and early startups
-* Teams without DevOps resources
-* Apps needing fast time-to-market
-
----
-
-### Mode 2: Self-Hosted (Open-Source)
-
-Deploy HVT on your own infrastructure:
-1. Clone this repository
-2. Deploy via Docker/Kubernetes
-3. Manage your own database and email delivery
-4. Full control and customization
-
-**Perfect for:**
-* Privacy-conscious applications
-* Data residency requirements (GDPR, HIPAA)
-* Enterprises needing on-premise deployment
-* Developers wanting full code ownership
-
----
-
-### Mode 3: Hybrid (Best of Both)
-
-Start hosted, migrate to self-hosted later:
-* No lock-in (open-source code available)
-* Export your data anytime
-* Gradual transition as you scale
-
----
-
-## Monetization Strategy (Open-Core Model)
-
-We monetize **services**, not code.
-
-### Free Tier (Self-Hosted)
-* ✅ Full source code (MIT license)
-* ✅ Unlimited users (on your infrastructure)
-* ✅ DIY deployment
-* ✅ Community support (Discord, GitHub Issues)
-
-**Cost: $0** (you pay your cloud provider)
-
----
-
-### Starter – $19/month (Hosted)
-* ✅ Up to 2,500 users
-* ✅ Email + password auth
-* ✅ Social login (Google, GitHub)
-* ✅ Email delivery infrastructure
-* ✅ Dashboard & analytics
-* ✅ Email support (48hr response)
-
-**Value: We manage everything for you**
-
----
-
-### Pro – $49/month (Hosted)
-* ✅ Up to 10,000 users
-* ✅ Everything in Starter
-* ✅ Webhooks (user.created, user.login, etc.)
-* ✅ Custom email templates
-* ✅ Audit logs (90-day retention)
-* ✅ Priority email support (24hr response)
-
-**Value: Advanced features + better support**
-
----
-
-### Enterprise – Custom Pricing (Hosted or On-Premise)
-* ✅ Unlimited users
-* ✅ Everything in Pro
-* ✅ Custom domain (auth.yourcompany.com)
-* ✅ Dedicated instance
-* ✅ SSO/SAML support
-* ✅ Audit logs (1-year+ retention)
-* ✅ 99.9% SLA
-* ✅ On-premise deployment support
-* ✅ Compliance certifications (SOC2, ISO)
-* ✅ Dedicated Slack channel
-
-**Value: Enterprise-grade reliability + compliance**
-
----
-
-**Why This Works:**
-
-Companies **pay for convenience**, not code:
-* Hosted infrastructure
-* Email delivery (no SMTP headaches)
-* 99.9% uptime guarantee
-* Support when things break
-* Time saved (weeks of development)
-
-**Open-source builds trust. Hosting generates revenue.**
-
----
-
-## API Reference (High-Level)
-
-### Authentication Endpoints
-```
-POST   /api/v1/auth/register      → Create new user
-POST   /api/v1/auth/login         → Authenticate user
-POST   /api/v1/auth/logout        → Invalidate session
-POST   /api/v1/auth/refresh       → Refresh access token
-POST   /api/v1/auth/social/google → Google OAuth
-POST   /api/v1/auth/social/github → GitHub OAuth
-```
-
-### User Management
-```
-GET    /api/v1/auth/me            → Get current user
-PATCH  /api/v1/auth/me            → Update user profile
-DELETE /api/v1/auth/me            → Delete user account
-```
-
-### Password & Email
-```
-POST   /api/v1/auth/password/reset-request  → Request password reset
-POST   /api/v1/auth/password/reset-confirm  → Confirm new password
-POST   /api/v1/auth/email/verify            → Verify email address
-POST   /api/v1/auth/email/resend            → Resend verification
-```
-
-### Organization & API Keys (Platform)
-```
-GET    /api/v1/organizations                → List organizations (admin)
-POST   /api/v1/organizations                → Create organization
-GET    /api/v1/organizations/<id>           → Get organization details (admin)
-GET    /api/v1/organizations/current        → Get current organization
-PATCH  /api/v1/organizations/current        → Update current organization
-GET    /api/v1/organizations/current/members → List organization members
-POST   /api/v1/organizations/current/keys   → Generate API key
-GET    /api/v1/organizations/current/keys   → List API keys
-GET    /api/v1/organizations/current/keys/<id>         → Get API key details
-DELETE /api/v1/organizations/current/keys/<id>         → Revoke (delete) API key
-PATCH  /api/v1/organizations/current/keys/<id>/revoke  → Deactivate API key
-```
-
-### Webhooks
-```
-GET    /api/v1/organizations/current/webhooks              → List webhooks
-POST   /api/v1/organizations/current/webhooks              → Create webhook
-GET    /api/v1/organizations/current/webhooks/<id>         → Get webhook details
-PATCH  /api/v1/organizations/current/webhooks/<id>         → Update webhook
-DELETE /api/v1/organizations/current/webhooks/<id>         → Delete webhook
-GET    /api/v1/organizations/current/webhooks/<id>/deliveries → Delivery history
-```
-
-### User Management
-```
-GET    /api/v1/users              → List org users
-POST   /api/v1/users              → Create user (admin)
-GET    /api/v1/users/<id>         → Get user details
-PATCH  /api/v1/users/<id>         → Update user (admin)
-DELETE /api/v1/users/<id>         → Delete user (admin)
-PATCH  /api/v1/users/<id>/role    → Change user role (admin)
-```
-
-All endpoints use **JWT token-based authentication** or **API key authentication**.
-
----
-
-## Technical Stack
-
-**Backend:**
-* Django 5.x (rapid development, battle-tested)
-* Django REST Framework (clean API design)
-* PostgreSQL (reliable, scalable)
-* django-allauth (social auth providers)
-* SimpleJWT (stateless token management)
-
-**Why Django?**
-We use Django **internally**, but expose a **pure REST API**. Your app never depends on Django—just HTTP.
-
-**Benefits:**
-* Fast initial development
-* Mature authentication libraries
-* Excellent security track record
-* Works with ANY frontend/backend stack
-
----
-
-## Security Model
-
-* ✅ Short-lived access tokens (15 minutes)
-* ✅ Refresh tokens (7 days, rotated)
-* ✅ Per-organization API keys
-* ✅ Argon2 password hashing
-* ✅ Rate limiting (by API key + IP)
-* ✅ Email verification enforcement
-* ✅ HTTPS-only in production
-* ✅ CORS configuration per organization
-* ✅ Webhook HMAC-SHA256 signatures
-* ✅ Audit logging for all auth events
-
-**No shortcuts. Security is non-negotiable.**
-
----
-
-## Roadmap
-
-### Phase 1: Core Authentication ✅ (Current)
-- [x] Email/password auth
-- [x] JWT token management
-- [x] User model + organizations
-- [x] Social login (Google, GitHub)
-- [x] Email verification flow
-- [x] Password reset flow
-
-### Phase 2: Platform Infrastructure ✅
-- [x] API key generation & management
-- [x] Rate limiting per organization
-- [x] Organization roles & permissions
-- [x] Webhooks system
-- [x] Audit logging
-
-### Phase 3: Developer Experience ✅
-- [x] API documentation (OpenAPI/Swagger)
-- [x] Standardized error responses
-- [x] Pagination & filtering
-- [x] Developer quickstart guide
-- [ ] JavaScript SDK
-- [ ] Python SDK
-- [ ] Example integrations (Next.js, Express, Django)
-
-### Phase 4: Production & Hosting
-- [ ] Docker containerization
-- [ ] Kubernetes deployment configs
-- [ ] Managed hosting infrastructure
-- [ ] Customer dashboard
-- [ ] Billing integration
-
----
-
-## What Differentiates Us from Competitors?
-
-| Feature | HVT | Firebase Auth | Auth0 | Clerk |
-|---------|-----|---------------|-------|-------|
-| **Open-Source** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Self-Hostable** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **REST API-First** | ✅ Yes | ⚠️ SDK-heavy | ✅ Yes | ✅ Yes |
-| **Pricing Model** | Flat rate | Pay-per-use | Per user | Per user |
-| **Starter Price** | $19/mo | Free tier | $23/mo | $25/mo |
-| **Data Ownership** | ✅ Full | ❌ Google-only | ❌ Auth0-only | ❌ Clerk-only |
-| **Backend Focus** | ✅ Yes | ⚠️ Frontend-heavy | ✅ Yes | ⚠️ Frontend-heavy |
-
-**Our Advantage:**
-* Open-source → Trust & customization
-* Self-hostable → Data sovereignty
-* Affordable → Predictable costs for startups
-* Simple → Just auth, done right
-
----
-
-## Getting Started (Self-Hosted)
-
-### Prerequisites
-* Python 3.11+
-* PostgreSQL 14+
-* Docker (optional)
-
-### Quick Start
+### Local development
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/hvt.git
+git clone https://github.com/markodera/hvt.git
 cd hvt
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
 cp .env.example .env
-# Edit .env with your database credentials
-
-# Run migrations
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 python manage.py migrate
-
-# Create superuser
-python manage.py createsuperuser
-
-# Run development server
 python manage.py runserver
 ```
 
-Visit http://localhost:8000/admin to access the admin panel.
+The API will be available at `http://localhost:8000`.
 
----
+### Docker
 
-## Documentation
+```bash
+cp .env.example .env
+docker-compose up --build
+```
 
-* **Developer Quickstart:** [docs/QUICKSTART.md](docs/QUICKSTART.md)
-* **API Key Guide:** [API_KEY_GUIDE.md](API_KEY_GUIDE.md)
-* **Browser Auth:** [docs/BROWSER_AUTHENTICATION.md](docs/BROWSER_AUTHENTICATION.md)
-* **Webhooks:** [docs/WEBHOOKS.md](docs/WEBHOOKS.md)
-* **API Docs (Swagger):** `/api/docs/` (when running locally)
+The compose stack starts PostgreSQL, Redis, and the Django API.
 
----
+## Configuration
 
-## Contributing
+Start from [`.env.example`](.env.example). The checked-in defaults are intentionally local-development oriented. For hosted or production deployment, override the security and domain settings documented in [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md).
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+If you use runtime auth in a customer-facing app, set each project's `frontend_url` so email verification and password reset links land on the correct frontend.
 
----
+## Public Endpoints
+
+- Main app: [hvts.app](https://hvts.app)
+- Direct API base URL: [api.hvts.app](https://api.hvts.app)
+- Documentation: [docs.hvts.app](https://docs.hvts.app)
+
+## Runtime API Notes
+
+Runtime requests are authenticated with `X-API-Key` and require the `auth:runtime` scope.
+
+Key runtime endpoints:
+
+```text
+POST /api/v1/auth/runtime/register/
+POST /api/v1/auth/runtime/login/
+GET  /api/v1/auth/runtime/social/providers/
+POST /api/v1/auth/runtime/social/google/
+POST /api/v1/auth/runtime/social/github/
+POST /api/v1/auth/runtime/register/resend-email/
+POST /api/v1/auth/runtime/register/verify-email/
+POST /api/v1/auth/runtime/password/reset/
+POST /api/v1/auth/runtime/password/reset/validate/
+POST /api/v1/auth/runtime/password/reset/confirm/<uidb64>/<token>/
+```
+
+## Docs
+
+- [Developer quickstart](docs/QUICKSTART.md)
+- [Browser authentication guide](docs/BROWSER_AUTHENTICATION.md)
+- [Webhook guide](docs/WEBHOOKS.md)
+- [Railway deployment](docs/RAILWAY_DEPLOYMENT.md)
+- [Runtime/frontend handoff](docs/RUNTIME_FRONTEND_HANDOFF.md)
+- [SDK repo split guide](docs/SDK_REPO_SPLIT.md)
+- [Open-source release checklist](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md)
+
+When running locally, OpenAPI docs are available at `/api/docs/` and `/api/redoc/` if `EXPOSE_API_DOCS=1`.
+
+## Development
+
+Run checks and tests before opening a pull request:
+
+```bash
+python manage.py check
+python manage.py test
+```
+
+Contribution, conduct, and security reporting live here:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md)
+
+## TypeScript SDK
+
+The TypeScript SDK now lives in its own repository so SDK contributors do not need the backend codebase.
+
+- SDK repo: [markodera/hvt-sdk](https://github.com/markodera/hvt-sdk)
+- NPM package: `@hvt/sdk`
+- Direct API users can integrate against [api.hvts.app](https://api.hvts.app) without using an SDK
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-**Open code. Paid hosting. Fair business.**
-
----
-
-## Support
-
-* **Community:** [Discord Server] (Coming Soon)
-* **Issues:** [GitHub Issues](https://github.com/yourusername/hvt/issues)
-* **Email:** support@hvt.dev (Paid customers only)
-
----
-
-**Built with ❤️ for developers who just want to ship.**
+HVT is released under the [GNU Affero General Public License v3.0 only](LICENSE).

@@ -1,4 +1,10 @@
 {
   "python.REPL.enableREPLSmartSend": false,
-  "python-envs.defaultEnvManager": "ms-python.python:pipenv"
+  "python-envs.defaultEnvManager": "ms-python.python:pipenv",
+  "chat.tools.terminal.autoApprove": {
+    "/^python manage\\.py shell -c \"import django; django\\.setup\\(\\); from hvt\\.api\\.v1\\.serializers\\.users import BaseRegisterSerializer; s=BaseRegisterSerializer\\(data=\\{'email': 'test2@test\\.com', 'password1': 'p', 'password2': 'p', 'first_name': 'A', 'last_name': 'B'\\}\\); s\\.is_valid\\(\\); print\\(s\\.validated_data\\.get\\('first_name'\\)\\)\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
 }

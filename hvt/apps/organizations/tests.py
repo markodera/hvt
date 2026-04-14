@@ -607,6 +607,29 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
         ).latest("created_at")
         self.assertEqual(audit_log.event_data["slug"], "storefront-prod")
 
+    def test_owner_can_create_project_with_frontend_url(self):
+        response = self.client.post(
+            reverse("project_list_create"),
+            {
+                "name": "Storefront Runtime",
+                "slug": "storefront-runtime",
+                "allow_signup": True,
+                "frontend_url": "https://storefront.example.com/",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        project = Project.objects.get(
+            organization=self.org,
+            slug="storefront-runtime",
+        )
+        self.assertEqual(project.frontend_url, "https://storefront.example.com")
+        self.assertEqual(
+            response.data["frontend_url"],
+            "https://storefront.example.com",
+        )
+
     def test_api_key_creation_defaults_to_default_project(self):
         response = self.client.post(
             reverse("apikey_list_create"),
@@ -996,6 +1019,44 @@ class ProjectAccessManagementTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["permissions"], ["orders.read.own"])
         self.assertEqual(response.data["roles"][0]["slug"], "buyer")
+
+    def test_current_project_access_allows_cross_project_role_assignment(self):
+        secondary_project = Project.objects.create(
+            organization=self.org,
+            name="Secondary Store",
+            slug="secondary-store",
+            allow_signup=True,
+        )
+        permission = ProjectPermission.objects.create(
+            project=secondary_project,
+            slug="orders.read.secondary",
+            name="Read Secondary Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=secondary_project,
+            slug="secondary-buyer",
+            name="Secondary Buyer",
+        )
+        role.permissions.add(permission)
+        self.member.project = self.default_project
+        self.member.save(update_fields=["project"])
+        UserProjectRole.objects.create(
+            user=self.member,
+            role=role,
+            assigned_by=self.owner,
+        )
+        self.client.force_authenticate(user=self.member)
+
+        response = self.client.get(
+            reverse(
+                "current_project_access",
+                kwargs={"project_pk": secondary_project.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["permissions"], ["orders.read.secondary"])
+        self.assertEqual(response.data["roles"][0]["slug"], "secondary-buyer")
 
     def test_role_delete_is_blocked_when_assigned(self):
         role = ProjectRole.objects.create(
