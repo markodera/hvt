@@ -6,7 +6,7 @@ django-allauth==65.13.1
 django-cors-headers==4.9.0
 django-filter==25.2
 django-redis==6.0.0
-djangorestframework==3.14.0
+djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 drf-spectacular==0.29.0
 gunicorn==23.0.0
