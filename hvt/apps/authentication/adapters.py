@@ -77,7 +77,7 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             # Extract App/Project name if this is a runtime auth flow
             project_name = None
             project = None
-            request = context.get('request')
+            request = context.get('request') or getattr(self, 'request', None)
             if request:
                 api_key = getattr(request, 'auth', None)
                 if api_key and hasattr(api_key, 'project') and api_key.project:
