@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local scratch and generated release artifacts
+.agent/
+tmp/
+tests/tmpclaude-*/
+tests/test_output*.txt
+tests/test_results*.txt
+tests/test_final.txt
+error_check.txt
+last100_logs.txt
+tmp_logs.txt
+sdk/typescript/*.tgz

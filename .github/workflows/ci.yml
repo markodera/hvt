@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: hvt
+          POSTGRES_USER: hvt
+          POSTGRES_PASSWORD: hvt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hvt -d hvt"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DEBUG: "1"
+      SECRET_KEY: ci-secret-key
+      FRONTEND_URL: http://localhost:5173
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CSRF_TRUSTED_ORIGINS: http://localhost:5173
+      DB_NAME: hvt
+      DB_USER: hvt
+      DB_PASSWORD: hvt
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      USE_REDIS_CACHE: "0"
+      EXPOSE_ADMIN: "1"
+      EXPOSE_API_DOCS: "1"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Django system checks
+        run: python manage.py check
+
+      - name: Runtime auth smoke tests
+        run: >
+          python manage.py test
+          hvt.apps.authentication.tests.RuntimePasswordResetFlowTest
+          hvt.apps.authentication.tests.RuntimeEmailVerificationFlowTest
+          hvt.apps.authentication.tests.RuntimeLoginFlowTest.test_runtime_login_allows_project_role_assignment_on_api_key_project
+          hvt.apps.organizations.tests.ProjectAndAPIKeyScopingTest.test_owner_can_create_project_with_frontend_url
+          hvt.apps.organizations.tests.ProjectAccessManagementTest.test_current_project_access_allows_cross_project_role_assignment
+          hvt.apps.organizations.tests_invitations.OrganizationInvitationAPITest.test_accept_same_org_project_invitation_preserves_org_and_grants_project_access

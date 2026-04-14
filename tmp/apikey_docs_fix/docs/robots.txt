@@ -1,5 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://docs.hvts.app/sitemap.xml
-Host: docs.hvts.app
