@@ -4,8 +4,11 @@ from rest_framework.exceptions import NotFound
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import Count, Q
+from django.utils import timezone
+from datetime import timedelta
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 from django.conf import settings
 from django.utils import timezone
 from dj_rest_auth.app_settings import api_settings as dj_rest_auth_settings
@@ -1642,6 +1645,67 @@ class OrganizationInvitationAcceptView(APIView):
 
 
 # --- Webhook CRUD Views ---
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Webhooks"],
+        summary="Webhook delivery summary",
+        description="Get an overview of webhook delivery statistics over the last 24 hours.",
+        responses={
+            200: inline_serializer(
+                name="WebhookSummaryResponse",
+                fields={
+                    "total_deliveries_24h": serializers.IntegerField(),
+                    "successful_24h": serializers.IntegerField(),
+                    "failed_24h": serializers.IntegerField(),
+                },
+            )
+        },
+    )
+)
+class WebhookSummaryView(APIView):
+    """
+    Get summarized webhook delivery info for last 24 hours.
+    """
+    permission_classes = [IsOrgAdminOrAPIKey]
+    api_key_read_scopes = ("webhooks:read",)
+
+    def get(self, request, *args, **kwargs):
+        if isinstance(self.request.auth, APIKey):
+            org = self.request.auth.organization
+            project = getattr(self.request.auth, "project", None)
+        elif self.request.user and hasattr(self.request.user, "organization"):
+            org = self.request.user.organization
+            project = None
+        else:
+            return Response({"total_deliveries_24h": 0, "successful_24h": 0, "failed_24h": 0})
+
+        if not org:
+            return Response({"total_deliveries_24h": 0, "successful_24h": 0, "failed_24h": 0})
+
+        time_threshold = timezone.now() - timedelta(hours=24)
+        
+        # Filter deliveries for these webhooks
+        qs = WebhookDelivery.objects.filter(
+            webhook__organization=org,
+            created_at__gte=time_threshold
+        )
+        
+        if project:
+            qs = qs.filter(webhook__project=project)
+            
+        stats = qs.aggregate(
+            total=Count('id'),
+            success_count=Count('id', filter=Q(status='success')),
+            failed_count=Count('id', filter=Q(status='failed'))
+        )
+        
+        return Response({
+            "total_deliveries_24h": stats["total"] or 0,
+            "successful_24h": stats["success_count"] or 0,
+            "failed_24h": stats["failed_count"] or 0,
+        })
 
 
 @extend_schema_view(

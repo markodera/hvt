@@ -559,6 +559,38 @@ class WebhookDeliveryAPITest(APITestCase):
         self.assertEqual(len(resp.data["results"]), 1)
         self.assertEqual(resp.data["results"][0]["status"], "success")
 
+    def test_webhook_summary(self):
+        # Create successful delivery within 24h
+        WebhookDelivery.objects.create(
+            webhook=self.webhook,
+            event_type="user.created",
+            payload={"user_id": str(uuid.uuid4())},
+            status="success",
+        )
+        # Create failed delivery within 24h
+        WebhookDelivery.objects.create(
+            webhook=self.webhook,
+            event_type="user.created",
+            payload={"user_id": str(uuid.uuid4())},
+            status="failed",
+        )
+        
+        # Create older delivery (outside 24h window) - Should not be included
+        old_delivery = WebhookDelivery.objects.create(
+            webhook=self.webhook,
+            event_type="user.created",
+            payload={"user_id": str(uuid.uuid4())},
+            status="success",
+        )
+        old_delivery.created_at = timezone.now() - timedelta(hours=48)
+        old_delivery.save()
+
+        url = "/api/v1/organizations/current/webhooks/summary/"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, http_status.HTTP_200_OK)
+        self.assertEqual(resp.data["total_deliveries_24h"], 2)
+        self.assertEqual(resp.data["successful_24h"], 1)
+        self.assertEqual(resp.data["failed_24h"], 1)
 
 # ---------------------------------------------------------------------------
 # Management Command Tests

@@ -109,6 +109,11 @@ urlpatterns = [
     ),
     # Webhook Management
     path(
+        "current/webhooks/summary/",
+        views.WebhookSummaryView.as_view(),
+        name="webhook_summary",
+    ),
+    path(
         "current/webhooks/",
         views.WebhookListCreateView.as_view(),
         name="webhook_list_create",
