@@ -149,6 +149,7 @@ def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
             "organization_slug": invitation.organization.slug,
             "invitee_email": invitation.email,
             "invited_by_email": invitation.invited_by.email if invitation.invited_by else "",
+            "invited_by_name": invitation.invited_by.full_name if invitation.invited_by and invitation.invited_by.full_name else (invitation.invited_by.email if invitation.invited_by else ""),
             "role_label": role_label,
             "project_name": invitation.project.name if invitation.project else "",
             "project_slug": invitation.project.slug if invitation.project else "",
@@ -427,6 +428,8 @@ class ProjectListCreateView(generics.ListCreateAPIView):
                 "slug": project.slug,
                 "allow_signup": project.allow_signup,
                 "is_default": project.is_default,
+                "frontend_url": project.frontend_url,
+                "allowed_origins": project.allowed_origins,
             },
             success=True,
         )
@@ -440,6 +443,8 @@ class ProjectListCreateView(generics.ListCreateAPIView):
                 "slug": project.slug,
                 "allow_signup": project.allow_signup,
                 "is_default": project.is_default,
+                "frontend_url": project.frontend_url,
+                "allowed_origins": project.allowed_origins,
             },
         )
 

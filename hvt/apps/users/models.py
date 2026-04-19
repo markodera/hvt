@@ -93,7 +93,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def full_name(self) -> str:
-        return f"{self.first_name} {self.last_name}"
+        parts = [
+            (self.first_name or "").strip(),
+            (self.last_name or "").strip(),
+        ]
+        return " ".join(part for part in parts if part)
 
     def is_org_owner(self):
         return self.role == self.Role.OWNER

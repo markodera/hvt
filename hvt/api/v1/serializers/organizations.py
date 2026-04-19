@@ -14,6 +14,7 @@ from hvt.apps.organizations.models import (
     WebhookDelivery,
     OrganizationInvitation,
 )
+from hvt.apps.organizations.runtime_origins import normalize_runtime_origin, normalize_runtime_origins
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -43,8 +44,33 @@ class OrganizationSerializer(serializers.ModelSerializer):
 class ProjectSerializer(serializers.ModelSerializer):
     """Serializer for organization projects."""
 
+    allowed_origins = serializers.ListField(
+        child=serializers.CharField(max_length=500),
+        required=False,
+        allow_empty=True,
+    )
+
     def validate_frontend_url(self, value):
         return (value or "").strip().rstrip("/")
+
+    def validate_allowed_origins(self, value):
+        normalized_origins = []
+        invalid_values = []
+
+        for item in value or []:
+            normalized_origin = normalize_runtime_origin(item)
+            if not normalized_origin:
+                invalid_values.append(str(item))
+                continue
+            if normalized_origin not in normalized_origins:
+                normalized_origins.append(normalized_origin)
+
+        if invalid_values:
+            raise serializers.ValidationError(
+                "Enter full origins like https://app.example.com or http://localhost:3000."
+            )
+
+        return normalize_runtime_origins(normalized_origins)
 
     class Meta:
         model = Project
@@ -56,6 +82,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "is_active",
             "allow_signup",
             "frontend_url",
+            "allowed_origins",
             "created_at",
             "updated_at",
         ]

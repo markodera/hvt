@@ -7,7 +7,13 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase, APIRequestFactory
 from rest_framework import status
 
-from hvt.apps.organizations.models import Organization, APIKey
+from hvt.apps.organizations.models import (
+    APIKey,
+    Organization,
+    Project,
+    ProjectRole,
+    UserProjectRole,
+)
 from hvt.apps.authentication.permissions import (
     IsOrgAdminOrAPIKey,
     IsOrgOwnerOrAPIKey,
@@ -562,3 +568,96 @@ class RoleUpdateEndpointTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.member.refresh_from_db()
         self.assertEqual(self.member.role, "member")
+
+
+class UserListAppRolesTest(APITestCase):
+    """Expose assigned app roles on user list and detail responses."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Test Org", slug="test-org-users")
+        self.owner = User.objects.create_user(
+            email="owner-users@example.com",
+            password="password123",
+            organization=self.org,
+            role="owner",
+        )
+        self.member = User.objects.create_user(
+            email="member-users@example.com",
+            password="password123",
+            organization=self.org,
+            role="member",
+        )
+        self.project = Project.objects.create(
+            organization=self.org,
+            name="Little Lemons",
+            slug="little-lemons",
+        )
+        self.member.project = self.project
+        self.member.save(update_fields=["project"])
+
+        self.buyer_role = ProjectRole.objects.create(
+            project=self.project,
+            slug="buyer",
+            name="Buyer",
+        )
+        self.seller_role = ProjectRole.objects.create(
+            project=self.project,
+            slug="seller",
+            name="Seller",
+        )
+        UserProjectRole.objects.create(user=self.member, role=self.buyer_role, assigned_by=self.owner)
+        UserProjectRole.objects.create(user=self.member, role=self.seller_role, assigned_by=self.owner)
+
+        self.client.force_authenticate(user=self.owner)
+
+    def test_user_list_includes_app_roles(self):
+        response = self.client.get("/api/v1/users/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result = next(item for item in response.data["results"] if item["id"] == str(self.member.id))
+
+        self.assertEqual(result["project_slug"], "little-lemons")
+        self.assertEqual(
+            result["app_roles"],
+            [
+                {
+                    "id": str(self.buyer_role.id),
+                    "slug": "buyer",
+                    "name": "Buyer",
+                    "project": str(self.project.id),
+                    "project_slug": "little-lemons",
+                },
+                {
+                    "id": str(self.seller_role.id),
+                    "slug": "seller",
+                    "name": "Seller",
+                    "project": str(self.project.id),
+                    "project_slug": "little-lemons",
+                },
+            ],
+        )
+
+    def test_user_detail_includes_app_roles(self):
+        response = self.client.get(f"/api/v1/users/{self.member.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["project_slug"], "little-lemons")
+        self.assertEqual(
+            response.data["app_roles"],
+            [
+                {
+                    "id": str(self.buyer_role.id),
+                    "slug": "buyer",
+                    "name": "Buyer",
+                    "project": str(self.project.id),
+                    "project_slug": "little-lemons",
+                },
+                {
+                    "id": str(self.seller_role.id),
+                    "slug": "seller",
+                    "name": "Seller",
+                    "project": str(self.project.id),
+                    "project_slug": "little-lemons",
+                },
+            ],
+        )

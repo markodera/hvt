@@ -12,11 +12,16 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 from corsheaders.defaults import default_headers
+from corsheaders.signals import check_request_enabled
 from urllib.parse import urlparse
 
 import dj_database_url
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
+from hvt.apps.organizations.runtime_origins import (
+    origin_is_allowed_for_runtime_preflight,
+    request_targets_runtime_public_endpoint,
+)
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -96,6 +101,11 @@ if DEBUG:
 if FRONTEND_URL:
     default_frontend_origins.append(FRONTEND_URL)
 default_frontend_origins = list(dict.fromkeys(default_frontend_origins))
+
+def _allow_localhost_runtime_cors(sender, request, **kwargs) -> bool:
+    return request_targets_runtime_public_endpoint(request) and (
+        origin_is_allowed_for_runtime_preflight(request.headers.get("origin", ""))
+    )
 
 
 # Application definition
@@ -194,6 +204,10 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Preserve django-cors-headers defaults and allow runtime API-key auth from browsers.
 CORS_ALLOW_HEADERS = [*default_headers, "x-api-key"]
+check_request_enabled.connect(
+    _allow_localhost_runtime_cors,
+    dispatch_uid="hvt.runtime_localhost_cors",
+)
 
 CSRF_TRUSTED_ORIGINS = _env_list(
     "CSRF_TRUSTED_ORIGINS",

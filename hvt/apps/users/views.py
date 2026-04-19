@@ -1,6 +1,7 @@
 from rest_framework import generics, status, filters
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
+from django.db.models import Prefetch
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view
 
@@ -11,7 +12,7 @@ from hvt.apps.authentication.permissions import (
     IsOrgAdminOrAPIKey,
     IsOrgMemberOrAPIKey,
 )
-from hvt.apps.organizations.models import APIKey
+from hvt.apps.organizations.models import APIKey, UserProjectRole
 from hvt.apps.organizations.webhooks import trigger_webhook_event
 from hvt.api.v1.serializers.users import (
     UserSerializer,
@@ -40,7 +41,22 @@ def _get_user_queryset(request):
     if not org:
         return User.objects.none()
 
-    queryset = User.objects.filter(organization=org)
+    queryset = User.objects.filter(organization=org).select_related(
+        "organization",
+        "project",
+    ).prefetch_related(
+        Prefetch(
+            "project_role_assignments",
+            queryset=UserProjectRole.objects.select_related(
+                "role",
+                "role__project",
+            ).order_by(
+                "role__project__slug",
+                "role__name",
+                "role__slug",
+            ),
+        )
+    )
     if isinstance(request.auth, APIKey) and request.auth.project_id:
         queryset = queryset.filter(project=request.auth.project)
     return queryset

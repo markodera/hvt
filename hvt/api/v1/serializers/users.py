@@ -466,9 +466,48 @@ class RuntimeSocialLoginSerializer(CustomSocialLoginSerializer):
         return attrs
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserProjectRoleSummarySerializer(serializers.Serializer):
+    """Compact project-role payload for user list and detail views."""
+
+    id = serializers.UUIDField(read_only=True)
+    slug = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    project = serializers.UUIDField(source="project_id", read_only=True)
+    project_slug = serializers.CharField(source="project.slug", read_only=True)
+
+
+class UserAppRolesMixin:
+    """Expose a user's assigned app roles with project context."""
+
+    @extend_schema_field(UserProjectRoleSummarySerializer(many=True))
+    def get_app_roles(self, obj):
+        assignments = getattr(obj, "project_role_assignments", None)
+        if assignments is None:
+            return []
+
+        seen_role_ids = set()
+        roles = []
+        for assignment in assignments.all():
+            role = getattr(assignment, "role", None)
+            if role is None or role.id in seen_role_ids:
+                continue
+            seen_role_ids.add(role.id)
+            roles.append(role)
+
+        roles.sort(
+            key=lambda role: (
+                (getattr(getattr(role, "project", None), "slug", "") or ""),
+                (role.name or ""),
+                (role.slug or ""),
+            )
+        )
+        return UserProjectRoleSummarySerializer(roles, many=True).data
+
+
+class UserSerializer(UserAppRolesMixin, serializers.ModelSerializer):
     """Serializer for User model"""
 
+    app_roles = serializers.SerializerMethodField()
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
@@ -486,6 +525,7 @@ class UserSerializer(serializers.ModelSerializer):
             "organization",
             "project",
             "project_slug",
+            "app_roles",
             "role",
             "role_display",
             "is_project_scoped",
@@ -499,6 +539,7 @@ class UserSerializer(serializers.ModelSerializer):
             "organization",
             "project",
             "project_slug",
+            "app_roles",
             "is_project_scoped",
             "is_test",
             "created_at",
@@ -540,9 +581,10 @@ class UserRoleUpdateSerializer(serializers.ModelSerializer):
             return value
 
 
-class OrganizationMemberSerializer(serializers.ModelSerializer):
+class OrganizationMemberSerializer(UserAppRolesMixin, serializers.ModelSerializer):
     """Serializer for listing organization members when role with info."""
 
+    app_roles = serializers.SerializerMethodField()
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
@@ -561,6 +603,7 @@ class OrganizationMemberSerializer(serializers.ModelSerializer):
             "organization",
             "project",
             "project_slug",
+            "app_roles",
             "role",
             "role_display",
             "is_active",

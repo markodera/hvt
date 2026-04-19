@@ -630,6 +630,36 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
             "https://storefront.example.com",
         )
 
+    def test_owner_can_create_project_with_allowed_origins(self):
+        response = self.client.post(
+            reverse("project_list_create"),
+            {
+                "name": "Storefront Preview",
+                "slug": "storefront-preview",
+                "allow_signup": True,
+                "frontend_url": "https://storefront.example.com/app",
+                "allowed_origins": [
+                    "https://preview.example.com:3000/path",
+                    "http://localhost:3000",
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        project = Project.objects.get(
+            organization=self.org,
+            slug="storefront-preview",
+        )
+        self.assertEqual(
+            project.allowed_origins,
+            ["https://preview.example.com:3000", "http://localhost:3000"],
+        )
+        self.assertEqual(
+            response.data["allowed_origins"],
+            ["https://preview.example.com:3000", "http://localhost:3000"],
+        )
+
     def test_api_key_creation_defaults_to_default_project(self):
         response = self.client.post(
             reverse("apikey_list_create"),

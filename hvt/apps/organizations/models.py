@@ -7,6 +7,8 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from hvt.apps.organizations.runtime_origins import normalize_runtime_origins
+
 
 APP_ACCESS_SLUG_VALIDATOR = RegexValidator(
     regex=r"^[a-z0-9]+(?:[._:-][a-z0-9]+)*$",
@@ -86,6 +88,14 @@ class Project(models.Model):
             "Used for project-scoped verification and password reset links."
         ),
     )
+    allowed_origins = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Additional browser origins allowed to call runtime auth endpoints for this project. "
+            "Use full origins like https://app.example.com or http://localhost:3000."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -110,6 +120,7 @@ class Project(models.Model):
     def save(self, *args, **kwargs):
         if isinstance(self.frontend_url, str):
             self.frontend_url = self.frontend_url.strip().rstrip("/")
+        self.allowed_origins = normalize_runtime_origins(self.allowed_origins)
         return super().save(*args, **kwargs)
 
 

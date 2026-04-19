@@ -228,7 +228,7 @@ class ProjectAdmin(admin.ModelAdmin):
     inlines = [SocialProviderConfigInline]
     fieldsets = (
         ("Project", {"fields": ("organization", "name", "slug")}),
-        ("Controls", {"fields": ("is_default", "is_active", "allow_signup")}),
+        ("Controls", {"fields": ("is_default", "is_active", "allow_signup", "frontend_url", "allowed_origins")}),
         ("Summary", {"fields": ("role_total", "permission_total", "user_total")}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )

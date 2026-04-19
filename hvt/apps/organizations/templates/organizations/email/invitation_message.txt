@@ -22,7 +22,7 @@ Invitation details:
 {% endif %}
 - Email: {{ invitee_email }}
 - Expires: {{ expires_at_display }}
-{% if invited_by_email %}- Invited by: {{ invited_by_email }}
+{% if invited_by_name %}- Invited by: {{ invited_by_name }}
 {% endif %}
 
 Use the same email address this invitation was sent to when you accept it.

@@ -782,6 +782,180 @@ class APIKeyRegistrationFlowTest(APITestCase):
         self.assertFalse(User.objects.filter(email="wrong-route@example.com").exists())
         mock_send_mail.assert_not_called()
 
+    @override_settings(
+        CORS_ALLOW_ALL_ORIGINS=False,
+        CORS_ALLOWED_ORIGINS=["https://hvts.app"],
+    )
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_test_key_runtime_register_allows_localhost_origin(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "local-runtime-user@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+            HTTP_ORIGIN="http://localhost:3000",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "http://localhost:3000",
+        )
+        mock_send_mail.assert_called_once()
+
+    @override_settings(
+        CORS_ALLOW_ALL_ORIGINS=False,
+        CORS_ALLOWED_ORIGINS=["https://hvts.app"],
+    )
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_live_key_runtime_register_allows_project_origin(self, mock_send_mail):
+        self.default_project.frontend_url = "https://storefront.example.com/app"
+        self.default_project.allowed_origins = ["https://preview.example.com:3001/path"]
+        self.default_project.save(
+            update_fields=["frontend_url", "allowed_origins", "updated_at"]
+        )
+
+        live_prefix, live_full_key, live_hashed_key = APIKey.generate_key(
+            environment="live"
+        )
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Live Runtime Signup Key",
+            environment="live",
+            prefix=live_prefix,
+            hashed_key=live_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "configured-live-user@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+            HTTP_X_API_KEY=live_full_key,
+            HTTP_ORIGIN="https://preview.example.com:3001",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "https://preview.example.com:3001",
+        )
+        mock_send_mail.assert_called_once()
+
+    @override_settings(
+        CORS_ALLOW_ALL_ORIGINS=False,
+        CORS_ALLOWED_ORIGINS=["https://hvts.app"],
+    )
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_live_key_runtime_register_rejects_unknown_origin(self, mock_send_mail):
+        live_prefix, live_full_key, live_hashed_key = APIKey.generate_key(
+            environment="live"
+        )
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Live Runtime Signup Key",
+            environment="live",
+            prefix=live_prefix,
+            hashed_key=live_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "blocked-live-user@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+            HTTP_X_API_KEY=live_full_key,
+            HTTP_ORIGIN="https://unknown.example.com",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            str(response.data["detail"]),
+            "This origin is not allowed for the provided API key.",
+        )
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertFalse(
+            User.objects.filter(email="blocked-live-user@example.com").exists()
+        )
+        mock_send_mail.assert_not_called()
+
+
+@override_settings(
+    ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"],
+    CORS_ALLOW_ALL_ORIGINS=False,
+    CORS_ALLOWED_ORIGINS=["https://hvts.app"],
+)
+class RuntimeCorsPreflightTest(APITestCase):
+    """Runtime browser auth should allow localhost preflight without opening control-plane auth."""
+
+    def preflight(self, path: str, origin: str = "http://localhost:3000"):
+        return self.client.options(
+            path,
+            HTTP_ORIGIN=origin,
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type,x-api-key",
+        )
+
+    def test_runtime_register_preflight_allows_localhost_origin(self):
+        response = self.preflight("/api/v1/auth/runtime/register/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "http://localhost:3000",
+        )
+        allowed_headers = response.headers.get("Access-Control-Allow-Headers", "").lower()
+        self.assertIn("content-type", allowed_headers)
+        self.assertIn("x-api-key", allowed_headers)
+
+    def test_runtime_register_preflight_allows_configured_project_origin(self):
+        owner = User.objects.create_user(
+            email="runtime-cors-owner@example.com",
+            password="Strongpass123!",
+        )
+        org = Organization.objects.create(
+            name="Runtime CORS Org",
+            slug="runtime-cors-org",
+            owner=owner,
+        )
+        project = org.ensure_default_project()
+        project.frontend_url = "https://storefront.example.com/app"
+        project.allowed_origins = ["https://preview.example.com:3001/path"]
+        project.save(update_fields=["frontend_url", "allowed_origins", "updated_at"])
+
+        response = self.preflight(
+            "/api/v1/auth/runtime/register/",
+            origin="https://preview.example.com:3001",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "https://preview.example.com:3001",
+        )
+
+    def test_control_plane_register_preflight_stays_blocked_for_localhost(self):
+        response = self.preflight("/api/v1/auth/register/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class RuntimeLoginFlowTest(APITestCase):

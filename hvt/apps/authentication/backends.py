@@ -6,6 +6,10 @@ from rest_framework import authentication, exceptions
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from hvt.apps.organizations.models import APIKey
+from hvt.apps.organizations.runtime_origins import (
+    origin_is_allowed_for_api_key,
+    request_targets_runtime_api_key_endpoint,
+)
 from hvt.apps.authentication.tokens import _OrgClaimVerificationMixin
 
 logger = logging.getLogger(__name__)
@@ -31,9 +35,9 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             return None
 
         logger.debug("[APIKeyAuthentication] API key header detected")
-        return self.validate_key(api_key)
+        return self.validate_key(api_key, request=request)
 
-    def validate_key(self, key: str):
+    def validate_key(self, key: str, request=None):
         """Validate the API key and return (user, auth_info)."""
         from hvt.apps.organizations.api_key_expiry import emit_api_key_expiry_webhook
 
@@ -99,6 +103,24 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             )
         elif not api_key_obj.project.is_active:
             raise exceptions.AuthenticationFailed("API key project is inactive.")
+
+        if request is not None and request_targets_runtime_api_key_endpoint(request):
+            request_origin = (request.headers.get("origin") or "").strip()
+            if request_origin:
+                request_host_origin = ""
+                try:
+                    request_host_origin = f"{request.scheme}://{request.get_host()}"
+                except Exception:
+                    request_host_origin = ""
+
+                if not origin_is_allowed_for_api_key(
+                    request_origin,
+                    api_key_obj,
+                    request_host_origin=request_host_origin,
+                ):
+                    raise exceptions.PermissionDenied(
+                        "This origin is not allowed for the provided API key."
+                    )
 
         # Update last used timestamp
         api_key_obj.update_last_used()
