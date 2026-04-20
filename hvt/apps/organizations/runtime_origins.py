@@ -5,6 +5,7 @@ LOCAL_DEVELOPMENT_ORIGIN_HOSTS = {"localhost", "127.0.0.1"}
 RUNTIME_PUBLIC_CORS_PATH_PREFIXES = (
     "/api/v1/auth/runtime/register",
     "/api/v1/auth/runtime/login",
+    "/api/v1/auth/runtime/verify-email",
     "/api/v1/auth/runtime/register/verify-email",
     "/api/v1/auth/runtime/register/resend-email",
     "/api/v1/auth/runtime/password/reset",
