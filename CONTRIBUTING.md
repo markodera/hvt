@@ -52,7 +52,7 @@ If you are changing runtime auth or project access behavior, also run the target
 python manage.py test \
   hvt.apps.authentication.tests.RuntimePasswordResetFlowTest \
   hvt.apps.authentication.tests.RuntimeEmailVerificationFlowTest \
-  hvt.apps.authentication.tests.RuntimeLoginFlowTest.test_runtime_login_allows_project_role_assignment_on_api_key_project \
+  hvt.apps.authentication.tests.RuntimeLoginFlowTest.test_runtime_login_rejects_cross_project_role_assignment_without_project_user \
   hvt.apps.organizations.tests.ProjectAndAPIKeyScopingTest.test_owner_can_create_project_with_frontend_url \
   hvt.apps.organizations.tests.ProjectAccessManagementTest.test_current_project_access_allows_cross_project_role_assignment \
   hvt.apps.organizations.tests_invitations.OrganizationInvitationAPITest.test_accept_same_org_project_invitation_preserves_org_and_grants_project_access

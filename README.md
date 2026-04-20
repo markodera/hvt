@@ -20,7 +20,8 @@ HVT separates two concerns:
 - control plane: the dashboard and admin-facing APIs used to manage organizations, projects, API keys, social providers, invites, and webhooks
 - runtime plane: project-scoped auth flows that your application uses for sign-up, sign-in, social login, verify-email, and password reset
 
-User accounts are shared at the organization level, while runtime access is enforced per project through direct membership or assigned project roles.
+**True Multi-Tenant Isolation:**
+User accounts are strictly isolated at the project level. Unlike traditional Django apps where an email must be globally unique, HVT uses an Auth0-style composite identity model (`Project_ID + Email`). The same customer can sign up for multiple independent apps on your platform without user pools ever bleeding across boundaries.
 
 ## Repository Layout
 
