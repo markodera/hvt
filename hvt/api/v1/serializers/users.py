@@ -1,13 +1,27 @@
-from rest_framework import serializers
+from rest_framework import exceptions, serializers
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.oauth2.client import OAuth2Error
-from django.core.exceptions import ImproperlyConfigured, MultipleObjectsReturned
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    MultipleObjectsReturned,
+    ValidationError as DjangoValidationError,
+)
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.utils.translation import gettext_lazy as _
 from requests.exceptions import RequestException
 import logging
 import sys
+from allauth.account.adapter import get_adapter
+from allauth.account.utils import setup_user_email
 from hvt.apps.authentication.models import AuditLog
+from hvt.apps.authentication.identity import (
+    get_control_plane_users_by_email,
+    get_runtime_legacy_users_by_email,
+    get_runtime_project_users_by_email,
+    get_runtime_user_for_api_key,
+    normalize_email,
+)
 from hvt.apps.organizations.access import assign_default_signup_roles, user_has_project_access
 from hvt.apps.users.models import User
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig, UserProjectRole
@@ -76,11 +90,43 @@ def _require_runtime_scope(api_key: APIKey) -> None:
         )
 
 
-def _create_registered_user(serializer: RegisterSerializer, request):
+from hvt.exceptions import EmailInUseException
+
+
+def _create_registered_user(
+    serializer: RegisterSerializer,
+    request,
+    *,
+    organization=None,
+    project=None,
+    role=None,
+):
     """Persist a new user with consistent error handling for register flows."""
     try:
         with transaction.atomic():
-            return super(serializer.__class__, serializer).save(request)
+            adapter = get_adapter()
+            user = adapter.new_user(request)
+            serializer.cleaned_data = serializer.get_cleaned_data()
+            user = adapter.save_user(request, user, serializer, commit=False)
+            if "password1" in serializer.cleaned_data:
+                try:
+                    adapter.clean_password(serializer.cleaned_data["password1"], user=user)
+                except DjangoValidationError as exc:
+                    raise serializers.ValidationError(
+                        detail=serializers.as_serializer_error(exc)
+                    ) from exc
+
+            if organization is not None:
+                user.organization = organization
+            if project is not None:
+                user.project = project
+            if role is not None:
+                user.role = role
+
+            user.save()
+            serializer.custom_signup(request, user)
+            setup_user_email(request, user, [])
+            return user
     except IntegrityError as exc:
         logger.exception(
             "User registration failed due to integrity error",
@@ -89,9 +135,7 @@ def _create_registered_user(serializer: RegisterSerializer, request):
                 "method": getattr(request, "method", ""),
             },
         )
-        raise serializers.ValidationError(
-            {"email": ["A user with this email already exists."]}
-        ) from exc
+        raise EmailInUseException() from exc
     except Exception:
         request_email = ""
         try:
@@ -174,10 +218,7 @@ class BaseRegisterSerializer(RegisterSerializer):
         fields = ["email", "password1", "password2", "first_name", "last_name"]
 
     def validate_email(self, value):
-        normalized_email = (value or "").strip().lower()
-        if User.objects.filter(email__iexact=normalized_email).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
-        return normalized_email
+        return normalize_email(value)
 
     def get_cleaned_data(self):
         return {
@@ -209,6 +250,12 @@ class ControlPlaneRegisterSerializer(BaseRegisterSerializer):
         _log_registration_event(request, user)
         return user
 
+    def validate_email(self, value):
+        normalized_email = super().validate_email(value)
+        if get_control_plane_users_by_email(normalized_email).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return normalized_email
+
 
 class RuntimeRegisterSerializer(BaseRegisterSerializer):
     """API-key-scoped runtime registration for customer-facing app users."""
@@ -216,6 +263,23 @@ class RuntimeRegisterSerializer(BaseRegisterSerializer):
     default_error_messages = {
         "api_key_required": "A valid X-API-Key header is required.",
     }
+
+    def validate_email(self, value):
+        normalized_email = super().validate_email(value)
+        request = self.context.get("request")
+        api_key = getattr(request, "auth", None)
+        if not isinstance(api_key, APIKey):
+            return normalized_email
+
+        if get_runtime_project_users_by_email(normalized_email, api_key).exists():
+            raise serializers.ValidationError(
+                "A user with this email already exists for this project."
+            )
+        if get_runtime_legacy_users_by_email(normalized_email, api_key).exists():
+            raise serializers.ValidationError(
+                "A user with this email already exists for this project."
+            )
+        return normalized_email
 
     def save(self, request):
         """Register a runtime user inside the org/project resolved from the API key."""
@@ -242,13 +306,15 @@ class RuntimeRegisterSerializer(BaseRegisterSerializer):
                 }
             )
 
-        user = _create_registered_user(self, request)
+        user = _create_registered_user(
+            self,
+            request,
+            organization=api_key_org,
+            project=api_key_project,
+            role=User.Role.MEMBER if api_key_org else None,
+        )
 
         if api_key_org:
-            user.organization = api_key_org
-            user.role = User.Role.MEMBER
-            user.project = api_key_project
-            user.save(update_fields=["organization", "role", "project"])
             assign_default_signup_roles(user, api_key_project)
 
         _log_registration_event(request, user, organization=user.organization, project=api_key_project)
@@ -273,6 +339,40 @@ class CustomLoginSerializer(LoginSerializer):
         fields.pop("username", None)
         return fields
 
+    @staticmethod
+    def validate_email_verification_status(user, email=None):
+        if (
+            "dj_rest_auth.registration" in settings.INSTALLED_APPS
+            and not user.emailaddress_set.filter(email__iexact=user.email, verified=True).exists()
+        ):
+            raise exceptions.PermissionDenied(
+                "E-mail is not verified. Please verify your email before logging in."
+            )
+
+    def get_login_user(self, email, password):
+        user = get_control_plane_users_by_email(email).first()
+        if not user or not user.check_password(password):
+            return None
+        return user
+
+    def validate(self, attrs):
+        email = normalize_email(attrs.get("email", ""))
+        password = attrs.get("password")
+        if not email or not password:
+            raise exceptions.ValidationError(_('Must include "email" and "password".'))
+
+        user = self.get_login_user(email, password)
+        if not user:
+            raise exceptions.ValidationError(
+                _("Unable to log in with provided credentials.")
+            )
+
+        self.validate_auth_user_status(user)
+        self.validate_email_verification_status(user, email=email)
+        attrs["email"] = email
+        attrs["user"] = user
+        return attrs
+
 
 class RuntimeLoginSerializer(CustomLoginSerializer):
     """Login serializer for app-runtime auth scoped by API key org."""
@@ -286,8 +386,10 @@ class RuntimeLoginSerializer(CustomLoginSerializer):
     }
 
     def validate(self, attrs):
-        attrs = super().validate(attrs)
-
+        email = normalize_email(attrs.get("email", ""))
+        password = attrs.get("password")
+        if not email or not password:
+            raise exceptions.ValidationError(_('Must include "email" and "password".'))
         request = self.context.get("request")
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
@@ -295,7 +397,37 @@ class RuntimeLoginSerializer(CustomLoginSerializer):
         if not api_key.has_scope("auth:runtime"):
             raise serializers.ValidationError(self.error_messages["missing_scope"])
 
-        user = _hydrate_runtime_user_organization(attrs["user"])
+        user = get_runtime_user_for_api_key(email, api_key)
+        if user:
+            if not user.check_password(password):
+                user = None
+        else:
+            for candidate in User.objects.select_related("organization", "project").filter(
+                email__iexact=email
+            ):
+                if not candidate.check_password(password):
+                    continue
+                candidate = _hydrate_runtime_user_organization(candidate)
+                if not candidate.organization_id:
+                    raise serializers.ValidationError(
+                        "This email does not belong to a runtime user in any organization. "
+                        "Register through /api/v1/auth/runtime/register/ with an API key first."
+                    )
+                if candidate.organization_id != api_key.organization_id:
+                    raise serializers.ValidationError(self.error_messages["wrong_org"])
+                if candidate.project_id is None:
+                    user = candidate
+                    break
+                raise serializers.ValidationError(self.error_messages["wrong_project"])
+
+        if not user:
+            raise exceptions.ValidationError(
+                _("Unable to log in with provided credentials.")
+            )
+
+        self.validate_auth_user_status(user)
+        self.validate_email_verification_status(user, email=email)
+        user = _hydrate_runtime_user_organization(user)
         if not user.organization_id:
             raise serializers.ValidationError(
                 "This email does not belong to a runtime user in any organization. "
@@ -310,6 +442,7 @@ class RuntimeLoginSerializer(CustomLoginSerializer):
         except serializers.ValidationError as exc:
             raise serializers.ValidationError(self.error_messages["wrong_project"]) from exc
 
+        attrs["email"] = email
         attrs["user"] = user
         return attrs
 

@@ -1,4 +1,3 @@
-from django.conf import settings
 from rest_framework import serializers
 from allauth.account.adapter import get_adapter
 from allauth.account.utils import filter_users_by_email
@@ -7,34 +6,17 @@ from dj_rest_auth.forms import AllAuthPasswordResetForm
 from allauth.account.utils import user_pk_to_url_str
 
 from hvt.apps.authentication.email import build_frontend_url
-from hvt.apps.organizations.access import user_has_project_access
+from hvt.apps.authentication.identity import (
+    normalize_email,
+    user_matches_runtime_project,
+)
 from hvt.apps.organizations.models import APIKey
 
-
-def _effective_user_organization_id(user):
-    organization_id = getattr(user, "organization_id", None)
-    if organization_id:
-        return organization_id
-
-    owned_org_manager = getattr(user, "owned_organization", None)
-    if owned_org_manager is None:
-        return None
-
-    owned_org = owned_org_manager.first()
-    return getattr(owned_org, "id", None)
-
-
 def _user_matches_runtime_api_key(user, api_key: APIKey) -> bool:
-    if _effective_user_organization_id(user) != getattr(api_key, "organization_id", None):
-        return False
-
-    if not getattr(api_key, "project_id", None):
-        return True
-
-    return user_has_project_access(user, api_key.project)
+    return user_matches_runtime_project(user, api_key)
 
 
-class HVTPasswordResetSerializer(PasswordResetSerializer):
+class FrontendPasswordResetSerializer(PasswordResetSerializer):
     """Password reset serializer that emits frontend reset links."""
 
     def get_email_options(self):
@@ -84,7 +66,32 @@ class RuntimePasswordResetForm(AllAuthPasswordResetForm):
         return self.cleaned_data["email"]
 
 
-class RuntimePasswordResetSerializer(HVTPasswordResetSerializer):
+class ControlPlanePasswordResetForm(AllAuthPasswordResetForm):
+    """Password reset form that only resolves dashboard users."""
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        email = get_adapter().clean_email(email)
+        users = filter_users_by_email(email, is_active=True, prefer_verified=False)
+        self.users = [user for user in users if getattr(user, "project_id", None) is None]
+        return self.cleaned_data["email"]
+
+
+class ControlPlanePasswordResetSerializer(FrontendPasswordResetSerializer):
+    """Password reset serializer scoped to control-plane users."""
+
+    @property
+    def password_reset_form_class(self):
+        return ControlPlanePasswordResetForm
+
+    def validate_email(self, value):
+        self.reset_form = self.password_reset_form_class(data=self.initial_data)
+        if not self.reset_form.is_valid():
+            raise serializers.ValidationError(self.reset_form.errors)
+        return normalize_email(value)
+
+
+class RuntimePasswordResetSerializer(FrontendPasswordResetSerializer):
     """Password reset serializer scoped to the runtime API key organization/project."""
 
     @property
@@ -98,7 +105,7 @@ class RuntimePasswordResetSerializer(HVTPasswordResetSerializer):
         )
         if not self.reset_form.is_valid():
             raise serializers.ValidationError(self.reset_form.errors)
-        return value
+        return normalize_email(value)
 
     def get_email_options(self):
         options = super().get_email_options()
@@ -127,4 +134,13 @@ class RuntimeResendEmailVerificationSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
     def validate_email(self, value):
-        return (value or "").strip().lower()
+        return normalize_email(value)
+
+
+class ControlPlaneResendEmailVerificationSerializer(serializers.Serializer):
+    """Serializer for control-plane resend-verification requests."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return normalize_email(value)

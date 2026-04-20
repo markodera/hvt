@@ -29,9 +29,21 @@ from rest_framework.exceptions import (
     Throttled,
     ValidationError,
 )
+
 from rest_framework.response import Response
 from django.http import Http404
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+
+class EmailNotVerifiedException(APIException):
+    status_code = 403
+    default_detail = "E-mail is not verified. Please verify your email before logging in."
+    default_code = "EMAIL_NOT_VERIFIED"
+
+
+class EmailInUseException(APIException):
+    status_code = 400
+    default_detail = "A user with this email address already exists in this project."
+    default_code = "EMAIL_IN_USE"
 
 
 # ---- human-readable labels keyed by status code ----
@@ -54,6 +66,8 @@ _EXCEPTION_CODES: dict[type, str] = {
     NotFound: "not_found",
     MethodNotAllowed: "method_not_allowed",
     Throttled: "throttled",
+    EmailInUseException: "EMAIL_IN_USE",
+    EmailNotVerifiedException: "EMAIL_NOT_VERIFIED",
 }
 
 
@@ -95,10 +109,47 @@ def hvt_exception_handler(exc: Exception, context: dict) -> Response | None:
             "retry_after_human": retry_after_human,
         }
 
+    if isinstance(detail, str):
+        if detail == "E-mail is not verified.":
+            exc = EmailNotVerifiedException()
+            code = exc.default_code
+            status_code = exc.status_code
+            response.status_code = status_code
+            message = exc.default_detail
+            error_label = _STATUS_LABELS.get(status_code, "Error")
+            detail = message
+        else:
+            message = detail
+    elif isinstance(detail, dict) and detail:
+        first_val = list(detail.values())[0]
+        message = first_val[0] if isinstance(first_val, list) and first_val else str(first_val)
+        if message == "E-mail is not verified.":
+            exc = EmailNotVerifiedException()
+            code = exc.default_code
+            status_code = exc.status_code
+            response.status_code = status_code
+            message = exc.default_detail
+            error_label = _STATUS_LABELS.get(status_code, "Error")
+            detail = message
+    elif isinstance(detail, list) and detail:
+        message = detail[0]
+        if message == "E-mail is not verified.":
+            exc = EmailNotVerifiedException()
+            code = exc.default_code
+            status_code = exc.status_code
+            response.status_code = status_code
+            message = exc.default_detail
+            error_label = _STATUS_LABELS.get(status_code, "Error")
+            detail = message
+    else:
+        message = str(detail)
+
     response.data = {
-        "error": error_label,
+        "error": message,
         "code": code,
+        "errorCode": code,
         "detail": detail,
+        "message": message,
         "status": status_code,
     }
 

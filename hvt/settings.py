@@ -242,6 +242,7 @@ SECURE_REFERRER_POLICY = os.getenv(
 X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
 EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", DEBUG)
 EXPOSE_API_DOCS = _env_bool("EXPOSE_API_DOCS", DEBUG)
+SILENCED_SYSTEM_CHECKS = ["auth.E003"]
 # Custom User model
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
@@ -427,7 +428,7 @@ SIMPLE_JWT = {
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
-ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_UNIQUE_EMAIL = False
 
 # dj-rest-auth
 
@@ -450,7 +451,7 @@ REST_AUTH = {
     "LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomLoginSerializer",
     "SOCIAL_LOGIN_SERIALIZER": "hvt.api.v1.serializers.users.CustomSocialLoginSerializer",
     "JWT_TOKEN_CLAIMS_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenObtainPairSerializer",
-    "PASSWORD_RESET_SERIALIZER": "hvt.apps.authentication.serializers.HVTPasswordResetSerializer",
+    "PASSWORD_RESET_SERIALIZER": "hvt.apps.authentication.serializers.ControlPlanePasswordResetSerializer",
     "PASSWORD_RESET_USE_SITES_DOMAIN": False,
 }
 
@@ -477,7 +478,7 @@ PASSWORD_RESET_CONFIRM_URL = "password/reset/confirm/{uid}/{token}"
 
 # SOCIAL AUTHENTICATION(Google & Github)
 SOCIALACCOUNT_AUTO_SIGNUP = True
-SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = False
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 

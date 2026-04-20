@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from allauth.account.models import EmailAddress
+from allauth.account.utils import user_pk_to_url_str
 from allauth.socialaccount.models import SocialApp
 
 from hvt.apps.organizations.models import (
@@ -475,6 +476,32 @@ class JWTCookieAuthFlowTest(APITestCase):
         self.assertIn("auth-token", response.cookies)
         self.assertIn("refresh-token", response.cookies)
 
+    def test_control_plane_login_ignores_runtime_user_with_same_email(self):
+        runtime_org = Organization.objects.create(
+            name="Runtime Cookie Org",
+            slug="runtime-cookie-org",
+        )
+        runtime_project = runtime_org.ensure_default_project()
+        runtime_user = User.objects.create_user(
+            email=self.user.email,
+            password="runtimepass123",
+            organization=runtime_org,
+            project=runtime_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=runtime_user,
+            email=runtime_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        response = self._login()
+
+        access_token = AccessToken(response.cookies["auth-token"].value)
+        self.assertEqual(access_token["org_id"], str(self.org.id))
+        self.assertIsNone(access_token["project_id"])
+
 
 class JWTOrgClaimHardeningTest(APITestCase):
     """Regression tests for org-aware JWT claim handling."""
@@ -607,6 +634,13 @@ class JWTOrgClaimHardeningTest(APITestCase):
 class ControlPlaneRegistrationFlowTest(APITestCase):
     """Control-plane signup stays on /auth/register/ without API-key tenant context."""
 
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_register_without_api_key_creates_user_without_org(self, mock_send_mail):
         response = self.client.post(
@@ -634,12 +668,63 @@ class ControlPlaneRegistrationFlowTest(APITestCase):
         )
         mock_send_mail.assert_called()
 
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_control_plane_register_allows_email_used_in_runtime_project(self, mock_send_mail):
+        org = Organization.objects.create(
+            name="Runtime Shadow Org",
+            slug="runtime-shadow-org",
+        )
+        project = org.ensure_default_project()
+        runtime_user = User.objects.create_user(
+            email="shared-identity@example.com",
+            password="Strongpass123!",
+            organization=org,
+            project=project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=runtime_user,
+            email=runtime_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            {
+                "email": "shared-identity@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            User.objects.filter(
+                email="shared-identity@example.com",
+                project__isnull=True,
+            ).exists()
+        )
+        self.assertTrue(
+            User.objects.filter(
+                email="shared-identity@example.com",
+                project=project,
+            ).exists()
+        )
+        self.assertEqual(
+            EmailAddress.objects.filter(email="shared-identity@example.com").count(),
+            2,
+        )
+        mock_send_mail.assert_called_once()
+
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class APIKeyRegistrationFlowTest(APITestCase):
     """Runtime registration flow using an API key as tenant context."""
 
     def setUp(self):
+        cache.clear()
         self.owner = User.objects.create_user(
             email="owner-runtime@example.com",
             password="testpass123",
@@ -671,6 +756,10 @@ class APIKeyRegistrationFlowTest(APITestCase):
             is_active=True,
             scopes=["auth:runtime"],
         )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_register_with_api_key_creates_member_in_key_org(self, mock_send_mail):
@@ -736,6 +825,67 @@ class APIKeyRegistrationFlowTest(APITestCase):
             UserProjectRole.objects.filter(user=created_user, role=role).exists()
         )
         mock_send_mail.assert_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_same_email_in_two_projects_creates_distinct_runtime_users(self, mock_send_mail):
+        second_project = Project.objects.create(
+            organization=self.org,
+            name="Operations Console",
+            slug="ops-console",
+            allow_signup=True,
+        )
+        second_prefix, second_full_key, second_hashed_key = APIKey.generate_key()
+        APIKey.objects.create(
+            organization=self.org,
+            project=second_project,
+            name="Ops Runtime Signup Key",
+            prefix=second_prefix,
+            hashed_key=second_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+        payload = {
+            "email": "shared-shopper@example.com",
+            "password1": "Strongpass123!",
+            "password2": "Strongpass123!",
+        }
+        first_response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            payload,
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+        second_response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            payload,
+            format="json",
+            HTTP_X_API_KEY=second_full_key,
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            User.objects.filter(email="shared-shopper@example.com").count(),
+            2,
+        )
+        self.assertTrue(
+            User.objects.filter(
+                email="shared-shopper@example.com",
+                project=self.default_project,
+            ).exists()
+        )
+        self.assertTrue(
+            User.objects.filter(
+                email="shared-shopper@example.com",
+                project=second_project,
+            ).exists()
+        )
+        self.assertEqual(
+            EmailAddress.objects.filter(email="shared-shopper@example.com").count(),
+            2,
+        )
+        self.assertEqual(mock_send_mail.call_count, 2)
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_register_with_api_key_respects_allow_signup(self, mock_send_mail):
@@ -1098,7 +1248,7 @@ class RuntimeLoginFlowTest(APITestCase):
             "These credentials do not belong to the API key project.",
         )
 
-    def test_runtime_login_allows_project_role_assignment_on_api_key_project(self):
+    def test_runtime_login_rejects_cross_project_role_assignment_without_project_user(self):
         other_project = Project.objects.create(
             organization=self.org,
             name="Storefront Staging",
@@ -1132,10 +1282,11 @@ class RuntimeLoginFlowTest(APITestCase):
             HTTP_X_API_KEY=self.full_key,
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        access_token = AccessToken(response.cookies["auth-token"].value)
-        self.assertEqual(access_token["project_id"], str(self.default_project.id))
-        self.assertEqual(access_token["app_roles"], ["buyer"])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["non_field_errors"][0]),
+            "These credentials do not belong to the API key project.",
+        )
 
     def test_runtime_login_requires_verified_email(self):
         response = self.client.post(
@@ -1145,10 +1296,10 @@ class RuntimeLoginFlowTest(APITestCase):
             HTTP_X_API_KEY=self.full_key,
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(
-            str(response.data["detail"]["non_field_errors"][0]),
-            "E-mail is not verified.",
+            str(response.data["detail"]),
+            "E-mail is not verified. Please verify your email before logging in.",
         )
 
     def test_runtime_login_requires_auth_runtime_scope(self):
@@ -1198,36 +1349,13 @@ class RuntimeLoginFlowTest(APITestCase):
         self.assertEqual(access_token["app_roles"], ["buyer"])
         self.assertEqual(access_token["app_permissions"], ["orders.read.own"])
 
-    def test_same_user_can_login_with_two_project_api_keys_when_assigned_roles(self):
+    def test_same_email_can_login_with_two_project_api_keys_using_project_scoped_users(self):
         second_project = Project.objects.create(
             organization=self.org,
             name="Internal Ops",
             slug="internal-ops",
             allow_signup=True,
         )
-
-        role_external = ProjectRole.objects.create(
-            project=self.default_project,
-            slug="external-user",
-            name="External User",
-        )
-        role_internal = ProjectRole.objects.create(
-            project=second_project,
-            slug="internal-user",
-            name="Internal User",
-        )
-
-        UserProjectRole.objects.create(
-            user=self.runtime_user,
-            role=role_external,
-            assigned_by=self.owner,
-        )
-        UserProjectRole.objects.create(
-            user=self.runtime_user,
-            role=role_internal,
-            assigned_by=self.owner,
-        )
-
         second_prefix, second_full_key, second_hashed_key = APIKey.generate_key()
         APIKey.objects.create(
             organization=self.org,
@@ -1237,6 +1365,20 @@ class RuntimeLoginFlowTest(APITestCase):
             hashed_key=second_hashed_key,
             is_active=True,
             scopes=["auth:runtime"],
+        )
+
+        second_runtime_user = User.objects.create_user(
+            email=self.runtime_user.email,
+            password="OtherStrongpass123!",
+            organization=self.org,
+            project=second_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=second_runtime_user,
+            email=second_runtime_user.email,
+            verified=True,
+            primary=True,
         )
 
         first_project_response = self.client.post(
@@ -1252,7 +1394,7 @@ class RuntimeLoginFlowTest(APITestCase):
 
         second_project_response = self.client.post(
             "/api/v1/auth/runtime/login/",
-            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            {"email": second_runtime_user.email, "password": "OtherStrongpass123!"},
             format="json",
             HTTP_X_API_KEY=second_full_key,
         )
@@ -1260,6 +1402,10 @@ class RuntimeLoginFlowTest(APITestCase):
         second_token = AccessToken(second_project_response.cookies["auth-token"].value)
         self.assertEqual(second_token["project_id"], str(second_project.id))
         self.assertEqual(second_token["project_slug"], second_project.slug)
+        self.runtime_user.refresh_from_db()
+        second_runtime_user.refresh_from_db()
+        self.assertEqual(self.runtime_user.project_id, self.default_project.id)
+        self.assertEqual(second_runtime_user.project_id, second_project.id)
 
     def test_runtime_login_heals_owner_missing_organization_link(self):
         from allauth.account.models import EmailAddress
@@ -1448,10 +1594,15 @@ class PasswordResetFlowTest(APITestCase):
     """Regression tests for frontend password-reset email flow."""
 
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(
             email="reset-target@example.com",
             password="testpass123",
         )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_password_reset_request_returns_success(self, mock_send_mail):
@@ -1501,12 +1652,49 @@ class PasswordResetFlowTest(APITestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("Updatedpass123!"))
 
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_password_reset_request_ignores_runtime_user_with_same_email(self, mock_send_mail):
+        runtime_org = Organization.objects.create(
+            name="Runtime Reset Shadow Org",
+            slug="runtime-reset-shadow-org",
+        )
+        runtime_project = runtime_org.ensure_default_project()
+        runtime_user = User.objects.create_user(
+            email=self.user.email,
+            password="runtimepass123",
+            organization=runtime_org,
+            project=runtime_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=runtime_user,
+            email=runtime_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/password/reset/",
+            {"email": self.user.email},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, args, _ = mock_send_mail.mock_calls[0]
+        self.assertIn(user_pk_to_url_str(self.user), args[2]["password_reset_url"])
+        self.assertNotIn(
+            user_pk_to_url_str(runtime_user),
+            args[2]["password_reset_url"],
+        )
+
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class RuntimePasswordResetFlowTest(APITestCase):
     """Runtime password reset should respect API-key project scoping."""
 
     def setUp(self):
+        cache.clear()
         self.owner = User.objects.create_user(
             email="runtime-reset-owner@example.com",
             password="Strongpass123!",
@@ -1595,6 +1783,10 @@ class RuntimePasswordResetFlowTest(APITestCase):
             assigned_by=self.owner,
         )
 
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_runtime_password_reset_sends_project_frontend_link(self, mock_send_mail):
         response = self.client.post(
@@ -1630,7 +1822,7 @@ class RuntimePasswordResetFlowTest(APITestCase):
         mock_send_mail.assert_not_called()
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
-    def test_runtime_password_reset_allows_project_role_assignment_access(self, mock_send_mail):
+    def test_runtime_password_reset_ignores_cross_project_role_assignment(self, mock_send_mail):
         response = self.client.post(
             "/api/v1/auth/runtime/password/reset/",
             {"email": self.cross_project_user.email},
@@ -1639,9 +1831,69 @@ class RuntimePasswordResetFlowTest(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_not_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_password_reset_targets_exact_same_email_project_user(self, mock_send_mail):
+        second_prefix, second_full_key, second_hashed_key = APIKey.generate_key()
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.other_project,
+            name="Ops Runtime Reset Key",
+            prefix=second_prefix,
+            hashed_key=second_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+        other_project_duplicate = User.objects.create_user(
+            email=self.runtime_user.email,
+            password="Differentpass123!",
+            organization=self.org,
+            project=self.other_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=other_project_duplicate,
+            email=other_project_duplicate.email,
+            verified=True,
+            primary=True,
+        )
+
+        first_response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": self.runtime_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
         mock_send_mail.assert_called_once()
-        _, args, _ = mock_send_mail.mock_calls[0]
-        self.assertEqual(args[1], self.cross_project_user.email)
+        _, first_args, _ = mock_send_mail.mock_calls[0]
+        self.assertEqual(first_args[1], self.runtime_user.email)
+        first_url = first_args[2]["password_reset_url"]
+        self.assertIn(user_pk_to_url_str(self.runtime_user), first_url)
+        self.assertIn("runtime=1", first_url)
+        self.assertIn("project=default", first_url)
+        self.assertNotIn(user_pk_to_url_str(other_project_duplicate), first_url)
+
+        mock_send_mail.reset_mock()
+
+        second_response = self.client.post(
+            "/api/v1/auth/runtime/password/reset/",
+            {"email": other_project_duplicate.email},
+            format="json",
+            HTTP_X_API_KEY=second_full_key,
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, second_args, _ = mock_send_mail.mock_calls[0]
+        self.assertEqual(second_args[1], other_project_duplicate.email)
+        second_url = second_args[2]["password_reset_url"]
+        self.assertIn(user_pk_to_url_str(other_project_duplicate), second_url)
+        self.assertIn("runtime=1", second_url)
+        self.assertIn("project=ops-console", second_url)
+        self.assertNotIn(user_pk_to_url_str(self.runtime_user), second_url)
 
     def test_runtime_password_reset_requires_runtime_scope(self):
         self.api_key.scopes = ["users:read"]
@@ -1686,6 +1938,7 @@ class RuntimeEmailVerificationFlowTest(APITestCase):
     """Runtime verification emails should use project-scoped frontend context."""
 
     def setUp(self):
+        cache.clear()
         self.owner = User.objects.create_user(
             email="runtime-verify-owner@example.com",
             password="Strongpass123!",
@@ -1720,6 +1973,10 @@ class RuntimeEmailVerificationFlowTest(APITestCase):
             is_active=True,
             scopes=["auth:runtime"],
         )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_runtime_register_verification_email_uses_project_frontend_url(self, mock_send_mail):
@@ -1802,6 +2059,75 @@ class RuntimeEmailVerificationFlowTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_send_mail.assert_not_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_resend_verification_targets_exact_same_email_project_user(self, mock_send_mail):
+        second_prefix, second_full_key, second_hashed_key = APIKey.generate_key()
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.other_project,
+            name="Ops Runtime Verify Key",
+            prefix=second_prefix,
+            hashed_key=second_hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+        default_user = User.objects.create_user(
+            email="pending-shared@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        other_user = User.objects.create_user(
+            email="pending-shared@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.other_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=default_user,
+            email=default_user.email,
+            verified=False,
+            primary=True,
+        )
+        EmailAddress.objects.create(
+            user=other_user,
+            email=other_user.email,
+            verified=False,
+            primary=True,
+        )
+
+        first_response = self.client.post(
+            "/api/v1/auth/runtime/register/resend-email/",
+            {"email": default_user.email},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, first_args, _ = mock_send_mail.mock_calls[0]
+        first_activate_url = first_args[2]["activate_url"]
+        self.assertIn("project=default", first_activate_url)
+        self.assertNotIn("project=ops-console", first_activate_url)
+
+        mock_send_mail.reset_mock()
+
+        second_response = self.client.post(
+            "/api/v1/auth/runtime/register/resend-email/",
+            {"email": other_user.email},
+            format="json",
+            HTTP_X_API_KEY=second_full_key,
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once()
+        _, second_args, _ = mock_send_mail.mock_calls[0]
+        second_activate_url = second_args[2]["activate_url"]
+        self.assertIn("project=ops-console", second_activate_url)
+        self.assertNotIn("project=default", second_activate_url)
 
     def test_runtime_verify_email_alias_marks_email_as_verified(self):
         from allauth.account.models import EmailConfirmationHMAC

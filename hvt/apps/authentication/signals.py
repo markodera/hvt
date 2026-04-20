@@ -10,6 +10,12 @@ import logging
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 from django.dispatch import receiver
 
+from hvt.apps.authentication.identity import (
+    get_control_plane_users_by_email,
+    get_runtime_user_for_api_key,
+    normalize_email,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,15 +96,16 @@ def on_login_failed(sender, credentials, request, **kwargs):
     from hvt.apps.authentication.models import AuditLog
 
     # Try to find the user to attach org context
-    from hvt.apps.users.models import User
-    email = credentials.get("email") or credentials.get("username", "")
+    email = normalize_email(credentials.get("email") or credentials.get("username", ""))
     target_user = None
     org = None
-    try:
-        target_user = User.objects.get(email=email)
-        org = target_user.organization
-    except User.DoesNotExist:
-        pass
+    api_key = getattr(request, "auth", None) if request else None
+    if api_key:
+        target_user = get_runtime_user_for_api_key(email, api_key)
+        org = getattr(api_key, "organization", None)
+    else:
+        target_user = get_control_plane_users_by_email(email).first()
+        org = getattr(target_user, "organization", None) if target_user else None
 
     AuditLog.log(
         event_type=AuditLog.EventType.LOGIN_FAILED,

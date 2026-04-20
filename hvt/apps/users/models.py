@@ -5,6 +5,7 @@ from django.contrib.auth.models import (
     PermissionsMixin,
 )
 from django.db import models
+from django.db.models import Q
 
 
 class UserManager(BaseUserManager):
@@ -13,7 +14,7 @@ class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError("Email is required")
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).strip().lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -38,7 +39,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         MEMBER = "member", "Member"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True, db_index=True)
+    email = models.EmailField(db_index=True)
 
     # Profile
     first_name = models.CharField(max_length=150, blank=True)
@@ -87,9 +88,25 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         db_table = "users"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["email", "project"],
+                name="uniq_user_email_per_project",
+            ),
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=Q(project__isnull=True),
+                name="uniq_user_email_when_project_null",
+            ),
+        ]
 
     def __str__(self):
         return self.email
+
+    def save(self, *args, **kwargs):
+        if isinstance(self.email, str):
+            self.email = self.email.strip().lower()
+        return super().save(*args, **kwargs)
 
     @property
     def full_name(self) -> str:

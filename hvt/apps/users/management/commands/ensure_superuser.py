@@ -32,6 +32,7 @@ class Command(BaseCommand):
         user_model = get_user_model()
         user, created = user_model.objects.get_or_create(
             email=email,
+            project=None,
             defaults={
                 "is_staff": True,
                 "is_superuser": True,

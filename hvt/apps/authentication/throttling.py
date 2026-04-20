@@ -132,6 +132,22 @@ class EmailFieldRateThrottle(RequestFieldRateThrottle):
     field_name = "email"
 
 
+class RuntimeEmailFieldRateThrottle(EmailFieldRateThrottle):
+    """Rate limit runtime email flows per project/email pair."""
+
+    def get_cache_key(self, request, view):
+        value = self.get_field_value(request)
+        if not value:
+            return None
+
+        scope_value = value
+        if isinstance(request.auth, APIKey) and request.auth.project_id:
+            scope_value = f"{request.auth.project_id}:{value}"
+
+        ident = hashlib.sha256(scope_value.encode("utf-8")).hexdigest()
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
 class APIKeyScopeRateThrottle(DynamicRateThrottle):
     """Rate limit by API key when the request authenticated with one."""
 
@@ -171,11 +187,19 @@ class LoginEmailRateThrottle(EmailFieldRateThrottle):
     scope = "auth_login_email"
 
 
+class RuntimeLoginEmailRateThrottle(RuntimeEmailFieldRateThrottle):
+    scope = "auth_login_email"
+
+
 class RegisterIPRateThrottle(IPAddressRateThrottle):
     scope = "auth_register_ip"
 
 
 class RegisterEmailRateThrottle(EmailFieldRateThrottle):
+    scope = "auth_register_email"
+
+
+class RuntimeRegisterEmailRateThrottle(RuntimeEmailFieldRateThrottle):
     scope = "auth_register_email"
 
 
@@ -192,6 +216,10 @@ class PasswordResetIPRateThrottle(IPAddressRateThrottle):
 
 
 class PasswordResetEmailRateThrottle(EmailFieldRateThrottle):
+    scope = "auth_password_reset_email"
+
+
+class RuntimePasswordResetEmailRateThrottle(RuntimeEmailFieldRateThrottle):
     scope = "auth_password_reset_email"
 
 
@@ -216,6 +244,10 @@ class ResendVerificationIPRateThrottle(IPAddressRateThrottle):
 
 
 class ResendVerificationEmailRateThrottle(EmailFieldRateThrottle):
+    scope = "auth_resend_verification_email"
+
+
+class RuntimeResendVerificationEmailRateThrottle(RuntimeEmailFieldRateThrottle):
     scope = "auth_resend_verification_email"
 
 

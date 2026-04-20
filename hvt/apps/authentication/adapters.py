@@ -1,10 +1,14 @@
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
-from allauth.account.adapter import DefaultAccountAdapter
+from allauth.account.adapter import DefaultAccountAdapter, get_adapter as get_account_adapter
 from allauth.socialaccount.models import SocialApp
 from django.contrib.sites.shortcuts import get_current_site
 from django.conf import settings
 import logging
 
+from hvt.apps.authentication.identity import (
+    get_control_plane_users_by_email,
+    get_runtime_user_for_api_key,
+)
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
 from hvt.apps.organizations.access import assign_default_signup_roles
 from .email import (
@@ -203,7 +207,7 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         app_defaults = {
             "secret": config.client_secret,
             "key": "",
-            "settings": {},
+            "settings": {"email_authentication": False},
         }
         app, created = SocialApp.objects.get_or_create(
             provider=config.provider,
@@ -216,8 +220,8 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         if app.secret != config.client_secret:
             app.secret = config.client_secret
             update_fields.append("secret")
-        if app.settings != {}:
-            app.settings = {}
+        if app.settings != {"email_authentication": False}:
+            app.settings = {"email_authentication": False}
             update_fields.append("settings")
         if update_fields:
             app.save(update_fields=update_fields)
@@ -246,21 +250,57 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         self._isolate_runtime_apps_for_provider(request, provider)
         return super().get_app(request, provider, client_id=client_id)
 
-    def save_user(self, request, sociallogin, form=None):
-        user = super().save_user(request, sociallogin, form)
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"DEBUG SAVE_USER request type: {type(request)}")
-        logger.error(f"DEBUG SAVE_USER request.auth: {getattr(request, 'auth', 'MISSING')}")
+    def _get_sociallogin_email(self, sociallogin):
+        for email_address in getattr(sociallogin, "email_addresses", []):
+            if getattr(email_address, "verified", False) and getattr(email_address, "email", ""):
+                return email_address.email.lower()
+
+        email = getattr(getattr(sociallogin, "user", None), "email", "") or ""
+        return email.lower()
+
+    def pre_social_login(self, request, sociallogin):
+        super().pre_social_login(request, sociallogin)
+        if sociallogin.is_existing:
+            return
+
+        email = self._get_sociallogin_email(sociallogin)
+        if not email:
+            return
+
         api_key = getattr(request, "auth", None)
-        update_fields = []
+        user = None
+        if isinstance(api_key, APIKey):
+            user = get_runtime_user_for_api_key(email, api_key)
+            if user and user.role == user.Role.MEMBER and user.project_id is None:
+                user.organization = api_key.organization
+                user.project = api_key.project
+                user.save(update_fields=["organization", "project"])
+        else:
+            user = get_control_plane_users_by_email(email).first()
+
+        if not user:
+            return
+
+        sociallogin.user = user
+        sociallogin.account.user = user
+        sociallogin._did_authenticate_by_email = email
+
+    def save_user(self, request, sociallogin, form=None):
+        user = sociallogin.user
+        user.set_unusable_password()
+        account_adapter = get_account_adapter()
+        if form:
+            account_adapter.save_user(request, user, form, commit=False)
+        else:
+            account_adapter.populate_username(request, user)
+
+        api_key = getattr(request, "auth", None)
         if isinstance(api_key, APIKey):
             user.organization = api_key.organization
             user.project = api_key.project
             user.role = user.Role.MEMBER
-            update_fields.extend(["organization", "project", "role"])
         user.is_active = True
-        update_fields.append("is_active")
-        user.save(update_fields=update_fields)
+        user.save()
+        sociallogin.save(request)
         assign_default_signup_roles(user, api_key.project if isinstance(api_key, APIKey) else None)
         return user

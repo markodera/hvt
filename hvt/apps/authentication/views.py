@@ -48,6 +48,8 @@ from hvt.api.v1.serializers.users import (
 )
 from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
 from hvt.apps.authentication.serializers import (
+    ControlPlanePasswordResetSerializer,
+    ControlPlaneResendEmailVerificationSerializer,
     RuntimePasswordResetSerializer,
     RuntimeResendEmailVerificationSerializer,
 )
@@ -67,9 +69,13 @@ from hvt.apps.authentication.throttling import (
     RegisterIPRateThrottle,
     ResendVerificationEmailRateThrottle,
     ResendVerificationIPRateThrottle,
+    RuntimeLoginEmailRateThrottle,
     RuntimeLoginAPIKeyThrottle,
+    RuntimePasswordResetEmailRateThrottle,
     RuntimePasswordResetAPIKeyThrottle,
+    RuntimeRegisterEmailRateThrottle,
     RuntimeRegisterAPIKeyThrottle,
+    RuntimeResendVerificationEmailRateThrottle,
     RuntimeResendVerificationAPIKeyThrottle,
     RuntimeSocialLoginAPIKeyThrottle,
     SocialLoginIPRateThrottle,
@@ -201,28 +207,28 @@ RUNTIME_LOGIN_THROTTLES = [
     OrganizationRateThrottle,
     RuntimeLoginAPIKeyThrottle,
     LoginIPRateThrottle,
-    LoginEmailRateThrottle,
+    RuntimeLoginEmailRateThrottle,
 ]
 RUNTIME_REGISTER_THROTTLES = [
     BurstRateThrottle,
     OrganizationRateThrottle,
     RuntimeRegisterAPIKeyThrottle,
     RegisterIPRateThrottle,
-    RegisterEmailRateThrottle,
+    RuntimeRegisterEmailRateThrottle,
 ]
 RUNTIME_PASSWORD_RESET_REQUEST_THROTTLES = [
     BurstRateThrottle,
     OrganizationRateThrottle,
     RuntimePasswordResetAPIKeyThrottle,
     PasswordResetIPRateThrottle,
-    PasswordResetEmailRateThrottle,
+    RuntimePasswordResetEmailRateThrottle,
 ]
 RUNTIME_RESEND_EMAIL_THROTTLES = [
     BurstRateThrottle,
     OrganizationRateThrottle,
     RuntimeResendVerificationAPIKeyThrottle,
     ResendVerificationIPRateThrottle,
-    ResendVerificationEmailRateThrottle,
+    RuntimeResendVerificationEmailRateThrottle,
 ]
 RUNTIME_SOCIAL_LOGIN_THROTTLES = [
     BurstRateThrottle,
@@ -461,6 +467,7 @@ class RuntimeAPIKeyScopedRequestMixin:
 
 
 class HVTPasswordResetView(PasswordResetView):
+    serializer_class = ControlPlanePasswordResetSerializer
     throttle_classes = PASSWORD_RESET_REQUEST_THROTTLES
 
 
@@ -562,7 +569,28 @@ class HVTVerifyEmailView(VerifyEmailView):
 
 
 class HVTResendEmailVerificationView(ResendEmailVerificationView):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = ControlPlaneResendEmailVerificationSerializer
     throttle_classes = RESEND_EMAIL_THROTTLES
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email_value = serializer.validated_data["email"]
+        email_address = (
+            EmailAddress.objects.select_related("user")
+            .filter(
+                email__iexact=email_value,
+                verified=False,
+                user__project__isnull=True,
+            )
+            .first()
+        )
+        if email_address:
+            email_address.send_confirmation(request)
+
+        return Response({"detail": "ok"}, status=status.HTTP_200_OK)
 
 
 @extend_schema_view(
