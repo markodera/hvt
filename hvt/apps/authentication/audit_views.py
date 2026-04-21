@@ -15,6 +15,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema
 from rest_framework import filters, generics
 
 from hvt.api.v1.serializers.audit import AuditLogSerializer
+from hvt.apps.authentication.identity import is_project_scoped_user
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import IsOrgMemberOrAPIKey
 from hvt.apps.organizations.models import APIKey
@@ -28,6 +29,8 @@ def _get_org(request):
     if isinstance(request.auth, APIKey):
         return request.auth.organization
     if request.user and request.user.is_authenticated:
+        if is_project_scoped_user(request.user):
+            return None
         return request.user.organization
     return None
 

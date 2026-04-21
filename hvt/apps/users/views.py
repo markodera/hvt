@@ -6,6 +6,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view
 
 from hvt.apps.users.models import User
+from hvt.apps.authentication.identity import is_project_scoped_user
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import (
     CanChangeRole,
@@ -31,6 +32,8 @@ def _get_org(request):
     if isinstance(request.auth, APIKey):
         return request.auth.organization
     if request.user and request.user.is_authenticated:
+        if is_project_scoped_user(request.user):
+            return None
         return request.user.organization
     return None
 

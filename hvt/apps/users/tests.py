@@ -102,6 +102,18 @@ class IsOrgMemberOrAPIKeyPermissionTest(TestCase):
             organization=self.org,
             role="member",
         )
+        self.project_scoped_member = User.objects.create_user(
+            email="runtime-member@example.com",
+            password="password123",
+            organization=self.org,
+            project=Project.objects.create(
+                organization=self.org,
+                name="Runtime Scoped Project",
+                slug="runtime-scoped-project",
+                allow_signup=True,
+            ),
+            role="member",
+        )
         self.user_no_org = User.objects.create_user(
             email="noorg@example.com", password="password123"
         )
@@ -130,6 +142,13 @@ class IsOrgMemberOrAPIKeyPermissionTest(TestCase):
         """User without organization should be denied"""
         request = self.factory.get("/test/")
         request.user = self.user_no_org
+        request.auth = None
+
+        self.assertFalse(self.permission.has_permission(request, None))
+
+    def test_project_scoped_member_denied(self):
+        request = self.factory.get("/test/")
+        request.user = self.project_scoped_member
         request.auth = None
 
         self.assertFalse(self.permission.has_permission(request, None))
@@ -168,6 +187,18 @@ class IsOrgAdminOrAPIKeyPermissionTest(TestCase):
             organization=self.org,
             role="member",
         )
+        self.project_scoped_member = User.objects.create_user(
+            email="runtime-member@example.com",
+            password="password123",
+            organization=self.org,
+            project=Project.objects.create(
+                organization=self.org,
+                name="Runtime Admin Project",
+                slug="runtime-admin-project",
+                allow_signup=True,
+            ),
+            role="member",
+        )
 
         prefix, _, hashed = APIKey.generate_key()
         self.api_key = APIKey.objects.create(
@@ -200,6 +231,13 @@ class IsOrgAdminOrAPIKeyPermissionTest(TestCase):
         """Member should be denied"""
         request = self.factory.get("/test/")
         request.user = self.member
+        request.auth = None
+
+        self.assertFalse(self.permission.has_permission(request, None))
+
+    def test_project_scoped_member_denied(self):
+        request = self.factory.get("/test/")
+        request.user = self.project_scoped_member
         request.auth = None
 
         self.assertFalse(self.permission.has_permission(request, None))

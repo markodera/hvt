@@ -8,11 +8,28 @@ def normalize_email(value: str) -> str:
     return (value or "").strip().lower()
 
 
+def is_project_scoped_user(user) -> bool:
+    """Safely resolve the project-scoped flag whether exposed as a property or method."""
+    if not user:
+        return False
+
+    value = getattr(user, "is_project_scoped", False)
+    return bool(value() if callable(value) else value)
+
+
 def get_control_plane_users_by_email(email: str):
     normalized_email = normalize_email(email)
     return User.objects.select_related("organization", "project").filter(
         email__iexact=normalized_email,
         project__isnull=True,
+    )
+
+
+def get_project_scoped_users_by_email(email: str):
+    normalized_email = normalize_email(email)
+    return User.objects.select_related("organization", "project").filter(
+        email__iexact=normalized_email,
+        project__isnull=False,
     )
 
 

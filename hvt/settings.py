@@ -505,6 +505,7 @@ SOCIALACCOUNT_PROVIDERS = {
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
+API_KEY_MAX_PER_PROJECT = int(os.getenv("API_KEY_MAX_PER_PROJECT", "25"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")
 
 # allauth - Use the custom adapter to point links to the frontend

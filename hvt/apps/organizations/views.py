@@ -26,7 +26,12 @@ from .models import (
     OrganizationInvitation,
 )
 from hvt.apps.authentication.models import AuditLog
-from hvt.apps.authentication.permissions import IsOrgOwnerOrAPIKey, IsOrgAdminOrAPIKey, IsOrgMemberOrAPIKey
+from hvt.apps.authentication.permissions import (
+    IsOrgOwnerOrAPIKey,
+    IsOrgAdminOrAPIKey,
+    IsOrgMemberOrAPIKey,
+    IsPlatformUser,
+)
 from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
 from hvt.apps.organizations.access import (
     assign_default_signup_roles,
@@ -201,7 +206,7 @@ class OrganizationListView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), IsPlatformUser()]
         return [permissions.IsAdminUser()]
 
     def create(self, request, *args, **kwargs):
@@ -274,7 +279,7 @@ class OrganizationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method in ["PATCH", "PUT"]:
-            return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), IsPlatformUser()]
         return [permissions.IsAdminUser()]
 
     def get_queryset(self):
@@ -363,7 +368,7 @@ class CurrentOrganizationView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ["PATCH", "PUT"]:
-            return [permissions.IsAuthenticated(), IsOrganizationOwner()]
+            return [permissions.IsAuthenticated(), IsPlatformUser(), IsOrganizationOwner()]
         return [IsOrgMemberOrAPIKey()]
 
     def get_object(self):
@@ -1270,7 +1275,7 @@ class APIKeyRevokeView(generics.UpdateAPIView):
 class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
     """Manage invitations for the current organization."""
 
-    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser, IsCurrentOrganizationOwner]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False) or not self.request.user.is_authenticated:
@@ -1339,7 +1344,7 @@ class OrganizationInvitationListCreateView(generics.ListCreateAPIView):
 class OrganizationInvitationResendView(generics.GenericAPIView):
     """Resend a pending invitation email."""
 
-    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser, IsCurrentOrganizationOwner]
     serializer_class = OrganizationInvitationSerializer
 
     def get_queryset(self):
@@ -1416,7 +1421,7 @@ class OrganizationInvitationResendView(generics.GenericAPIView):
 class OrganizationInvitationRevokeView(generics.DestroyAPIView):
     """Revoke a pending invitation without deleting the audit trail."""
 
-    permission_classes = [permissions.IsAuthenticated, IsCurrentOrganizationOwner]
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser, IsCurrentOrganizationOwner]
     serializer_class = OrganizationInvitationSerializer
 
     def get_queryset(self):

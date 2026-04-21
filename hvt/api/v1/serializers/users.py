@@ -476,6 +476,8 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
     def validate(self, attrs):
         try:
             return super().validate(attrs)
+        except exceptions.PermissionDenied:
+            raise
         except SocialApp.DoesNotExist as exc:
             provider_label = self._get_provider_label()
             raise serializers.ValidationError(

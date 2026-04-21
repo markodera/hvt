@@ -1,5 +1,5 @@
 from rest_framework import permissions
-from hvt.apps.organizations.models import APIKey
+from hvt.apps.authentication.identity import is_project_scoped_user
 
 
 class IsOrganizationOwner(permissions.BasePermission):
@@ -11,7 +11,12 @@ class IsOrganizationOwner(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
         # Check if user is the owner of the organization
-        return obj.owner == request.user
+        return bool(
+            request.user
+            and getattr(request.user, "is_authenticated", False)
+            and not is_project_scoped_user(request.user)
+            and obj.owner == request.user
+        )
 
 
 class IsCurrentOrganizationOwner(permissions.BasePermission):
@@ -26,6 +31,7 @@ class IsCurrentOrganizationOwner(permissions.BasePermission):
         return bool(
             user
             and getattr(user, "is_authenticated", False)
+            and not is_project_scoped_user(user)
             and getattr(user, "organization_id", None)
             and user.is_org_owner()
         )
@@ -43,6 +49,7 @@ class IsCurrentOrganizationAdmin(permissions.BasePermission):
         return bool(
             user
             and getattr(user, "is_authenticated", False)
+            and not is_project_scoped_user(user)
             and getattr(user, "organization_id", None)
             and user.can_manage_users()
         )

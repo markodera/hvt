@@ -11,6 +11,7 @@ from rest_framework_simplejwt.serializers import (
     TokenRefreshSerializer,
 )
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from hvt.apps.authentication.identity import is_project_scoped_user
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ def _validate_refresh_context(refresh_token: RefreshToken):
         )
 
     if not token_project_id:
+        if is_project_scoped_user(user):
+            raise exceptions.PermissionDenied()
         return user, None
 
     try:

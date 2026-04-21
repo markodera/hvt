@@ -372,6 +372,7 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
                 "project",
                 organization.ensure_default_project(),
             )
+            self._validate_project_api_key_limit(attrs["project"])
             return attrs
 
         try:
@@ -382,7 +383,26 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
             ) from exc
 
         attrs["project"] = project
+        self._validate_project_api_key_limit(project)
         return attrs
+
+    def _validate_project_api_key_limit(self, project):
+        if self.instance is not None:
+            return
+
+        max_keys = int(getattr(settings, "API_KEY_MAX_PER_PROJECT", 25) or 25)
+        if max_keys <= 0:
+            return
+
+        existing_count = APIKey.objects.filter(project=project).count()
+        if existing_count >= max_keys:
+            raise serializers.ValidationError(
+                {
+                    "detail": (
+                        f"This project has reached the API key limit of {max_keys}."
+                    )
+                }
+            )
 
     def create(self, validated_data):
         environment = validated_data.pop("environment", "test")

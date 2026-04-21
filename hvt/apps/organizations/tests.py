@@ -3,9 +3,11 @@ Comprehensive test cases for Test/Live API Key environment isolation.
 Tests that test and live environments are completely isolated.
 """
 from datetime import timedelta
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient, APIRequestFactory
 from rest_framework import status
@@ -143,7 +145,7 @@ class APIKeyAuthenticationTestLiveTest(TestCase):
 
         self.assertIsNotNone(result)
         user, auth = result
-        self.assertIsNone(user)
+        self.assertIsInstance(user, AnonymousUser)
         self.assertIsInstance(auth, APIKey)
         self.assertEqual(auth.id, self.test_api_key.id)
         self.assertTrue(auth.is_test)
@@ -156,7 +158,7 @@ class APIKeyAuthenticationTestLiveTest(TestCase):
 
         self.assertIsNotNone(result)
         user, auth = result
-        self.assertIsNone(user)
+        self.assertIsInstance(user, AnonymousUser)
         self.assertIsInstance(auth, APIKey)
         self.assertEqual(auth.id, self.live_api_key.id)
         self.assertTrue(auth.is_live)
@@ -525,6 +527,7 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
     """Project bootstrapping and project-aware API key behavior."""
 
     def setUp(self):
+        cache.clear()
         from allauth.account.models import EmailAddress
 
         self.owner = User.objects.create_user(
@@ -552,6 +555,10 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
             {"email": self.owner.email, "password": "password123"},
             format="json",
         )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     def test_org_creation_bootstraps_default_project(self):
         founder = User.objects.create_user(
@@ -719,6 +726,28 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("expires_at", response.data["detail"])
+
+    @override_settings(API_KEY_MAX_PER_PROJECT=1)
+    def test_api_key_creation_enforces_project_cap(self):
+        first_response = self.client.post(
+            reverse("apikey_list_create"),
+            {"name": "First Key", "scopes": ["api_keys:read"]},
+            format="json",
+        )
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+
+        second_response = self.client.post(
+            reverse("apikey_list_create"),
+            {"name": "Second Key", "scopes": ["api_keys:read"]},
+            format="json",
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("api key limit", str(second_response.data).lower())
+        self.assertEqual(
+            APIKey.objects.filter(project=self.default_project).count(),
+            1,
+        )
 
     def test_api_key_list_marks_expired_key_as_expired(self):
         prefix, _, hashed_key = APIKey.generate_key(environment="test")
@@ -1137,6 +1166,7 @@ class ProjectSocialProviderConfigTest(APITestCase):
     """Project social provider config CRUD and deletion safety."""
 
     def setUp(self):
+        cache.clear()
         from allauth.account.models import EmailAddress
 
         self.owner = User.objects.create_user(
@@ -1164,6 +1194,10 @@ class ProjectSocialProviderConfigTest(APITestCase):
             {"email": self.owner.email, "password": "password123"},
             format="json",
         )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     def test_owner_can_create_project_social_provider_config(self):
         response = self.client.post(

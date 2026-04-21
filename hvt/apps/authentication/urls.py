@@ -1,7 +1,6 @@
 from django.urls import path, include
 from dj_rest_auth.views import (
     LogoutView,
-    UserDetailsView,
 )
 from . import views
 
@@ -52,7 +51,7 @@ urlpatterns = [
     ),
     path("login/", views.HVTLoginView.as_view(), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),
-    path("user/", UserDetailsView.as_view(), name="rest_user_details"),
+    path("user/", views.HVTUserDetailsView.as_view(), name="rest_user_details"),
     path("password/reset/", views.HVTPasswordResetView.as_view(), name="rest_password_reset"),
     path(
         "password/reset/validate/",

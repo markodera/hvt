@@ -1,6 +1,8 @@
+import hashlib
+import hmac
 import json
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from django.conf import settings as django_settings
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
@@ -28,6 +30,7 @@ from hvt.apps.organizations.models import (
 from hvt.apps.authentication.backends import APIKeyAuthentication
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import IsAuthenticatedOrAPIKey, IsAdminOrAPIKey
+from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
 from django.contrib.sites.models import Site
 
 User = get_user_model()
@@ -250,6 +253,23 @@ class APIKeyPermissionTest(TestCase):
         self.user = User.objects.create_user(
             email="test@example.com", password="testpass123"
         )
+        self.runtime_org = Organization.objects.create(
+            name="Runtime Permission Org",
+            slug="runtime-permission-org",
+        )
+        self.runtime_project = Project.objects.create(
+            organization=self.runtime_org,
+            name="Runtime Project",
+            slug="runtime-project",
+            allow_signup=True,
+        )
+        self.project_scoped_user = User.objects.create_user(
+            email="runtime@example.com",
+            password="testpass123",
+            organization=self.runtime_org,
+            project=self.runtime_project,
+            role=User.Role.MEMBER,
+        )
         self.admin_user = User.objects.create_user(
             email="admin@example.com", password="adminpass123", is_staff=True
         )
@@ -274,6 +294,14 @@ class APIKeyPermissionTest(TestCase):
         request.auth = None
 
         self.assertTrue(permission.has_permission(request, None))
+
+    def test_is_authenticated_or_api_key_denies_project_scoped_user(self):
+        permission = IsAuthenticatedOrAPIKey()
+        request = self.factory.get("/api/test/")
+        request.user = self.project_scoped_user
+        request.auth = None
+
+        self.assertFalse(permission.has_permission(request, None))
 
     def test_is_authenticated_or_api_key_with_api_key(self):
         """Test IsAuthenticatedOrAPIKey with API key"""
@@ -501,6 +529,209 @@ class JWTCookieAuthFlowTest(APITestCase):
         access_token = AccessToken(response.cookies["auth-token"].value)
         self.assertEqual(access_token["org_id"], str(self.org.id))
         self.assertIsNone(access_token["project_id"])
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class ControlPlaneRuntimeIsolationTest(APITestCase):
+    """Runtime identities must not authenticate against dashboard-only surfaces."""
+
+    def setUp(self):
+        cache.clear()
+        self.owner = User.objects.create_user(
+            email="cp-boundary-owner@example.com",
+            password="Strongpass123!",
+            role=User.Role.OWNER,
+        )
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
+        )
+        self.org = Organization.objects.create(
+            name="Control Plane Boundary Org",
+            slug="control-plane-boundary-org",
+            owner=self.owner,
+        )
+        self.owner.organization = self.org
+        self.owner.save(update_fields=["organization"])
+        self.default_project = self.org.ensure_default_project()
+
+        self.runtime_user = User.objects.create_user(
+            email="cp-boundary-runtime@example.com",
+            password="Strongpass123!",
+            organization=self.org,
+            project=self.default_project,
+            role=User.Role.MEMBER,
+        )
+        EmailAddress.objects.create(
+            user=self.runtime_user,
+            email=self.runtime_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        prefix, self.full_key, hashed_key = APIKey.generate_key()
+        self.api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Boundary Runtime Key",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["auth:runtime"],
+        )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    def _runtime_login(self):
+        response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response
+
+    def test_runtime_user_dashboard_login_returns_403(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.content, b"")
+
+    @patch("hvt.api.v1.serializers.users.SocialLoginSerializer.validate", autospec=True)
+    def test_runtime_google_oauth_login_returns_403(self, mock_validate):
+        mock_validate.return_value = {"user": self.runtime_user}
+
+        response = self.client.post(
+            "/api/v1/auth/social/google/",
+            {"code": "dummy-code"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.content, b"")
+
+    @patch("hvt.api.v1.serializers.users.SocialLoginSerializer.validate", autospec=True)
+    def test_runtime_github_oauth_login_returns_403(self, mock_validate):
+        mock_validate.return_value = {"user": self.runtime_user}
+
+        response = self.client.post(
+            "/api/v1/auth/social/github/",
+            {"code": "dummy-code"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.content, b"")
+
+    def test_runtime_platform_scoped_refresh_token_returns_403(self):
+        refresh = HVTTokenObtainPairSerializer.get_token(self.runtime_user)
+
+        response = self.client.post(
+            "/api/v1/auth/token/refresh/",
+            {"refresh": str(refresh)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_runtime_user_dashboard_password_reset_is_silent_noop(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/password/reset/",
+            {"email": self.runtime_user.email},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["detail"],
+            "Password reset e-mail has been sent.",
+        )
+        mock_send_mail.assert_not_called()
+
+    def test_runtime_jwt_is_rejected_by_control_plane_me(self):
+        self._runtime_login()
+
+        response = self.client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_runtime_jwt_is_rejected_by_control_plane_user_details_alias(self):
+        self._runtime_login()
+
+        response = self.client.get("/api/v1/auth/user/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_runtime_jwt_is_rejected_by_current_organization_view(self):
+        self._runtime_login()
+
+        response = self.client.get("/api/v1/organizations/current/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_control_plane_social_adapter_blocks_runtime_only_email(self):
+        from rest_framework.exceptions import PermissionDenied
+        from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+
+        request = self.client.get("/api/v1/auth/social/google/").wsgi_request
+        sociallogin = Mock()
+        sociallogin.is_existing = False
+        sociallogin.email_addresses = [Mock(email=self.runtime_user.email, verified=True)]
+        sociallogin.user = Mock(email=self.runtime_user.email)
+        sociallogin.account = Mock(user=None)
+
+        with self.assertRaises(PermissionDenied):
+            CustomSocialAccountAdapter().pre_social_login(request, sociallogin)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
+class ResendWebhookSecurityTest(APITestCase):
+    def test_resend_webhook_requires_signing_key_configuration(self):
+        with override_settings(RESEND_WEBHOOK_SIGNING_KEY=""):
+            response = self.client.post(
+                "/api/v1/auth/webhooks/resend/",
+                data=json.dumps({"type": "email.delivered"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    def test_resend_webhook_rejects_invalid_signature(self):
+        with override_settings(RESEND_WEBHOOK_SIGNING_KEY="super-secret"):
+            response = self.client.post(
+                "/api/v1/auth/webhooks/resend/",
+                data=json.dumps({"type": "email.delivered"}),
+                content_type="application/json",
+                HTTP_RESEND_SIGNATURE="bad-signature",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_resend_webhook_accepts_valid_signature(self):
+        body = json.dumps({"type": "email.delivered"}).encode()
+        secret = "super-secret"
+        signature = hmac.HMAC(secret.encode(), body, hashlib.sha256).hexdigest()
+
+        with override_settings(RESEND_WEBHOOK_SIGNING_KEY=secret):
+            response = self.client.post(
+                "/api/v1/auth/webhooks/resend/",
+                data=body,
+                content_type="application/json",
+                HTTP_RESEND_SIGNATURE=signature,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json(), {"ok": True})
 
 
 class JWTOrgClaimHardeningTest(APITestCase):

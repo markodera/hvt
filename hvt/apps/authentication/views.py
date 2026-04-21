@@ -16,6 +16,7 @@ from dj_rest_auth.views import (
     PasswordChangeView,
     PasswordResetConfirmView,
     PasswordResetView,
+    UserDetailsView,
 )
 from dj_rest_auth.registration.views import (
     RegisterView,
@@ -47,6 +48,12 @@ from hvt.api.v1.serializers.users import (
     RuntimeRegisterSerializer,
 )
 from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+from hvt.apps.authentication.identity import (
+    get_project_scoped_users_by_email,
+    is_project_scoped_user,
+    normalize_email,
+)
+from hvt.apps.authentication.permissions import IsPlatformUser
 from hvt.apps.authentication.serializers import (
     ControlPlanePasswordResetSerializer,
     ControlPlaneResendEmailVerificationSerializer,
@@ -266,13 +273,55 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
     """
 
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
 
     def get_object(self):
         return self.request.user
 
 
-class HVTLoginView(LoginView):
+class HVTUserDetailsView(UserDetailsView):
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+
+class PlatformUserOnlyMixin:
+    """Reject runtime users on control-plane auth endpoints without leaking identity details."""
+
+    def _platform_forbidden_response(self):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    def _resolve_project_scoped_password_user(self, request):
+        email = normalize_email(request.data.get("email", ""))
+        password = request.data.get("password") or ""
+        if not email or not password:
+            return None
+
+        for candidate in get_project_scoped_users_by_email(email):
+            if candidate.check_password(password):
+                return candidate
+        return None
+
+    def post(self, request, *args, **kwargs):
+        self.request = request
+        self.serializer = self.get_serializer(data=self.request.data)
+
+        try:
+            self.serializer.is_valid(raise_exception=True)
+        except PermissionDenied:
+            return self._platform_forbidden_response()
+        except serializers.ValidationError:
+            if self._resolve_project_scoped_password_user(request) is not None:
+                return self._platform_forbidden_response()
+            raise
+
+        user = self.serializer.validated_data.get("user")
+        if is_project_scoped_user(user):
+            return self._platform_forbidden_response()
+
+        self.login()
+        return self.get_response()
+
+
+class HVTLoginView(PlatformUserOnlyMixin, LoginView):
     throttle_classes = CONTROL_PLANE_LOGIN_THROTTLES
 
 
@@ -303,7 +352,7 @@ class RuntimeLoginView(LoginView):
             self.process_login()
 
 
-class GoogleLogin(SocialLoginView):
+class GoogleLogin(PlatformUserOnlyMixin, SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/google/callback")
     client_class = HVTCompatibilityOAuth2Client
@@ -311,7 +360,7 @@ class GoogleLogin(SocialLoginView):
     throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class GithubLogin(SocialLoginView):
+class GithubLogin(PlatformUserOnlyMixin, SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/github/callback")
     client_class = HVTCompatibilityOAuth2Client
@@ -567,6 +616,27 @@ class HVTRegisterView(RegisterView):
 class HVTVerifyEmailView(VerifyEmailView):
     throttle_classes = VERIFY_EMAIL_THROTTLES
 
+    def get_serializer(self, *args, **kwargs):
+        # Intercept the data passed to the serializer
+        if "data" in kwargs:
+            import urllib.parse
+            import copy
+            
+            data = kwargs["data"]
+            # Make the data mutable
+            if hasattr(data, "copy"):
+                mutable_data = data.copy()
+            else:
+                mutable_data = copy.copy(data)
+                
+            # URL-decode the key if it exists
+            # Next.js and frontend frameworks often send URL-encoded keys (e.g. %3A instead of :)
+            if "key" in mutable_data and isinstance(mutable_data["key"], str):
+                mutable_data["key"] = urllib.parse.unquote(mutable_data["key"])
+                
+            kwargs["data"] = mutable_data
+            
+        return super().get_serializer(*args, **kwargs)
 
 class HVTResendEmailVerificationView(ResendEmailVerificationView):
     permission_classes = [permissions.AllowAny]
@@ -638,6 +708,7 @@ class HVTRuntimeResendEmailVerificationView(
 
 
 class HVTPasswordChangeView(PasswordChangeView):
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
     throttle_classes = PASSWORD_CHANGE_THROTTLES
 
 
@@ -679,12 +750,14 @@ def resend_webhook(request):
     # Verify signature header
     raw = request.body
     sig = request.headers.get("Resend-Signature", "")
-    secret = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
+    secret = getattr(settings, "RESEND_WEBHOOK_SIGNING_KEY", "")
 
-    if secret:
-        expected = hmac.HMAC(secret.encode(), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            return JsonResponse({"error": "Invalid signature"}, status=403)
+    if not secret:
+        return JsonResponse({"error": "Webhook signing key not configured"}, status=503)
+
+    expected = hmac.HMAC(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return JsonResponse({"error": "Invalid signature"}, status=403)
 
     try:
         payload = json.loads(raw)

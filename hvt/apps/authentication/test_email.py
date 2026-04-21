@@ -44,7 +44,7 @@ class ResendEmailBackendTest(TestCase):
         
         self.assertEqual(call_args['to'], ['user@example.com'])
         self.assertEqual(call_args['subject'], 'Hello from HVT')
-        self.assertEqual(call_args['from_'], 'noreply@test.hvt.dev')
+        self.assertEqual(call_args['from'], 'noreply@test.hvt.dev')
         self.assertEqual(call_args['text'], 'This is a basic text email.')
         self.assertEqual(call_args['html'], '<p>This is a basic text email.</p>')
 
@@ -147,7 +147,7 @@ class ResendEmailBackendTest(TestCase):
         self.assertEqual(num_sent, 1)
 
         call_args = mock_send.call_args[0][0]
-        self.assertEqual(call_args["from_"], "fallback@example.com")
+        self.assertEqual(call_args["from"], "fallback@example.com")
 
     def test_build_email_context_runtime_project_sets_app_fields(self):
         """Runtime project name should drive user-facing app text in templates."""

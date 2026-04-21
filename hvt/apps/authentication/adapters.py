@@ -3,14 +3,17 @@ from allauth.account.adapter import DefaultAccountAdapter, get_adapter as get_ac
 from allauth.socialaccount.models import SocialApp
 from django.contrib.sites.shortcuts import get_current_site
 from django.conf import settings
+from rest_framework.exceptions import PermissionDenied
 import logging
 
 from hvt.apps.authentication.identity import (
     get_control_plane_users_by_email,
+    get_project_scoped_users_by_email,
     get_runtime_user_for_api_key,
 )
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
 from hvt.apps.organizations.access import assign_default_signup_roles
+from hvt.apps.users.models import User
 from .email import (
     ResendEmailService,
     build_email_context,
@@ -277,6 +280,8 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
                 user.save(update_fields=["organization", "project"])
         else:
             user = get_control_plane_users_by_email(email).first()
+            if user is None and get_project_scoped_users_by_email(email).exists():
+                raise PermissionDenied()
 
         if not user:
             return
@@ -287,6 +292,16 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
     def save_user(self, request, sociallogin, form=None):
         user = sociallogin.user
+        api_key = getattr(request, "auth", None)
+
+        if (
+            not isinstance(api_key, APIKey)
+            and user.email
+            and not get_control_plane_users_by_email(user.email).exclude(pk=user.pk).exists()
+            and get_project_scoped_users_by_email(user.email).exists()
+        ):
+            raise PermissionDenied()
+
         user.set_unusable_password()
         account_adapter = get_account_adapter()
         if form:
@@ -294,11 +309,10 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         else:
             account_adapter.populate_username(request, user)
 
-        api_key = getattr(request, "auth", None)
         if isinstance(api_key, APIKey):
             user.organization = api_key.organization
             user.project = api_key.project
-            user.role = user.Role.MEMBER
+            user.role = User.Role.MEMBER
         user.is_active = True
         user.save()
         sociallogin.save(request)

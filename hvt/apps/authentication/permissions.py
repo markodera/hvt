@@ -1,5 +1,6 @@
 import logging
 from rest_framework import permissions
+from hvt.apps.authentication.identity import is_project_scoped_user
 from hvt.apps.organizations.models import APIKey
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,23 @@ def _allow_api_key(request, view, permission_name):
     return True
 
 
+class IsPlatformUser(permissions.BasePermission):
+    """Allow access only to authenticated dashboard users, never runtime users."""
+
+    message = "You do not have permission to perform this action."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return bool(
+            user
+            and getattr(user, "is_authenticated", False)
+            and not is_project_scoped_user(user)
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return self.has_permission(request, view)
+
+
 class IsAuthenticatedOrAPIKey(permissions.BasePermission):
     """
     Allow access if authenticated via JWT or Valid API key.
@@ -70,6 +88,12 @@ class IsAuthenticatedOrAPIKey(permissions.BasePermission):
 
         # Check if user is authenticated
         if request.user and request.user.is_authenticated:
+            if is_project_scoped_user(request.user):
+                logger.warning(
+                    "[IsAuthenticatedOrAPIKey] Denying project-scoped user %s",
+                    getattr(request.user, "email", ""),
+                )
+                return False
             logger.info("[IsAuthenticatedOrAPIKey] User is authenticated via JWT")
             return True
 
@@ -93,6 +117,12 @@ class IsAdminOrAPIKey(permissions.BasePermission):
 
         # Check if user is admin
         if request.user and request.user.is_authenticated and request.user.is_staff:
+            if is_project_scoped_user(request.user):
+                logger.warning(
+                    "[IsAdminOrAPIKey] Denying project-scoped user %s",
+                    getattr(request.user, "email", ""),
+                )
+                return False
             logger.info("[IsAdminOrAPIKey] User is admin, granting access")
             return True
 
@@ -118,6 +148,12 @@ class IsOrgAdminOrAPIKey(permissions.BasePermission):
             return _allow_api_key(request, view, "IsOrgAdminOrAPIKey")
 
         if request.user and request.user.is_authenticated:
+            if is_project_scoped_user(request.user):
+                logger.info(
+                    "[IsOrgAdminOrAPIKey] Project-scoped user %s denied",
+                    request.user.email,
+                )
+                return False
             # Check if user belongs to an organization
             if not request.user.organization:
                 logger.info(
@@ -152,6 +188,12 @@ class IsOrgOwnerOrAPIKey(permissions.BasePermission):
 
         # Check user role
         if request.user and request.user.is_authenticated:
+            if is_project_scoped_user(request.user):
+                logger.info(
+                    "[IsOrgOwnerOrAPIKey] Project-scoped user %s denied",
+                    request.user.email,
+                )
+                return False
             # Check if user belongs to an organization
             if not request.user.organization:
                 logger.info(
@@ -186,6 +228,12 @@ class IsOrgMemberOrAPIKey(permissions.BasePermission):
 
         # Check if user is authenticated and belongs to an org
         if request.user and request.user.is_authenticated:
+            if is_project_scoped_user(request.user):
+                logger.info(
+                    "[IsOrgMemberOrAPIKey] Project-scoped user %s denied",
+                    request.user.email,
+                )
+                return False
             if request.user.organization:
                 logger.info(
                     f"[IsOrgMemberOrAPIKey] User {request.user.email} is org member, granting access"
@@ -212,6 +260,8 @@ class IsSelfOrOrgAdmin(permissions.BasePermission):
             return _allow_api_key(request, view, "IsSelfOrOrgAdmin")
 
         if request.user and request.user.is_authenticated:
+            if is_project_scoped_user(request.user):
+                return False
             # User can always edit themselves
             if obj == request.user:
                 logger.info(
@@ -248,6 +298,9 @@ class CanChangeRole(permissions.BasePermission):
             return False
 
         if not request.user or not request.user.is_authenticated:
+            return False
+
+        if is_project_scoped_user(request.user):
             return False
 
         # Must be in the same organization
