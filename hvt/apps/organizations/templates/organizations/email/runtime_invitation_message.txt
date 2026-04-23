@@ -1,0 +1,28 @@
+{% if invitee_name %}
+Hi {{ invitee_name }},
+{% else %}
+Hi,
+{% endif %}
+
+You've been invited to create your {{ project_name }} account on HVT.
+
+Assigned roles:
+- {{ role_slugs|join:", " }}
+
+Accept invitation:
+{{ accept_url }}
+
+Invitation details:
+- Project: {{ project_name }}
+- Email: {{ invitee_email }}
+- Expires: {{ expires_at_display }}
+
+Use the same email address this invitation was sent to when you accept it.
+
+If you were not expecting this invitation, you can safely ignore this email.
+
+Docs: {{ docs_url }}
+Support: {{ support_email }}
+
+Sent by {{ brand_name }}
+{{ brand_domain }}

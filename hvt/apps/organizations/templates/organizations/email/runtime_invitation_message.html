@@ -1,0 +1,53 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}You're invited to join {{ project_name }} on HVT{% endblock %}
+{% block preview %}Create your {{ project_name }} account and accept your invited runtime roles.{% endblock %}
+{% block eyebrow %}
+<div style="display:inline-block; margin:0 0 14px 0; padding:6px 10px; border-radius:999px; border:1px solid #3f3f46; background:#18181b; color:#c4b5fd; font-family:Inter, Arial, sans-serif; font-size:11px; line-height:1; font-weight:600; letter-spacing:0.12em; text-transform:uppercase;">
+    Runtime invitation
+</div>
+{% endblock %}
+{% block heading %}Join {{ project_name }}{% endblock %}
+{% block body %}
+{% if invitee_name %}
+<p style="margin:0 0 16px 0;">Hi <strong>{{ invitee_name }}</strong>,</p>
+{% endif %}
+
+<p style="margin:0 0 16px 0;">You've been invited to create your <strong>{{ project_name }}</strong> account on HVT.</p>
+
+<p style="margin:0 0 22px 0;">
+    <a href="{{ accept_url }}" style="display:inline-block; padding:12px 18px; border-radius:10px; background:#7c3aed; color:#ffffff; font-weight:700; text-decoration:none;">Accept invitation</a>
+</p>
+
+<div style="margin:0 0 18px 0; padding:16px; border-radius:16px; border:1px solid #27272a; background:#18181b;">
+    <div style="margin:0 0 10px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">Invitation details</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:Inter, Arial, sans-serif; font-size:14px; line-height:1.7; color:#d4d4d8;">
+        <tr>
+            <td style="padding:0 0 6px 0; color:#71717a;">Project</td>
+            <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ project_name }}</td>
+        </tr>
+        <tr>
+            <td style="padding:0 0 6px 0; color:#71717a;">Roles</td>
+            <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ role_slugs|join:", " }}</td>
+        </tr>
+        <tr>
+            <td style="padding:0 0 6px 0; color:#71717a;">Email</td>
+            <td style="padding:0 0 6px 0; color:#ffffff;" align="right">{{ invitee_email }}</td>
+        </tr>
+        <tr>
+            <td style="padding:0; color:#71717a;">Expires</td>
+            <td style="padding:0; color:#ffffff;" align="right">{{ expires_at_display }}</td>
+        </tr>
+    </table>
+</div>
+
+<div style="margin:0 0 18px 0; padding:16px; border-radius:16px; border:1px solid #27272a; background:#111111;">
+    <div style="margin:0 0 8px 0; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#71717a;">Direct link</div>
+    <a href="{{ accept_url }}" style="word-break:break-all; color:#c4b5fd; text-decoration:none;">{{ accept_url }}</a>
+</div>
+
+<p style="margin:0;">If you were not expecting this invitation, you can safely ignore this email.</p>
+{% endblock %}
+{% block footer %}
+This invitation was sent by {{ brand_name }} for {{ project_name }}. Accept it with the same email address it was sent to: {{ invitee_email }}.
+{% endblock %}

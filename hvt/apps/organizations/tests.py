@@ -991,6 +991,7 @@ class ProjectAccessManagementTest(APITestCase):
                 "slug": "buyer",
                 "name": "Buyer",
                 "is_default_signup": True,
+                "is_self_assignable": True,
                 "permission_ids": [str(permission.id)],
             },
             format="json",
@@ -999,6 +1000,8 @@ class ProjectAccessManagementTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         role = ProjectRole.objects.get(project=self.default_project, slug="buyer")
         self.assertEqual(list(role.permissions.values_list("slug", flat=True)), ["orders.read.own"])
+        self.assertTrue(role.is_self_assignable)
+        self.assertTrue(response.data["is_self_assignable"])
 
     def test_member_cannot_manage_project_roles(self):
         self.client.force_authenticate(user=self.member)
@@ -1018,17 +1021,28 @@ class ProjectAccessManagementTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_owner_can_replace_user_project_roles(self):
-        permission = ProjectPermission.objects.create(
+        buyer_permission = ProjectPermission.objects.create(
             project=self.default_project,
             slug="orders.read.own",
             name="Read Own Orders",
         )
-        role = ProjectRole.objects.create(
+        seller_permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.write.own",
+            name="Write Own Orders",
+        )
+        buyer_role = ProjectRole.objects.create(
             project=self.default_project,
             slug="buyer",
             name="Buyer",
         )
-        role.permissions.add(permission)
+        seller_role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="verified_seller",
+            name="Verified Seller",
+        )
+        buyer_role.permissions.add(buyer_permission)
+        seller_role.permissions.add(seller_permission)
         self.client.force_authenticate(user=self.owner)
 
         response = self.client.put(
@@ -1039,18 +1053,45 @@ class ProjectAccessManagementTest(APITestCase):
                     "user_pk": self.runtime_user.id,
                 },
             ),
-            {"role_ids": [str(role.id)]},
+            {"role_slugs": ["buyer", "verified_seller"]},
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["permissions"], ["orders.read.own"])
         self.assertEqual(
-            response.data["roles"][0]["slug"],
-            "buyer",
+            set(response.data["permissions"]),
+            {"orders.read.own", "orders.write.own"},
+        )
+        self.assertEqual(
+            {item["slug"] for item in response.data["roles"]},
+            {"buyer", "verified_seller"},
         )
         self.assertTrue(
-            UserProjectRole.objects.filter(user=self.runtime_user, role=role).exists()
+            UserProjectRole.objects.filter(user=self.runtime_user, role=buyer_role).exists()
+        )
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=self.runtime_user, role=seller_role).exists()
+        )
+
+    def test_owner_replace_user_project_roles_rejects_unknown_slug(self):
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.put(
+            reverse(
+                "project_user_role_assignment",
+                kwargs={
+                    "project_pk": self.default_project.id,
+                    "user_pk": self.runtime_user.id,
+                },
+            ),
+            {"role_slugs": ["missing-role"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["role_slugs"][0]),
+            "These roles do not exist in this project: missing-role",
         )
 
     def test_current_project_access_returns_effective_permissions(self):

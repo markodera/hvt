@@ -22,9 +22,15 @@ from hvt.apps.authentication.identity import (
     get_runtime_user_for_api_key,
     normalize_email,
 )
-from hvt.apps.organizations.access import assign_default_signup_roles, user_has_project_access
+from hvt.apps.organizations.access import (
+    assign_default_signup_roles,
+    get_user_project_permission_slugs,
+    get_user_project_roles,
+    user_has_project_access,
+)
 from hvt.apps.users.models import User
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig, UserProjectRole
+from hvt.apps.organizations.runtime_roles import assign_requested_registration_role
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.registration.serializers import SocialLoginSerializer
 from dj_rest_auth.serializers import LoginSerializer
@@ -155,7 +161,7 @@ def _create_registered_user(
             raise serializers.ValidationError(
                 (
                     "Verification email could not be sent. "
-                    "Resend test mode only allows delivery to your own verified email address."
+                    
                 )
             ) from exc
         raise
@@ -263,6 +269,7 @@ class RuntimeRegisterSerializer(BaseRegisterSerializer):
     default_error_messages = {
         "api_key_required": "A valid X-API-Key header is required.",
     }
+    role_slug = serializers.CharField(required=False, allow_blank=False)
 
     def validate_email(self, value):
         normalized_email = super().validate_email(value)
@@ -306,16 +313,24 @@ class RuntimeRegisterSerializer(BaseRegisterSerializer):
                 }
             )
 
-        user = _create_registered_user(
-            self,
-            request,
-            organization=api_key_org,
-            project=api_key_project,
-            role=User.Role.MEMBER if api_key_org else None,
-        )
+        with transaction.atomic():
+            user = _create_registered_user(
+                self,
+                request,
+                organization=api_key_org,
+                project=api_key_project,
+                role=User.Role.MEMBER if api_key_org else None,
+            )
 
-        if api_key_org:
-            assign_default_signup_roles(user, api_key_project)
+            if api_key_org:
+                if "role_slug" in request.data:
+                    assign_requested_registration_role(
+                        user=user,
+                        project=api_key_project,
+                        role_slug=request.data.get("role_slug"),
+                    )
+                else:
+                    assign_default_signup_roles(user, api_key_project)
 
         _log_registration_event(request, user, organization=user.organization, project=api_key_project)
         _trigger_registration_webhook(
@@ -679,6 +694,77 @@ class UserSerializer(UserAppRolesMixin, serializers.ModelSerializer):
             "is_test",
             "created_at",
         ]
+
+
+class RuntimeCurrentUserSerializer(serializers.ModelSerializer):
+    """Serializer for runtime session bootstrap tied to the token's project context."""
+
+    full_name = serializers.ReadOnlyField()
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+    organization = serializers.UUIDField(source="organization_id", read_only=True, allow_null=True)
+    organization_slug = serializers.CharField(
+        source="organization.slug",
+        read_only=True,
+        allow_null=True,
+    )
+    project = serializers.SerializerMethodField()
+    project_slug = serializers.SerializerMethodField()
+    app_roles = serializers.SerializerMethodField()
+    app_permissions = serializers.SerializerMethodField()
+    is_project_scoped = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "full_name",
+            "organization",
+            "organization_slug",
+            "project",
+            "project_slug",
+            "app_roles",
+            "app_permissions",
+            "role",
+            "role_display",
+            "is_project_scoped",
+            "is_active",
+            "is_test",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def _get_runtime_project(self):
+        return self.context.get("project")
+
+    @extend_schema_field(serializers.UUIDField(allow_null=True))
+    def get_project(self, obj):
+        project = self._get_runtime_project()
+        return str(project.id) if project else None
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_project_slug(self, obj):
+        project = self._get_runtime_project()
+        return project.slug if project else None
+
+    @extend_schema_field(UserProjectRoleSummarySerializer(many=True))
+    def get_app_roles(self, obj):
+        project = self._get_runtime_project()
+        if not project:
+            return []
+        return UserProjectRoleSummarySerializer(
+            get_user_project_roles(obj, project),
+            many=True,
+        ).data
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_app_permissions(self, obj):
+        project = self._get_runtime_project()
+        if not project:
+            return []
+        return get_user_project_permission_slugs(obj, project)
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

@@ -3,6 +3,50 @@ from django.db import transaction
 from hvt.apps.organizations.models import ProjectRole, UserProjectRole
 
 
+CONTROL_PLANE_ROLE_SLUGS = frozenset({"owner", "admin", "member"})
+
+
+def normalize_role_slug(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def normalize_role_slugs(values) -> list[str]:
+    normalized = []
+    seen = set()
+    for value in values or []:
+        slug = normalize_role_slug(value)
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        normalized.append(slug)
+    return normalized
+
+
+def get_project_roles_by_slugs(project, role_slugs) -> tuple[list[ProjectRole], list[str]]:
+    normalized_role_slugs = normalize_role_slugs(role_slugs)
+    if not project or not normalized_role_slugs:
+        return [], normalized_role_slugs
+
+    roles = list(
+        ProjectRole.objects.filter(
+            project=project,
+            slug__in=normalized_role_slugs,
+        )
+    )
+    roles_by_slug = {role.slug: role for role in roles}
+    resolved_roles = [
+        roles_by_slug[role_slug]
+        for role_slug in normalized_role_slugs
+        if role_slug in roles_by_slug
+    ]
+    invalid_role_slugs = [
+        role_slug
+        for role_slug in normalized_role_slugs
+        if role_slug not in roles_by_slug
+    ]
+    return resolved_roles, invalid_role_slugs
+
+
 def get_user_project_roles(user, project):
     """Return the project's role objects assigned to the user."""
     if not user or not project:

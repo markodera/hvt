@@ -8,6 +8,7 @@ This is the backend-to-frontend contract for launch prep across runtime auth, pr
 - Runtime resend verification exists at `POST /api/v1/auth/runtime/register/resend-email/`.
 - Runtime verify-email alias exists at `POST /api/v1/auth/runtime/register/verify-email/`.
 - Runtime login exists at `POST /api/v1/auth/runtime/login/` and issues project-scoped JWT claims when the API key is project-scoped.
+- Runtime session bootstrap/introspection exists at `GET /api/v1/auth/runtime/me/` and returns the authenticated runtime user plus effective app roles/permissions for the JWT project context.
 - Runtime password reset exists at:
   - `POST /api/v1/auth/runtime/password/reset/`
   - `POST /api/v1/auth/runtime/password/reset/validate/`
@@ -56,6 +57,10 @@ This is the backend-to-frontend contract for launch prep across runtime auth, pr
   - Load enabled providers from `GET /api/v1/auth/runtime/social/providers/`
   - Start OAuth only for providers returned by that endpoint
   - Send the exact selected `callback_url` back to the backend when finishing social login
+- Runtime session bootstrap:
+  - Call `GET /api/v1/auth/runtime/me/`
+  - If `401`, call `POST /api/v1/auth/token/refresh/`
+  - Retry `GET /api/v1/auth/runtime/me/`
 - Cookie auth refresh:
   - `POST /api/v1/auth/token/refresh/` rotates cookies and can be treated as the session refresh path
 
@@ -94,6 +99,7 @@ This is the backend-to-frontend contract for launch prep across runtime auth, pr
   - API key creation with project selection and `auth:runtime`
   - project social provider config UI
   - runtime login
+  - runtime session bootstrap via `runtime/me`
   - runtime password reset
   - runtime resend verification
   - runtime social provider discovery

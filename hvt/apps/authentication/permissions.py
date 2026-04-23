@@ -74,6 +74,25 @@ class IsPlatformUser(permissions.BasePermission):
         return self.has_permission(request, view)
 
 
+class IsRuntimeUser(permissions.BasePermission):
+    """Allow access only to authenticated sessions that carry runtime project context."""
+
+    message = "You do not have permission to perform this action."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        validated_token = getattr(request, "auth", None)
+        project_id = validated_token.get("project_id") if hasattr(validated_token, "get") else None
+        return bool(
+            user
+            and getattr(user, "is_authenticated", False)
+            and project_id
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return self.has_permission(request, view)
+
+
 class IsAuthenticatedOrAPIKey(permissions.BasePermission):
     """
     Allow access if authenticated via JWT or Valid API key.

@@ -55,6 +55,11 @@ class AuditLog(models.Model):
         ORG_INVITATION_ACCEPTED = "org.invitation.accepted", "Organization Invitation Accepted"
         ORG_INVITATION_REVOKED = "org.invitation.revoked", "Organization Invitation Revoked"
         ORG_INVITATION_RESENT = "org.invitation.resent", "Organization Invitation Resent"
+        RUNTIME_USER_INVITED = "runtime_user.invited", "Runtime User Invited"
+        RUNTIME_USER_INVITE_ACCEPTED = (
+            "runtime_user.invite_accepted",
+            "Runtime User Invite Accepted",
+        )
 
         # Project events
         PROJECT_CREATED = "project.created", "Project Created"

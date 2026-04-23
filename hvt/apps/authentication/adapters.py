@@ -3,6 +3,7 @@ from allauth.account.adapter import DefaultAccountAdapter, get_adapter as get_ac
 from allauth.socialaccount.models import SocialApp
 from django.contrib.sites.shortcuts import get_current_site
 from django.conf import settings
+from django.db import transaction
 from rest_framework.exceptions import PermissionDenied
 import logging
 
@@ -13,6 +14,7 @@ from hvt.apps.authentication.identity import (
 )
 from hvt.apps.organizations.models import APIKey, SocialProviderConfig
 from hvt.apps.organizations.access import assign_default_signup_roles
+from hvt.apps.organizations.runtime_roles import assign_requested_registration_role
 from hvt.apps.users.models import User
 from .email import (
     ResendEmailService,
@@ -302,19 +304,31 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         ):
             raise PermissionDenied()
 
-        user.set_unusable_password()
-        account_adapter = get_account_adapter()
-        if form:
-            account_adapter.save_user(request, user, form, commit=False)
-        else:
-            account_adapter.populate_username(request, user)
+        with transaction.atomic():
+            user.set_unusable_password()
+            account_adapter = get_account_adapter()
+            if form:
+                account_adapter.save_user(request, user, form, commit=False)
+            else:
+                account_adapter.populate_username(request, user)
 
-        if isinstance(api_key, APIKey):
-            user.organization = api_key.organization
-            user.project = api_key.project
-            user.role = User.Role.MEMBER
-        user.is_active = True
-        user.save()
-        sociallogin.save(request)
-        assign_default_signup_roles(user, api_key.project if isinstance(api_key, APIKey) else None)
-        return user
+            if isinstance(api_key, APIKey):
+                user.organization = api_key.organization
+                user.project = api_key.project
+                user.role = User.Role.MEMBER
+            user.is_active = True
+            user.save()
+            sociallogin.save(request)
+            if isinstance(api_key, APIKey):
+                if "role_slug" in request.data:
+                    assign_requested_registration_role(
+                        user=user,
+                        project=api_key.project,
+                        role_slug=request.data.get("role_slug"),
+                    )
+                else:
+                    assign_default_signup_roles(
+                        user,
+                        api_key.project,
+                    )
+            return user

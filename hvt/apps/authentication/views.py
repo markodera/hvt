@@ -38,14 +38,16 @@ import os
 import json
 
 from hvt.apps.users.models import User
-from hvt.apps.organizations.models import APIKey, SocialProviderConfig
+from hvt.apps.organizations.access import user_has_project_access
+from hvt.apps.organizations.models import APIKey, Project, SocialProviderConfig
 from hvt.api.v1.serializers.users import (
-    UserSerializer,
-    RuntimeLoginSerializer,
-    CustomSocialLoginSerializer,
-    RuntimeSocialLoginSerializer,
     ControlPlaneRegisterSerializer,
+    CustomSocialLoginSerializer,
+    RuntimeCurrentUserSerializer,
+    RuntimeLoginSerializer,
     RuntimeRegisterSerializer,
+    RuntimeSocialLoginSerializer,
+    UserSerializer,
 )
 from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
 from hvt.apps.authentication.identity import (
@@ -53,7 +55,7 @@ from hvt.apps.authentication.identity import (
     is_project_scoped_user,
     normalize_email,
 )
-from hvt.apps.authentication.permissions import IsPlatformUser
+from hvt.apps.authentication.permissions import IsPlatformUser, IsRuntimeUser
 from hvt.apps.authentication.serializers import (
     ControlPlanePasswordResetSerializer,
     ControlPlaneResendEmailVerificationSerializer,
@@ -274,6 +276,46 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
 
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+    def get_object(self):
+        return self.request.user
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Auth"],
+        summary="Get current runtime user profile",
+        description=(
+            "Returns the authenticated runtime user's profile and effective app "
+            "access for the project encoded in the current JWT session."
+        ),
+    ),
+)
+class RuntimeCurrentUserView(generics.RetrieveAPIView):
+    """GET /api/v1/auth/runtime/me - runtime session bootstrap/introspection."""
+
+    serializer_class = RuntimeCurrentUserSerializer
+    permission_classes = [permissions.IsAuthenticated, IsRuntimeUser]
+
+    def _get_runtime_project(self):
+        validated_token = getattr(self.request, "auth", None)
+        project_id = validated_token.get("project_id") if hasattr(validated_token, "get") else None
+        if not project_id:
+            raise PermissionDenied("Runtime session is missing project context.")
+
+        try:
+            project = Project.objects.select_related("organization").get(id=project_id)
+        except (Project.DoesNotExist, TypeError, ValueError) as exc:
+            raise PermissionDenied("Runtime session project was not found.") from exc
+
+        if not user_has_project_access(self.request.user, project):
+            raise PermissionDenied("Runtime session does not match the current project.")
+        return project
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["project"] = self._get_runtime_project()
+        return context
 
     def get_object(self):
         return self.request.user
@@ -607,7 +649,7 @@ class HVTRegisterView(RegisterView):
                 raise serializers.ValidationError(
                     (
                         "Verification email could not be sent. "
-                        "Resend currently allows only your verified test recipient or a verified sender domain/API key pair."
+                        
                     )
                 ) from exc
             raise

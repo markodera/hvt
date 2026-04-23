@@ -10,14 +10,8 @@ paths:
   /api/v1/auth/login/:
     post:
       operationId: auth_login_create
-      description: |-
-        Check the credentials and return the REST Token
-        if the credentials are valid and authenticated.
-        Calls Django Auth login method to register User ID
-        in Django session framework
-
-        Accept the following POST parameters: username, password
-        Return the REST Framework Token Object's key.
+      description: Reject runtime users on control-plane auth endpoints without leaking
+        identity details.
       tags:
       - auth
       requestBody:
@@ -404,6 +398,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/RuntimeLogin'
           description: ''
+  /api/v1/auth/runtime/me/:
+    get:
+      operationId: auth_runtime_me_retrieve
+      description: Returns the authenticated runtime user's profile and effective
+        app access for the project encoded in the current JWT session.
+      summary: Get current runtime user profile
+      tags:
+      - Auth
+      security:
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - APIKeyAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeCurrentUser'
+          description: ''
   /api/v1/auth/runtime/password/reset/:
     post:
       operationId: auth_runtime_password_reset_create
@@ -685,27 +698,8 @@ paths:
   /api/v1/auth/social/github/:
     post:
       operationId: auth_social_github_create
-      description: |-
-        class used for social authentications
-        example usage for facebook with access_token
-        -------------
-        from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
-
-        class FacebookLogin(SocialLoginView):
-            adapter_class = FacebookOAuth2Adapter
-        -------------
-
-        example usage for facebook with code
-
-        -------------
-        from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
-        from allauth.socialaccount.providers.oauth2.client import OAuth2Client
-
-        class FacebookLogin(SocialLoginView):
-            adapter_class = FacebookOAuth2Adapter
-            client_class = OAuth2Client
-            callback_url = 'localhost:8000'
-        -------------
+      description: Reject runtime users on control-plane auth endpoints without leaking
+        identity details.
       tags:
       - auth
       requestBody:
@@ -734,27 +728,8 @@ paths:
   /api/v1/auth/social/google/:
     post:
       operationId: auth_social_google_create
-      description: |-
-        class used for social authentications
-        example usage for facebook with access_token
-        -------------
-        from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
-
-        class FacebookLogin(SocialLoginView):
-            adapter_class = FacebookOAuth2Adapter
-        -------------
-
-        example usage for facebook with code
-
-        -------------
-        from allauth.socialaccount.providers.facebook.views import FacebookOAuth2Adapter
-        from allauth.socialaccount.providers.oauth2.client import OAuth2Client
-
-        class FacebookLogin(SocialLoginView):
-            adapter_class = FacebookOAuth2Adapter
-            client_class = OAuth2Client
-            callback_url = 'localhost:8000'
-        -------------
+      description: Reject runtime users on control-plane auth endpoints without leaking
+        identity details.
       tags:
       - auth
       requestBody:
@@ -3041,6 +3016,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/OrganizationInvitationPublic'
           description: ''
+  /api/v1/runtime/invitations/:
+    get:
+      operationId: runtime_invitations_list
+      description: List runtime invitations for the project resolved from the provided
+        API key. Supports optional filtering by status and email.
+      summary: List runtime invitations
+      tags:
+      - Runtime Invitations
+      security:
+      - APIKeyAuth: []
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RuntimeInvitation'
+          description: ''
+    post:
+      operationId: runtime_invitations_create
+      description: Invite a runtime user into the project resolved from the provided
+        API key.
+      summary: Create runtime invitation
+      tags:
+      - Runtime Invitations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationCreateRequest'
+        required: true
+      security:
+      - APIKeyAuth: []
+      - jwtCookieAuth: []
+      - BearerAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeInvitation'
+          description: ''
+  /api/v1/runtime/invitations/accept/:
+    post:
+      operationId: runtime_invitations_accept_create
+      description: Accept a runtime invitation token and immediately return a JWT
+        pair.
+      summary: Accept runtime invitation
+      tags:
+      - Runtime Invitations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationAcceptRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationAcceptRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeInvitationAcceptRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeInvitationAcceptResponse'
+          description: ''
   /api/v1/users/:
     get:
       operationId: users_list
@@ -3763,6 +3820,8 @@ components:
       - org.invitation.accepted
       - org.invitation.revoked
       - org.invitation.resent
+      - runtime_user.invited
+      - runtime_user.invite_accepted
       - project.created
       - project.updated
       - project.deleted
@@ -3799,6 +3858,8 @@ components:
         * `org.invitation.accepted` - Organization Invitation Accepted
         * `org.invitation.revoked` - Organization Invitation Revoked
         * `org.invitation.resent` - Organization Invitation Resent
+        * `runtime_user.invited` - Runtime User Invited
+        * `runtime_user.invite_accepted` - Runtime User Invite Accepted
         * `project.created` - Project Created
         * `project.updated` - Project Updated
         * `project.deleted` - Project Deleted
@@ -4648,6 +4709,9 @@ components:
         is_default_signup:
           type: boolean
           description: Assign this role automatically during public runtime signup.
+        is_self_assignable:
+          type: boolean
+          description: Allow runtime users to request this role during registration.
         permission_ids:
           type: array
           items:
@@ -4658,11 +4722,11 @@ components:
       type: object
       description: Replace a user's role assignments for a single project.
       properties:
-        role_ids:
+        role_slugs:
           type: array
           items:
             type: string
-            format: uuid
+            minLength: 1
     PatchedSocialProviderConfigRequest:
       type: object
       description: Serializer for per-project social provider configuration.
@@ -4897,6 +4961,9 @@ components:
         is_default_signup:
           type: boolean
           description: Assign this role automatically during public runtime signup.
+        is_self_assignable:
+          type: boolean
+          description: Allow runtime users to request this role during registration.
         permissions:
           type: array
           items:
@@ -4937,6 +5004,9 @@ components:
         is_default_signup:
           type: boolean
           description: Assign this role automatically during public runtime signup.
+        is_self_assignable:
+          type: boolean
+          description: Allow runtime users to request this role during registration.
         permission_ids:
           type: array
           items:
@@ -4996,13 +5066,13 @@ components:
       type: object
       description: Replace a user's role assignments for a single project.
       properties:
-        role_ids:
+        role_slugs:
           type: array
           items:
             type: string
-            format: uuid
+            minLength: 1
       required:
-      - role_ids
+      - role_slugs
     ProviderEnum:
       enum:
       - google
@@ -5019,6 +5089,204 @@ components:
           readOnly: true
       required:
       - detail
+    RuntimeCurrentUser:
+      type: object
+      description: Serializer for runtime session bootstrap tied to the token's project
+        context.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+        full_name:
+          type: string
+          readOnly: true
+        organization:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        organization_slug:
+          type: string
+          readOnly: true
+          nullable: true
+        project:
+          type: string
+          format: uuid
+          nullable: true
+          readOnly: true
+        project_slug:
+          type: string
+          nullable: true
+          readOnly: true
+        app_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserProjectRoleSummary'
+          readOnly: true
+        app_permissions:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRoleEnum'
+          readOnly: true
+        role_display:
+          type: string
+          readOnly: true
+        is_project_scoped:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        is_test:
+          type: boolean
+          readOnly: true
+          description: Test user are only access via test API keys
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - app_permissions
+      - app_roles
+      - created_at
+      - email
+      - first_name
+      - full_name
+      - id
+      - is_active
+      - is_project_scoped
+      - is_test
+      - last_name
+      - organization
+      - organization_slug
+      - project
+      - project_slug
+      - role
+      - role_display
+    RuntimeInvitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        project:
+          type: string
+          format: uuid
+          readOnly: true
+        project_slug:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        role_slugs:
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RuntimeInvitationStatusEnum'
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accepted_at
+      - created_at
+      - email
+      - expires_at
+      - id
+      - project
+      - project_slug
+      - role_slugs
+      - status
+    RuntimeInvitationAcceptRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password1:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password2:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password1
+      - password2
+      - token
+    RuntimeInvitationAcceptResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    RuntimeInvitationCreateRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+        role_slugs:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+      required:
+      - email
+      - role_slugs
+    RuntimeInvitationStatusEnum:
+      enum:
+      - pending
+      - accepted
+      - expired
+      - revoked
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `accepted` - Accepted
+        * `expired` - Expired
+        * `revoked` - Revoked
     RuntimeLogin:
       type: object
       description: Login serializer for app-runtime auth scoped by API key org.
@@ -5074,6 +5342,8 @@ components:
         last_name:
           type: string
           maxLength: 150
+        role_slug:
+          type: string
       required:
       - email
     RuntimeRegisterRequest:
@@ -5098,6 +5368,9 @@ components:
         last_name:
           type: string
           maxLength: 150
+        role_slug:
+          type: string
+          minLength: 1
       required:
       - email
       - password1
@@ -5222,18 +5495,6 @@ components:
       - client_id
       - provider
       - redirect_uris
-    StatusEnum:
-      enum:
-      - pending
-      - success
-      - failed
-      - retrying
-      type: string
-      description: |-
-        * `pending` - Pending
-        * `success` - Success
-        * `failed` - Failed
-        * `retrying` - Retrying
     User:
       type: object
       description: Serializer for User model
@@ -5514,7 +5775,7 @@ components:
           readOnly: true
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+          - $ref: '#/components/schemas/WebhookDeliveryStatusEnum'
           readOnly: true
         response_status_code:
           type: integer
@@ -5559,6 +5820,18 @@ components:
       - response_body
       - response_status_code
       - status
+    WebhookDeliveryStatusEnum:
+      enum:
+      - pending
+      - success
+      - failed
+      - retrying
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `success` - Success
+        * `failed` - Failed
+        * `retrying` - Retrying
     WebhookRequest:
       type: object
       properties:

@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+from allauth.account.adapter import get_adapter
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
@@ -13,8 +15,13 @@ from hvt.apps.organizations.models import (
     Webhook,
     WebhookDelivery,
     OrganizationInvitation,
+    RuntimeInvitation,
 )
 from hvt.apps.organizations.runtime_origins import normalize_runtime_origin, normalize_runtime_origins
+from hvt.apps.organizations.runtime_roles import (
+    resolve_project_roles_or_error,
+    validate_no_control_plane_role_slugs,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -141,6 +148,7 @@ class ProjectRoleSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "is_default_signup",
+            "is_self_assignable",
             "permissions",
             "permission_ids",
             "created_at",
@@ -196,10 +204,13 @@ class ProjectRoleSerializer(serializers.ModelSerializer):
 class ProjectUserRoleAssignmentUpdateSerializer(serializers.Serializer):
     """Replace a user's role assignments for a single project."""
 
-    role_ids = serializers.ListField(
-        child=serializers.UUIDField(),
+    role_slugs = serializers.ListField(
+        child=serializers.CharField(),
         allow_empty=True,
     )
+
+    def validate_role_slugs(self, value):
+        return [str(role_slug or "").strip().lower() for role_slug in value]
 
 
 class ProjectUserRoleAccessSerializer(serializers.Serializer):
@@ -786,3 +797,75 @@ class OrganizationInvitationAcceptSerializer(serializers.Serializer):
     """Serializer for accepting an invitation by token."""
 
     token = serializers.CharField(max_length=128)
+
+
+class RuntimeInvitationCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role_slugs = serializers.ListField(
+        child=serializers.CharField(),
+        allow_empty=False,
+    )
+    first_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    last_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+    def validate_email(self, value):
+        return (value or "").strip().lower()
+
+    def validate(self, attrs):
+        project = self.context["project"]
+        role_slugs = validate_no_control_plane_role_slugs(
+            attrs.get("role_slugs", []),
+            field_name="role_slugs",
+            message="Control plane roles cannot be used in runtime invitations",
+        )
+        roles, normalized_role_slugs = resolve_project_roles_or_error(
+            project,
+            role_slugs,
+            field_name="role_slugs",
+            invalid_message_prefix="These roles do not exist in this project: ",
+        )
+        attrs["role_slugs"] = normalized_role_slugs
+        attrs["roles"] = roles
+        return attrs
+
+
+class RuntimeInvitationSerializer(serializers.ModelSerializer):
+    project = serializers.UUIDField(source="project_id", read_only=True)
+    project_slug = serializers.CharField(source="project.slug", read_only=True)
+
+    class Meta:
+        model = RuntimeInvitation
+        fields = [
+            "id",
+            "project",
+            "project_slug",
+            "email",
+            "role_slugs",
+            "status",
+            "expires_at",
+            "accepted_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class RuntimeInvitationAcceptSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=128)
+    password1 = serializers.CharField(trim_whitespace=False, write_only=True)
+    password2 = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate(self, attrs):
+        password1 = attrs.get("password1", "")
+        password2 = attrs.get("password2", "")
+        if password1 != password2:
+            raise serializers.ValidationError(
+                {"password2": ["The two password fields didn't match."]}
+            )
+
+        try:
+            get_adapter().clean_password(password1)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                serializers.as_serializer_error(exc)
+            ) from exc
+        return attrs

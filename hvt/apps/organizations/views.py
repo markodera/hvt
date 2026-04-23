@@ -1,9 +1,9 @@
 from rest_framework import generics, permissions, status, filters, serializers
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
@@ -20,10 +20,20 @@ from .models import (
     APIKey,
     ProjectPermission,
     ProjectRole,
+    RuntimeInvitation,
     SocialProviderConfig,
     Webhook,
     WebhookDelivery,
     OrganizationInvitation,
+)
+from hvt.apps.authentication.backends import (
+    APIKeyAuthentication,
+    HVTJWTCookieAuthentication,
+    HVTJWTAuthentication,
+)
+from hvt.apps.authentication.identity import (
+    get_control_plane_users_by_email,
+    get_runtime_project_users_by_email,
 )
 from hvt.apps.authentication.models import AuditLog
 from hvt.apps.authentication.permissions import (
@@ -32,7 +42,8 @@ from hvt.apps.authentication.permissions import (
     IsOrgMemberOrAPIKey,
     IsPlatformUser,
 )
-from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
+from hvt.apps.authentication.throttling import APIKeyRateThrottle
+from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer, build_hvt_token_pair
 from hvt.apps.organizations.access import (
     assign_default_signup_roles,
     get_user_project_permission_slugs,
@@ -45,9 +56,15 @@ from hvt.apps.organizations.permissions import (
     IsCurrentOrganizationAdmin,
     IsCurrentOrganizationOwner,
 )
+from hvt.apps.organizations.runtime_roles import resolve_project_roles_or_error
 from hvt.apps.organizations.webhooks import trigger_webhook_event
-from hvt.pagination import LargeResultPagination
-from hvt.apps.authentication.email import ResendEmailService, build_email_context, render_email_template
+from hvt.pagination import LargeResultPagination, StandardPagination
+from hvt.apps.authentication.email import (
+    ResendEmailService,
+    build_email_context,
+    build_frontend_url,
+    render_email_template,
+)
 from hvt.apps.users.models import User
 from hvt.api.v1.serializers.organizations import (
     OrganizationSerializer,
@@ -66,6 +83,9 @@ from hvt.api.v1.serializers.organizations import (
     OrganizationInvitationSerializer,
     OrganizationInvitationPublicSerializer,
     OrganizationInvitationAcceptSerializer,
+    RuntimeInvitationAcceptSerializer,
+    RuntimeInvitationCreateSerializer,
+    RuntimeInvitationSerializer,
 )
 
 import logging
@@ -179,6 +199,68 @@ def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
     except Exception:
         logger.exception(
             "Failed to send organization invitation email",
+            extra={"invitation_id": str(invitation.id), "email": invitation.email},
+        )
+        return False
+
+
+def _build_runtime_invitation_accept_url(invitation: RuntimeInvitation) -> str:
+    return build_frontend_url(
+        "/invite/accept",
+        project=invitation.project,
+        query={"token": invitation.token},
+    )
+
+
+def _send_runtime_invitation_email(
+    invitation: RuntimeInvitation,
+    *,
+    first_name: str = "",
+    last_name: str = "",
+) -> bool:
+    if not getattr(settings, "RESEND_API_KEY", ""):
+        logger.warning(
+            "Skipping runtime invitation email because RESEND_API_KEY is not configured",
+            extra={"invitation_id": str(invitation.id), "email": invitation.email},
+        )
+        return False
+
+    accept_url = _build_runtime_invitation_accept_url(invitation)
+    email_context = build_email_context(
+        {
+            "project": invitation.project,
+            "project_name": invitation.project.name,
+            "invitee_email": invitation.email,
+            "invitee_first_name": (first_name or "").strip(),
+            "invitee_last_name": (last_name or "").strip(),
+            "invitee_name": " ".join(
+                part
+                for part in [(first_name or "").strip(), (last_name or "").strip()]
+                if part
+            ),
+            "role_slugs": invitation.role_slugs,
+            "accept_url": accept_url,
+            "expires_at_display": timezone.localtime(invitation.expires_at).strftime(
+                "%B %d, %Y at %H:%M %Z"
+            ),
+        }
+    )
+    subject, text, html = render_email_template(
+        "organizations/email/runtime_invitation",
+        email_context,
+    )
+
+    try:
+        ResendEmailService().send(
+            to=invitation.email,
+            subject=subject,
+            html=html,
+            text=text,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to send runtime invitation email",
             extra={"invitation_id": str(invitation.id), "email": invitation.email},
         )
         return False
@@ -809,19 +891,12 @@ class ProjectUserRoleAssignmentView(APIView):
         user = self._get_user(project)
         serializer = ProjectUserRoleAssignmentUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        roles = list(
-            ProjectRole.objects.filter(
-                project=project,
-                id__in=serializer.validated_data["role_ids"],
-            )
+        roles, _ = resolve_project_roles_or_error(
+            project,
+            serializer.validated_data["role_slugs"],
+            field_name="role_slugs",
+            invalid_message_prefix="These roles do not exist in this project: ",
         )
-        found_ids = {role.id for role in roles}
-        requested_ids = serializer.validated_data["role_ids"]
-        if any(role_id not in found_ids for role_id in requested_ids):
-            raise serializers.ValidationError(
-                {"role_ids": ["Select valid roles in the current project."]}
-            )
 
         sync_user_project_roles(
             user,
@@ -1651,6 +1726,243 @@ class OrganizationInvitationAcceptView(APIView):
             status=status.HTTP_200_OK,
         )
         _set_rotated_auth_tokens(response, request.user, project=invitation.project)
+        return response
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Runtime Invitations"],
+        summary="List runtime invitations",
+        description=(
+            "List runtime invitations for the project resolved from the provided API key. "
+            "Supports optional filtering by status and email."
+        ),
+        responses={200: RuntimeInvitationSerializer(many=True)},
+    ),
+    post=extend_schema(
+        tags=["Runtime Invitations"],
+        summary="Create runtime invitation",
+        description="Invite a runtime user into the project resolved from the provided API key.",
+        request=RuntimeInvitationCreateSerializer,
+        responses={201: RuntimeInvitationSerializer},
+    ),
+)
+class RuntimeInvitationListCreateView(APIView):
+    authentication_classes = [
+        APIKeyAuthentication,
+        HVTJWTCookieAuthentication,
+        HVTJWTAuthentication,
+    ]
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [APIKeyRateThrottle]
+
+    def _get_runtime_api_key(self, request) -> APIKey:
+        if request.user and request.user.is_authenticated and not isinstance(request.auth, APIKey):
+            raise PermissionDenied("Platform JWT authentication is not allowed on this endpoint.")
+
+        api_key = getattr(request, "auth", None)
+        if not isinstance(api_key, APIKey):
+            raise NotAuthenticated("A valid X-API-Key header is required.")
+        if not api_key.has_scope("auth:runtime"):
+            raise PermissionDenied("This API key does not have the required auth:runtime scope.")
+        if not api_key.project_id:
+            raise PermissionDenied("Runtime invitations require a project-scoped API key.")
+        return api_key
+
+    def get(self, request, *args, **kwargs):
+        api_key = self._get_runtime_api_key(request)
+
+        queryset = RuntimeInvitation.objects.filter(project=api_key.project).order_by("-created_at")
+
+        status_filter = (request.query_params.get("status") or "").strip().lower()
+        if status_filter:
+            if status_filter not in RuntimeInvitation.Status.values:
+                raise serializers.ValidationError(
+                    {"status": ["Invalid status filter for runtime invitations."]}
+                )
+            queryset = queryset.filter(status=status_filter)
+
+        email_filter = (request.query_params.get("email") or "").strip().lower()
+        if email_filter:
+            queryset = queryset.filter(email=email_filter)
+
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = RuntimeInvitationSerializer(page if page is not None else queryset, many=True)
+        if page is not None:
+            return paginator.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    def post(self, request, *args, **kwargs):
+        api_key = self._get_runtime_api_key(request)
+
+        project = api_key.project
+        serializer = RuntimeInvitationCreateSerializer(
+            data=request.data,
+            context={"project": project},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        if get_runtime_project_users_by_email(email, api_key).exists():
+            raise serializers.ValidationError(
+                {"email": ["A user with this email already exists in this project"]}
+            )
+
+        if get_control_plane_users_by_email(email).exists():
+            return Response({}, status=status.HTTP_201_CREATED)
+
+        with transaction.atomic():
+            RuntimeInvitation.objects.filter(
+                project=project,
+                email=email,
+                status=RuntimeInvitation.Status.PENDING,
+            ).update(status=RuntimeInvitation.Status.REVOKED)
+            invitation = RuntimeInvitation.objects.create(
+                project=project,
+                email=email,
+                role_slugs=serializer.validated_data["role_slugs"],
+                invited_by=_authenticated_user_or_none(request),
+            )
+
+        email_sent = _send_runtime_invitation_email(
+            invitation,
+            first_name=serializer.validated_data.get("first_name", ""),
+            last_name=serializer.validated_data.get("last_name", ""),
+        )
+        AuditLog.log(
+            event_type=AuditLog.EventType.RUNTIME_USER_INVITED,
+            request=request,
+            api_key=api_key,
+            organization=project.organization,
+            project=project,
+            target=invitation,
+            event_data={
+                "email": invitation.email,
+                "role_slugs": invitation.role_slugs,
+                "email_sent": email_sent,
+            },
+            success=True,
+        )
+
+        return Response(
+            RuntimeInvitationSerializer(invitation).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(
+    tags=["Runtime Invitations"],
+    summary="Accept runtime invitation",
+    description="Accept a runtime invitation token and immediately return a JWT pair.",
+    request=RuntimeInvitationAcceptSerializer,
+    responses={200: inline_serializer(
+        name="RuntimeInvitationAcceptResponse",
+        fields={
+            "access": serializers.CharField(),
+            "refresh": serializers.CharField(),
+        },
+    )},
+)
+class RuntimeInvitationAcceptView(APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = RuntimeInvitationAcceptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        invitation = get_object_or_404(
+            RuntimeInvitation.objects.select_related(
+                "project",
+                "project__organization",
+                "invited_by",
+            ),
+            token=serializer.validated_data["token"],
+        )
+
+        if invitation.status != RuntimeInvitation.Status.PENDING:
+            raise serializers.ValidationError(
+                {"detail": "This invitation is no longer valid"}
+            )
+
+        if invitation.is_expired:
+            invitation.status = RuntimeInvitation.Status.EXPIRED
+            invitation.save(update_fields=["status"])
+            raise serializers.ValidationError(
+                {"detail": "This invitation has expired"}
+            )
+
+        invited_roles, _ = resolve_project_roles_or_error(
+            invitation.project,
+            invitation.role_slugs,
+            field_name="role_slugs",
+            invalid_message_prefix="These roles do not exist in this project: ",
+        )
+
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    email=invitation.email,
+                    password=serializer.validated_data["password1"],
+                    organization=invitation.project.organization,
+                    project=invitation.project,
+                    role=User.Role.MEMBER,
+                )
+                assign_default_signup_roles(
+                    user,
+                    invitation.project,
+                    assigned_by=invitation.invited_by,
+                )
+                merged_roles = list(get_user_project_roles(user, invitation.project))
+                merged_role_ids = {role.id for role in merged_roles}
+                for invited_role in invited_roles:
+                    if invited_role.id not in merged_role_ids:
+                        merged_roles.append(invited_role)
+                sync_user_project_roles(
+                    user,
+                    invitation.project,
+                    merged_roles,
+                    assigned_by=invitation.invited_by,
+                )
+                invitation.status = RuntimeInvitation.Status.ACCEPTED
+                invitation.accepted_at = timezone.now()
+                invitation.save(update_fields=["status", "accepted_at"])
+        except IntegrityError as exc:
+            raise serializers.ValidationError(
+                {"email": ["A user with this email already exists in this project"]}
+            ) from exc
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.RUNTIME_USER_INVITE_ACCEPTED,
+            request=request,
+            user=user,
+            organization=invitation.project.organization,
+            project=invitation.project,
+            target=invitation,
+            event_data={
+                "email": invitation.email,
+                "role_slugs": invitation.role_slugs,
+            },
+            success=True,
+        )
+
+        access_token, refresh_token = build_hvt_token_pair(
+            user,
+            project=invitation.project,
+        )
+        access_value = str(access_token)
+        refresh_value = str(refresh_token)
+        response = Response(
+            {
+                "access": access_value,
+                "refresh": ""
+                if dj_rest_auth_settings.JWT_AUTH_HTTPONLY
+                else refresh_value,
+            },
+            status=status.HTTP_200_OK,
+        )
+        set_jwt_cookies(response, access_value, refresh_value)
         return response
 
 

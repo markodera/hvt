@@ -1,6 +1,7 @@
 import uuid
 import secrets
 import hashlib
+from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
@@ -16,6 +17,10 @@ APP_ACCESS_SLUG_VALIDATOR = RegexValidator(
         "Use lowercase letters, numbers, and separators like '.', '_', ':', or '-'."
     ),
 )
+
+
+def _runtime_invitation_default_expiry():
+    return timezone.now() + timedelta(hours=72)
 
 
 class Organization(models.Model):
@@ -182,6 +187,10 @@ class ProjectRole(models.Model):
     is_default_signup = models.BooleanField(
         default=False,
         help_text="Assign this role automatically during public runtime signup.",
+    )
+    is_self_assignable = models.BooleanField(
+        default=False,
+        help_text="Allow runtime users to request this role during registration.",
     )
     permissions = models.ManyToManyField(
         ProjectPermission,
@@ -673,6 +682,76 @@ class OrganizationInvitation(models.Model):
             self.token = secrets.token_hex(32)
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class RuntimeInvitation(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        EXPIRED = "expired", "Expired"
+        REVOKED = "revoked", "Revoked"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="runtime_invitations",
+    )
+    email = models.EmailField(db_index=True)
+    role_slugs = models.JSONField(default=list, blank=True)
+    token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+    invited_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_runtime_invitations",
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    expires_at = models.DateTimeField(default=_runtime_invitation_default_expiry)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "runtime_invitations"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["project", "email"]),
+            models.Index(fields=["project", "status", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.email} -> {self.project.slug} ({self.status})"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    def clean(self):
+        if not isinstance(self.role_slugs, list):
+            raise ValidationError({"role_slugs": "Expected a list of role slugs."})
+
+        normalized_role_slugs = []
+        seen = set()
+        for role_slug in self.role_slugs:
+            normalized_role_slug = str(role_slug or "").strip().lower()
+            if not normalized_role_slug or normalized_role_slug in seen:
+                continue
+            seen.add(normalized_role_slug)
+            normalized_role_slugs.append(normalized_role_slug)
+        self.role_slugs = normalized_role_slugs
+
+    def save(self, *args, **kwargs):
+        self.email = (self.email or "").strip().lower()
+        if not self.token:
+            self.token = secrets.token_urlsafe(48)
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class Webhook(models.Model):

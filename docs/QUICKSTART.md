@@ -393,6 +393,7 @@ Response:
 | POST | `/api/v1/auth/logout/` | Invalidate session |
 | POST | `/api/v1/auth/token/refresh/` | Refresh access token |
 | GET | `/api/v1/auth/me/` | Current user profile |
+| GET | `/api/v1/auth/runtime/me/` | Current runtime user profile and project access |
 | PATCH | `/api/v1/auth/me/` | Update profile |
 | POST | `/api/v1/auth/password/reset/` | Request password reset |
 | POST | `/api/v1/auth/password/change/` | Change password (authenticated) |

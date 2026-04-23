@@ -29,7 +29,7 @@ from hvt.apps.organizations.models import (
 )
 from hvt.apps.authentication.backends import APIKeyAuthentication
 from hvt.apps.authentication.models import AuditLog
-from hvt.apps.authentication.permissions import IsAuthenticatedOrAPIKey, IsAdminOrAPIKey
+from hvt.apps.authentication.permissions import IsAdminOrAPIKey, IsAuthenticatedOrAPIKey
 from hvt.apps.authentication.tokens import HVTTokenObtainPairSerializer
 from django.contrib.sites.models import Site
 
@@ -665,6 +665,18 @@ class ControlPlaneRuntimeIsolationTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_control_plane_jwt_is_rejected_by_runtime_me(self):
+        response = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": self.owner.email, "password": "Strongpass123!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        runtime_me_response = self.client.get("/api/v1/auth/runtime/me/")
+
+        self.assertEqual(runtime_me_response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_runtime_jwt_is_rejected_by_control_plane_user_details_alias(self):
         self._runtime_login()
 
@@ -1056,6 +1068,125 @@ class APIKeyRegistrationFlowTest(APITestCase):
             UserProjectRole.objects.filter(user=created_user, role=role).exists()
         )
         mock_send_mail.assert_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_role_slug_replaces_default_signup_roles(self, mock_send_mail):
+        default_role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+            is_default_signup=True,
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="seller",
+            name="Seller",
+            is_self_assignable=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "self-assign@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+                "role_slug": role.slug,
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created_user = User.objects.get(email="self-assign@example.com")
+        assigned_role_slugs = set(
+            UserProjectRole.objects.filter(
+                user=created_user,
+                role__project=self.default_project,
+            ).values_list("role__slug", flat=True)
+        )
+        self.assertEqual(assigned_role_slugs, {"seller"})
+        self.assertFalse(
+            UserProjectRole.objects.filter(user=created_user, role=default_role).exists()
+        )
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=created_user, role=role).exists()
+        )
+        mock_send_mail.assert_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_role_slug_rejects_non_self_assignable_role(self, mock_send_mail):
+        ProjectRole.objects.create(
+            project=self.default_project,
+            slug="seller",
+            name="Seller",
+            is_self_assignable=False,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "not-allowed@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+                "role_slug": "seller",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["role_slug"][0]),
+            "This role cannot be self-assigned",
+        )
+        self.assertFalse(User.objects.filter(email="not-allowed@example.com").exists())
+        mock_send_mail.assert_not_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_role_slug_rejects_control_plane_role(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "control-plane-role@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+                "role_slug": "owner",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["role_slug"][0]),
+            "Control plane roles cannot be assigned at runtime registration",
+        )
+        self.assertFalse(
+            User.objects.filter(email="control-plane-role@example.com").exists()
+        )
+        mock_send_mail.assert_not_called()
+
+    @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
+    def test_register_with_role_slug_rejects_unknown_project_role(self, mock_send_mail):
+        response = self.client.post(
+            "/api/v1/auth/runtime/register/",
+            {
+                "email": "unknown-role@example.com",
+                "password1": "Strongpass123!",
+                "password2": "Strongpass123!",
+                "role_slug": "teacher",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(response.data["detail"]["role_slug"][0]),
+            "This role does not exist in this project",
+        )
+        self.assertFalse(User.objects.filter(email="unknown-role@example.com").exists())
+        mock_send_mail.assert_not_called()
 
     @patch("hvt.apps.authentication.adapters.ResendAccountAdapter.send_mail", return_value=None)
     def test_register_with_same_email_in_two_projects_creates_distinct_runtime_users(self, mock_send_mail):
@@ -1579,6 +1710,85 @@ class RuntimeLoginFlowTest(APITestCase):
         access_token = AccessToken(response.cookies["auth-token"].value)
         self.assertEqual(access_token["app_roles"], ["buyer"])
         self.assertEqual(access_token["app_permissions"], ["orders.read.own"])
+
+    def test_runtime_me_returns_current_project_profile_and_access(self):
+        permission = ProjectPermission.objects.create(
+            project=self.default_project,
+            slug="orders.read.own",
+            name="Read Own Orders",
+        )
+        role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="buyer",
+            name="Buyer",
+        )
+        role.permissions.add(permission)
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=role,
+            assigned_by=self.owner,
+        )
+
+        second_project = Project.objects.create(
+            organization=self.org,
+            name="Internal Ops",
+            slug="internal-ops",
+            allow_signup=True,
+        )
+        second_permission = ProjectPermission.objects.create(
+            project=second_project,
+            slug="orders.read.internal",
+            name="Read Internal Orders",
+        )
+        second_role = ProjectRole.objects.create(
+            project=second_project,
+            slug="internal-buyer",
+            name="Internal Buyer",
+        )
+        second_role.permissions.add(second_permission)
+        UserProjectRole.objects.create(
+            user=self.runtime_user,
+            role=second_role,
+            assigned_by=self.owner,
+        )
+
+        login_response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get("/api/v1/auth/runtime/me/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], self.runtime_user.email)
+        self.assertEqual(response.data["organization"], str(self.org.id))
+        self.assertEqual(response.data["organization_slug"], self.org.slug)
+        self.assertEqual(response.data["project"], str(self.default_project.id))
+        self.assertEqual(response.data["project_slug"], self.default_project.slug)
+        self.assertEqual(response.data["app_permissions"], ["orders.read.own"])
+        self.assertEqual([role_data["slug"] for role_data in response.data["app_roles"]], ["buyer"])
+
+    def test_runtime_me_succeeds_after_cookie_refresh(self):
+        login_response = self.client.post(
+            "/api/v1/auth/runtime/login/",
+            {"email": self.runtime_user.email, "password": "Strongpass123!"},
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        del self.client.cookies["auth-token"]
+
+        refresh_response = self.client.post("/api/v1/auth/token/refresh/", {}, format="json")
+
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+
+        me_response = self.client.get("/api/v1/auth/runtime/me/")
+
+        self.assertEqual(me_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(me_response.data["project"], str(self.default_project.id))
 
     def test_same_email_can_login_with_two_project_api_keys_using_project_scoped_users(self):
         second_project = Project.objects.create(
@@ -2730,6 +2940,50 @@ class RuntimeSocialAuthFlowTest(APITestCase):
             response.data["detail"],
             "This API key does not have the required auth:runtime scope.",
         )
+
+    def test_runtime_social_adapter_role_slug_replaces_default_signup_roles(self):
+        from hvt.apps.authentication.adapters import CustomSocialAccountAdapter
+
+        default_role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="default-buyer",
+            name="Default Buyer",
+            is_default_signup=True,
+        )
+        requested_role = ProjectRole.objects.create(
+            project=self.default_project,
+            slug="seller",
+            name="Seller",
+            is_self_assignable=True,
+        )
+        request = Mock(auth=self.api_key, data={"role_slug": requested_role.slug})
+        social_user = User(email="runtime-social-role@example.com")
+        sociallogin = Mock(user=social_user)
+        sociallogin.account = Mock(user=None)
+        sociallogin.save = Mock()
+        account_adapter = Mock()
+        account_adapter.populate_username = Mock()
+
+        with patch(
+            "hvt.apps.authentication.adapters.get_account_adapter",
+            return_value=account_adapter,
+        ):
+            saved_user = CustomSocialAccountAdapter().save_user(request, sociallogin)
+
+        saved_user.refresh_from_db()
+        self.assertEqual(saved_user.organization_id, self.org.id)
+        self.assertEqual(saved_user.project_id, self.default_project.id)
+        assigned_role_slugs = set(
+            UserProjectRole.objects.filter(
+                user=saved_user,
+                role__project=self.default_project,
+            ).values_list("role__slug", flat=True)
+        )
+        self.assertEqual(assigned_role_slugs, {requested_role.slug})
+        self.assertFalse(
+            UserProjectRole.objects.filter(user=saved_user, role=default_role).exists()
+        )
+        sociallogin.save.assert_called_once_with(request)
 
     def test_runtime_social_login_rejects_callback_url_outside_project_allowlist(self):
         SocialProviderConfig.objects.create(

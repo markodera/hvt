@@ -49,6 +49,7 @@ urlpatterns = [
         views.RuntimeGithubLogin.as_view(),
         name="runtime_github_login",
     ),
+    path("runtime/me/", views.RuntimeCurrentUserView.as_view(), name="runtime_current_user"),
     path("login/", views.HVTLoginView.as_view(), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),
     path("user/", views.HVTUserDetailsView.as_view(), name="rest_user_details"),
