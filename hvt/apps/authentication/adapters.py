@@ -1,11 +1,13 @@
-from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+import logging
+import json
+
 from allauth.account.adapter import DefaultAccountAdapter, get_adapter as get_account_adapter
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.models import SocialApp
-from django.contrib.sites.shortcuts import get_current_site
 from django.conf import settings
+from django.contrib.sites.shortcuts import get_current_site
 from django.db import transaction
 from rest_framework.exceptions import PermissionDenied
-import logging
 
 from hvt.apps.authentication.identity import (
     get_control_plane_users_by_email,
@@ -263,6 +265,35 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         email = getattr(getattr(sociallogin, "user", None), "email", "") or ""
         return email.lower()
 
+    @staticmethod
+    def _get_request_payload(request):
+        data = getattr(request, "data", None)
+        if data is not None:
+            return data
+
+        request_meta = getattr(request, "META", {}) or {}
+        content_type = str(
+            getattr(request, "content_type", "") or request_meta.get("CONTENT_TYPE", "")
+        ).lower()
+        if "json" in content_type:
+            body = getattr(request, "body", b"") or b""
+            if isinstance(body, bytes):
+                encoding = getattr(request, "encoding", None) or "utf-8"
+                try:
+                    body = body.decode(encoding)
+                except UnicodeDecodeError:
+                    return {}
+            try:
+                payload = json.loads(body)
+            except (TypeError, ValueError):
+                return {}
+            return payload if isinstance(payload, dict) else {}
+
+        post_data = getattr(request, "POST", None)
+        if post_data is not None:
+            return post_data
+        return {}
+
     def pre_social_login(self, request, sociallogin):
         super().pre_social_login(request, sociallogin)
         if sociallogin.is_existing:
@@ -295,6 +326,7 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
     def save_user(self, request, sociallogin, form=None):
         user = sociallogin.user
         api_key = getattr(request, "auth", None)
+        request_payload = self._get_request_payload(request)
 
         if (
             not isinstance(api_key, APIKey)
@@ -320,11 +352,11 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
             user.save()
             sociallogin.save(request)
             if isinstance(api_key, APIKey):
-                if "role_slug" in request.data:
+                if "role_slug" in request_payload:
                     assign_requested_registration_role(
                         user=user,
                         project=api_key.project,
-                        role_slug=request.data.get("role_slug"),
+                        role_slug=request_payload.get("role_slug"),
                     )
                 else:
                     assign_default_signup_roles(

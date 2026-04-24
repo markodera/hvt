@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase, APIRequestFactory
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -2956,7 +2956,12 @@ class RuntimeSocialAuthFlowTest(APITestCase):
             name="Seller",
             is_self_assignable=True,
         )
-        request = Mock(auth=self.api_key, data={"role_slug": requested_role.slug})
+        request = APIRequestFactory().post(
+            "/api/v1/auth/runtime/social/google/",
+            {"role_slug": requested_role.slug},
+            format="json",
+        )
+        request.auth = self.api_key
         social_user = User(email="runtime-social-role@example.com")
         sociallogin = Mock(user=social_user)
         sociallogin.account = Mock(user=None)
@@ -3141,6 +3146,40 @@ class RuntimeSocialAuthFlowTest(APITestCase):
         self.assertEqual(
             response.data["detail"]["non_field_errors"][0],
             "Social login failed: AttributeError: boom",
+        )
+
+    @patch("hvt.api.v1.serializers.users.SocialLoginSerializer.validate", autospec=True)
+    def test_runtime_social_login_returns_role_slug_validation_error(
+        self, mock_validate
+    ):
+        SocialProviderConfig.objects.create(
+            project=self.default_project,
+            provider=SocialProviderConfig.Provider.GITHUB,
+            client_id="github-default",
+            client_secret="secret-default",
+            redirect_uris=["http://localhost:5173/runtime-playground/callback/github"],
+            is_active=True,
+        )
+        mock_validate.side_effect = serializers.ValidationError(
+            {"role_slug": ["This role cannot be self-assigned"]}
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/runtime/social/github/",
+            {
+                "code": "dummy-code",
+                "callback_url": "http://localhost:5173/runtime-playground/callback/github",
+                "role_slug": "seller",
+            },
+            format="json",
+            HTTP_X_API_KEY=self.full_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "validation_error")
+        self.assertEqual(
+            response.data["detail"]["role_slug"][0],
+            "This role cannot be self-assigned",
         )
 
     def test_runtime_github_social_login_returns_400_on_failure(self):

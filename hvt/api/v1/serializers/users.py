@@ -491,6 +491,8 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
     def validate(self, attrs):
         try:
             return super().validate(attrs)
+        except serializers.ValidationError:
+            raise
         except exceptions.PermissionDenied:
             raise
         except SocialApp.DoesNotExist as exc:
@@ -544,6 +546,8 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
 
 class RuntimeSocialLoginSerializer(CustomSocialLoginSerializer):
     """Social login serializer for runtime app users scoped by API key/project."""
+
+    role_slug = serializers.CharField(required=False, allow_blank=False)
 
     default_error_messages = {
         "api_key_required": "A valid X-API-Key header is required.",
