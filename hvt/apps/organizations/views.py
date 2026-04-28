@@ -124,7 +124,9 @@ def _serialize_user_project_access(user, project) -> dict:
 
 def _sync_default_project_signup(org: Organization) -> None:
     """Keep the default project's signup toggle aligned with org onboarding."""
-    default_project = org.ensure_default_project()
+    default_project = org.get_default_project()
+    if default_project is None:
+        return
     if default_project.allow_signup != org.allow_signup:
         default_project.allow_signup = org.allow_signup
         default_project.save(update_fields=["allow_signup", "updated_at"])
@@ -309,7 +311,6 @@ class OrganizationListView(generics.ListCreateAPIView):
             )
 
         org = serializer.save(owner=user)
-        org.ensure_default_project()
 
         if not had_organization:
             user.organization = org
@@ -502,7 +503,12 @@ class ProjectListCreateView(generics.ListCreateAPIView):
         return _current_user_project_queryset(self.request)
 
     def perform_create(self, serializer):
-        project = serializer.save(organization=self.request.user.organization)
+        organization = self.request.user.organization
+        is_first_project = not organization.projects.exists()
+        project = serializer.save(
+            organization=organization,
+            is_default=is_first_project,
+        )
         AuditLog.log(
             event_type=AuditLog.EventType.PROJECT_CREATED,
             request=self.request,
@@ -550,7 +556,7 @@ class ProjectListCreateView(generics.ListCreateAPIView):
     delete=extend_schema(
         tags=["Projects"],
         summary="Delete a project",
-        description="Delete a non-default project in the current organization. Owner only.",
+        description="Delete a project in the current organization. Owner only.",
     ),
 )
 class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -603,8 +609,6 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
             )
 
     def perform_destroy(self, instance):
-        if instance.is_default:
-            raise serializers.ValidationError("The default project cannot be deleted.")
         if instance.api_keys.exists():
             raise serializers.ValidationError(
                 "Delete or revoke this project's API keys before deleting the project."
@@ -637,6 +641,14 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "Delete this project's app permissions before deleting the project."
             )
 
+        replacement_project = None
+        if instance.is_default:
+            replacement_project = (
+                instance.organization.projects.exclude(pk=instance.pk)
+                .order_by("created_at", "name")
+                .first()
+            )
+
         AuditLog.log(
             event_type=AuditLog.EventType.PROJECT_DELETED,
             request=self.request,
@@ -660,7 +672,13 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "slug": instance.slug,
             },
         )
-        instance.delete()
+        with transaction.atomic():
+            if replacement_project is not None:
+                instance.is_default = False
+                instance.save(update_fields=["is_default", "updated_at"])
+                replacement_project.is_default = True
+                replacement_project.save(update_fields=["is_default", "updated_at"])
+            instance.delete()
 
 
 @extend_schema_view(
@@ -1204,13 +1222,13 @@ class APIKeyListCreateView(generics.ListCreateAPIView):
     delete=extend_schema(
         tags=["API Keys"],
         summary="Delete an API key",
-        description="Permanently delete an API key. This action cannot be undone.",
+        description="Permanently delete a revoked API key. This action cannot be undone.",
     ),
 )
 class APIKeyDetailView(generics.RetrieveDestroyAPIView):
     """
     GET: Get API Key details.
-    DELETE: Revoke (delete) an API key.
+    DELETE: Permanently delete a revoked API key.
     """
     serializer_class = APIKeyListSerializer
     permission_classes = [IsOrgOwnerOrAPIKey]
@@ -1233,11 +1251,15 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         api_key = self.get_object()
+        if api_key.is_active:
+            raise serializers.ValidationError(
+                {"detail": "Revoke this API key before deleting it."}
+            )
         response = super().destroy(request, *args, **kwargs)
 
         if response.status_code == status.HTTP_204_NO_CONTENT:
             AuditLog.log(
-                event_type=AuditLog.EventType.API_KEY_REVOKED,
+                event_type=AuditLog.EventType.API_KEY_DELETED,
                 request=request,
                 user=_authenticated_user_or_none(request),
                 api_key=request.auth if isinstance(request.auth, APIKey) else None,
@@ -1248,20 +1270,23 @@ class APIKeyDetailView(generics.RetrieveDestroyAPIView):
                     "key_name": api_key.name,
                     "environment": api_key.environment,
                     "project_id": str(api_key.project_id) if api_key.project_id else None,
-                    "action": "deleted",
+                    "project_slug": api_key.project.slug if api_key.project_id else "",
+                    "scopes": api_key.scopes,
                 },
                 success=True,
             )
 
-            # Trigger webhook: api_key.revoked
+            # Trigger webhook: api_key.deleted
             trigger_webhook_event(
                 organization=api_key.organization,
                 project=api_key.project,
-                event_type="api_key.revoked",
+                event_type="api_key.deleted",
                 payload={
                     "api_key_id": str(api_key.id),
                     "name": api_key.name,
-                    "action": "deleted",
+                    "environment": api_key.environment,
+                    "project_id": str(api_key.project_id) if api_key.project_id else None,
+                    "project_slug": api_key.project.slug if api_key.project_id else "",
                 },
             )
 

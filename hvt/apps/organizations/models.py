@@ -57,8 +57,24 @@ class Organization(models.Model):
     def __str__(self):
         return self.name
 
+    def get_default_project(self):
+        """Return the org's default project without creating one."""
+        if not self.pk:
+            return None
+        return self.projects.filter(is_default=True).order_by("created_at", "name").first()
+
     def ensure_default_project(self):
-        """Return the org's default project, creating it when missing."""
+        """Return the org's default project, promoting or creating one when missing."""
+        project = self.get_default_project()
+        if project is not None:
+            return project
+
+        existing_project = self.projects.order_by("created_at", "name").first()
+        if existing_project is not None:
+            existing_project.is_default = True
+            existing_project.save(update_fields=["is_default", "updated_at"])
+            return existing_project
+
         project, _ = self.projects.get_or_create(
             is_default=True,
             defaults={
@@ -769,6 +785,7 @@ class Webhook(models.Model):
         API_KEY_CREATED = "api_key.created", "API Key Created"
         API_KEY_EXPIRED = "api_key.expired", "API Key Expired"
         API_KEY_REVOKED = "api_key.revoked", "API Key Revoked"
+        API_KEY_DELETED = "api_key.deleted", "API Key Deleted"
         ORG_INVITATION_CREATED = "org.invitation.created", "Organization Invitation Created"
         ORG_INVITATION_ACCEPTED = "org.invitation.accepted", "Organization Invitation Accepted"
         ORG_INVITATION_REVOKED = "org.invitation.revoked", "Organization Invitation Revoked"

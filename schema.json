@@ -2461,7 +2461,7 @@
             },
             "delete": {
                 "operationId": "organizations_current_keys_destroy",
-                "description": "Permanently delete an API key. This action cannot be undone.",
+                "description": "Permanently delete a revoked API key. This action cannot be undone.",
                 "summary": "Delete an API key",
                 "parameters": [
                     {
@@ -3061,7 +3061,7 @@
             },
             "delete": {
                 "operationId": "organizations_current_projects_destroy",
-                "description": "Delete a non-default project in the current organization. Owner only.",
+                "description": "Delete a project in the current organization. Owner only.",
                 "summary": "Delete a project",
                 "parameters": [
                     {
@@ -5731,7 +5731,7 @@
                         "type": "string",
                         "format": "uuid",
                         "writeOnly": true,
-                        "description": "Optional project ID. Defaults to the organization's default project."
+                        "description": "Project ID. Defaults to the organization's primary project when one exists."
                     }
                 },
                 "required": [
@@ -6164,6 +6164,7 @@
                     "social.disconnected",
                     "api_key.created",
                     "api_key.revoked",
+                    "api_key.deleted",
                     "api_key.used",
                     "user.created",
                     "user.updated",
@@ -6187,7 +6188,7 @@
                     "project.social_provider.deleted"
                 ],
                 "type": "string",
-                "description": "* `user.login` - User Login\n* `user.logout` - User Logout\n* `user.register` - User Registration\n* `login.failed` - Login Failed\n* `password.reset.request` - Password Reset Requested\n* `password.reset.complete` - Password Reset Completed\n* `password.changed` - Password Changed\n* `email.verified` - Email Verified\n* `email.verification.sent` - Verification Email Sent\n* `email.verification.failed` - Verification Email Failed\n* `social.login` - Social Login\n* `social.connected` - Social Account Connected\n* `social.disconnected` - Social Account disconnected\n* `api_key.created` - API Key Created\n* `api_key.revoked` - API Key Revoked\n* `api_key.used` - API Key Used\n* `user.created` - User Created\n* `user.updated` - User Updated\n* `user.deleted` - User Deleted\n* `user.role.changed` - User Role Changed\n* `org.created` - Organization Created\n* `org.updated` - Organization Updated\n* `org.member.added` - Member Added to Organization\n* `org.member.removed` - Member Removed from Organization\n* `org.invitation.created` - Organization Invitation Created\n* `org.invitation.accepted` - Organization Invitation Accepted\n* `org.invitation.revoked` - Organization Invitation Revoked\n* `org.invitation.resent` - Organization Invitation Resent\n* `runtime_user.invited` - Runtime User Invited\n* `runtime_user.invite_accepted` - Runtime User Invite Accepted\n* `project.created` - Project Created\n* `project.updated` - Project Updated\n* `project.deleted` - Project Deleted\n* `project.social_provider.created` - Project Social Provider Created\n* `project.social_provider.updated` - Project Social Provider Updated\n* `project.social_provider.deleted` - Project Social Provider Deleted"
+                "description": "* `user.login` - User Login\n* `user.logout` - User Logout\n* `user.register` - User Registration\n* `login.failed` - Login Failed\n* `password.reset.request` - Password Reset Requested\n* `password.reset.complete` - Password Reset Completed\n* `password.changed` - Password Changed\n* `email.verified` - Email Verified\n* `email.verification.sent` - Verification Email Sent\n* `email.verification.failed` - Verification Email Failed\n* `social.login` - Social Login\n* `social.connected` - Social Account Connected\n* `social.disconnected` - Social Account disconnected\n* `api_key.created` - API Key Created\n* `api_key.revoked` - API Key Revoked\n* `api_key.deleted` - API Key Deleted\n* `api_key.used` - API Key Used\n* `user.created` - User Created\n* `user.updated` - User Updated\n* `user.deleted` - User Deleted\n* `user.role.changed` - User Role Changed\n* `org.created` - Organization Created\n* `org.updated` - Organization Updated\n* `org.member.added` - Member Added to Organization\n* `org.member.removed` - Member Removed from Organization\n* `org.invitation.created` - Organization Invitation Created\n* `org.invitation.accepted` - Organization Invitation Accepted\n* `org.invitation.revoked` - Organization Invitation Revoked\n* `org.invitation.resent` - Organization Invitation Resent\n* `runtime_user.invited` - Runtime User Invited\n* `runtime_user.invite_accepted` - Runtime User Invite Accepted\n* `project.created` - Project Created\n* `project.updated` - Project Updated\n* `project.deleted` - Project Deleted\n* `project.social_provider.created` - Project Social Provider Created\n* `project.social_provider.updated` - Project Social Provider Updated\n* `project.social_provider.deleted` - Project Social Provider Deleted"
             },
             "HVTCookieTokenRefresh": {
                 "type": "object",
@@ -7405,7 +7406,7 @@
                         "type": "string",
                         "format": "uuid",
                         "writeOnly": true,
-                        "description": "Optional project ID. Defaults to the organization's default project."
+                        "description": "Project ID. Defaults to the organization's primary project when one exists."
                     },
                     "url": {
                         "type": "string",
@@ -8219,6 +8220,9 @@
                     "callback_url": {
                         "type": "string",
                         "format": "uri"
+                    },
+                    "role_slug": {
+                        "type": "string"
                     }
                 }
             },
@@ -8238,6 +8242,10 @@
                     "callback_url": {
                         "type": "string",
                         "format": "uri",
+                        "minLength": 1
+                    },
+                    "role_slug": {
+                        "type": "string",
                         "minLength": 1
                     }
                 }
@@ -8778,7 +8786,7 @@
                         "type": "string",
                         "format": "uuid",
                         "writeOnly": true,
-                        "description": "Optional project ID. Defaults to the organization's default project."
+                        "description": "Project ID. Defaults to the organization's primary project when one exists."
                     },
                     "url": {
                         "type": "string",

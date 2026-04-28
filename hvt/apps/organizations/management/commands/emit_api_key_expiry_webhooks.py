@@ -49,7 +49,18 @@ class Command(BaseCommand):
 
         emitted = 0
         for api_key in keys:
-            project = api_key.project or api_key.organization.ensure_default_project()
+            project = api_key.project or api_key.organization.get_default_project()
+            if project is None:
+                self.stdout.write(
+                    f"  [{api_key.id}] {api_key.name} ({api_key.prefix}...) project=<missing>"
+                )
+                if not dry_run:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            "    skipped: key is not attached to a project and no primary project exists"
+                        )
+                    )
+                continue
             self.stdout.write(
                 f"  [{api_key.id}] {api_key.name} ({api_key.prefix}...) project={project.slug}"
             )

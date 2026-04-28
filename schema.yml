@@ -1483,7 +1483,7 @@ paths:
           description: ''
     delete:
       operationId: organizations_current_keys_destroy
-      description: Permanently delete an API key. This action cannot be undone.
+      description: Permanently delete a revoked API key. This action cannot be undone.
       summary: Delete an API key
       parameters:
       - in: path
@@ -1842,8 +1842,7 @@ paths:
           description: ''
     delete:
       operationId: organizations_current_projects_destroy
-      description: Delete a non-default project in the current organization. Owner
-        only.
+      description: Delete a project in the current organization. Owner only.
       summary: Delete a project
       parameters:
       - in: path
@@ -3472,8 +3471,8 @@ components:
           type: string
           format: uuid
           writeOnly: true
-          description: Optional project ID. Defaults to the organization's default
-            project.
+          description: Project ID. Defaults to the organization's primary project
+            when one exists.
       required:
       - name
     APIKeyList:
@@ -3807,6 +3806,7 @@ components:
       - social.disconnected
       - api_key.created
       - api_key.revoked
+      - api_key.deleted
       - api_key.used
       - user.created
       - user.updated
@@ -3845,6 +3845,7 @@ components:
         * `social.disconnected` - Social Account disconnected
         * `api_key.created` - API Key Created
         * `api_key.revoked` - API Key Revoked
+        * `api_key.deleted` - API Key Deleted
         * `api_key.used` - API Key Used
         * `user.created` - User Created
         * `user.updated` - User Updated
@@ -4786,8 +4787,8 @@ components:
           type: string
           format: uuid
           writeOnly: true
-          description: Optional project ID. Defaults to the organization's default
-            project.
+          description: Project ID. Defaults to the organization's primary project
+            when one exists.
         url:
           type: string
           format: uri
@@ -5407,6 +5408,8 @@ components:
         callback_url:
           type: string
           format: uri
+        role_slug:
+          type: string
     RuntimeSocialLoginRequest:
       type: object
       description: Social login serializer for runtime app users scoped by API key/project.
@@ -5420,6 +5423,9 @@ components:
         callback_url:
           type: string
           format: uri
+          minLength: 1
+        role_slug:
+          type: string
           minLength: 1
     SocialProviderConfig:
       type: object
@@ -5839,8 +5845,8 @@ components:
           type: string
           format: uuid
           writeOnly: true
-          description: Optional project ID. Defaults to the organization's default
-            project.
+          description: Project ID. Defaults to the organization's primary project
+            when one exists.
         url:
           type: string
           format: uri

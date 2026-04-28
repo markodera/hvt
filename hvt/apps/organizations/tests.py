@@ -108,6 +108,12 @@ class APIKeyAuthenticationTestLiveTest(TestCase):
             email="test@example.com", password="password123"
         )
         self.org = Organization.objects.create(name="Test Org", owner=self.user)
+        self.project = Project.objects.create(
+            organization=self.org,
+            name="Primary Project",
+            slug="primary-project",
+            is_default=True,
+        )
 
         # Create test key
         test_prefix, self.test_full_key, test_hashed_key = APIKey.generate_key(
@@ -115,6 +121,7 @@ class APIKeyAuthenticationTestLiveTest(TestCase):
         )
         self.test_api_key = APIKey.objects.create(
             organization=self.org,
+            project=self.project,
             name="Test Key",
             environment="test",
             prefix=test_prefix,
@@ -128,6 +135,7 @@ class APIKeyAuthenticationTestLiveTest(TestCase):
         )
         self.live_api_key = APIKey.objects.create(
             organization=self.org,
+            project=self.project,
             name="Live Key",
             environment="live",
             prefix=live_prefix,
@@ -560,7 +568,7 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
         cache.clear()
         super().tearDown()
 
-    def test_org_creation_bootstraps_default_project(self):
+    def test_org_creation_does_not_bootstrap_default_project(self):
         founder = User.objects.create_user(
             email="fresh-founder@example.com",
             password="password123",
@@ -587,9 +595,82 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         created_org = Organization.objects.get(slug="fresh-org")
-        project = created_org.projects.get(is_default=True)
-        self.assertEqual(project.slug, "default")
-        self.assertEqual(project.allow_signup, created_org.allow_signup)
+        self.assertEqual(created_org.projects.count(), 0)
+
+    def test_first_project_created_for_new_org_becomes_default(self):
+        founder = User.objects.create_user(
+            email="new-project-founder@example.com",
+            password="password123",
+        )
+        from allauth.account.models import EmailAddress
+
+        EmailAddress.objects.create(
+            user=founder,
+            email=founder.email,
+            verified=True,
+            primary=True,
+        )
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": founder.email, "password": "password123"},
+            format="json",
+        )
+        create_org_response = self.client.post(
+            reverse("organization_list"),
+            {"name": "Projectless Org", "slug": "projectless-org"},
+            format="json",
+        )
+        self.assertEqual(create_org_response.status_code, status.HTTP_201_CREATED)
+
+        response = self.client.post(
+            reverse("project_list_create"),
+            {"name": "Storefront Prod", "slug": "storefront-prod", "allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["is_default"])
+        project = Project.objects.get(id=response.data["id"])
+        self.assertTrue(project.is_default)
+
+    def test_updating_org_without_projects_does_not_create_default_project(self):
+        founder = User.objects.create_user(
+            email="projectless-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        from allauth.account.models import EmailAddress
+
+        EmailAddress.objects.create(
+            user=founder,
+            email=founder.email,
+            verified=True,
+            primary=True,
+        )
+        org = Organization.objects.create(
+            name="Projectless Org",
+            slug="projectless-org-settings",
+            owner=founder,
+            allow_signup=False,
+        )
+        founder.organization = org
+        founder.save(update_fields=["organization"])
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": founder.email, "password": "password123"},
+            format="json",
+        )
+
+        response = self.client.patch(
+            reverse("current_organization"),
+            {"allow_signup": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        org.refresh_from_db()
+        self.assertTrue(org.allow_signup)
+        self.assertEqual(org.projects.count(), 0)
 
     def test_owner_can_create_project(self):
         response = self.client.post(
@@ -702,6 +783,43 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
         api_key = APIKey.objects.get(id=response.data["id"])
         self.assertEqual(api_key.project_id, project.id)
         self.assertEqual(response.data["project_slug"], "storefront-prod")
+
+    def test_api_key_creation_requires_project_when_org_has_no_projects(self):
+        founder = User.objects.create_user(
+            email="projectless-key-owner@example.com",
+            password="password123",
+            role=User.Role.OWNER,
+        )
+        from allauth.account.models import EmailAddress
+
+        EmailAddress.objects.create(
+            user=founder,
+            email=founder.email,
+            verified=True,
+            primary=True,
+        )
+        org = Organization.objects.create(
+            name="Projectless Key Org",
+            slug="projectless-key-org",
+            owner=founder,
+            allow_signup=True,
+        )
+        founder.organization = org
+        founder.save(update_fields=["organization"])
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"email": founder.email, "password": "password123"},
+            format="json",
+        )
+
+        response = self.client.post(
+            reverse("apikey_list_create"),
+            {"name": "Needs Project", "scopes": ["auth:runtime"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("project_id", response.data["detail"])
 
     def test_api_key_creation_rejects_unknown_scope(self):
         response = self.client.post(
@@ -912,6 +1030,116 @@ class ProjectAndAPIKeyScopingTest(APITestCase):
         self.assertIn("project.created", called_events)
         self.assertIn("project.updated", called_events)
         self.assertIn("project.deleted", called_events)
+
+    def test_deleting_default_project_promotes_replacement(self):
+        replacement_project = Project.objects.create(
+            organization=self.org,
+            name="Storefront Staging",
+            slug="storefront-staging",
+            allow_signup=True,
+        )
+
+        response = self.client.delete(
+            reverse("project_detail", kwargs={"pk": self.default_project.id}),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        replacement_project.refresh_from_db()
+        self.assertTrue(replacement_project.is_default)
+
+    def test_active_api_key_must_be_revoked_before_delete(self):
+        prefix, _, hashed_key = APIKey.generate_key(environment="test")
+        api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Delete Guard Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=True,
+            scopes=["api_keys:read"],
+        )
+
+        response = self.client.delete(
+            reverse("apikey_detail", kwargs={"pk": api_key.id}),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(APIKey.objects.filter(id=api_key.id).exists())
+        self.assertIn("revoke this api key before deleting it", str(response.data).lower())
+
+    def test_revoked_api_key_can_be_deleted(self):
+        prefix, _, hashed_key = APIKey.generate_key(environment="test")
+        api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Revoked Delete Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=False,
+            scopes=["api_keys:read"],
+        )
+
+        response = self.client.delete(
+            reverse("apikey_detail", kwargs={"pk": api_key.id}),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(APIKey.objects.filter(id=api_key.id).exists())
+
+    @patch("hvt.apps.organizations.views.trigger_webhook_event")
+    def test_revoked_api_key_delete_emits_deleted_audit_and_webhook(self, mock_trigger):
+        prefix, _, hashed_key = APIKey.generate_key(environment="test")
+        api_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.default_project,
+            name="Deleted Event Key",
+            environment="test",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            is_active=False,
+            scopes=["api_keys:read", "audit_logs:read"],
+        )
+
+        response = self.client.delete(
+            reverse("apikey_detail", kwargs={"pk": api_key.id}),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        audit_log = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.API_KEY_DELETED,
+            organization=self.org,
+            project=self.default_project,
+            target_object_id=api_key.id,
+        ).latest("created_at")
+        self.assertEqual(audit_log.event_data["key_name"], "Deleted Event Key")
+        self.assertEqual(audit_log.event_data["environment"], "test")
+        self.assertEqual(
+            audit_log.event_data["project_id"],
+            str(self.default_project.id),
+        )
+        self.assertEqual(
+            audit_log.event_data["project_slug"],
+            self.default_project.slug,
+        )
+        self.assertEqual(
+            audit_log.event_data["scopes"],
+            ["api_keys:read", "audit_logs:read"],
+        )
+
+        mock_trigger.assert_called_once_with(
+            organization=self.org,
+            project=self.default_project,
+            event_type="api_key.deleted",
+            payload={
+                "api_key_id": str(api_key.id),
+                "name": "Deleted Event Key",
+                "environment": "test",
+                "project_id": str(self.default_project.id),
+                "project_slug": self.default_project.slug,
+            },
+        )
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])

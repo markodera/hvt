@@ -30,7 +30,7 @@ def emit_api_key_expiry_webhook(api_key: APIKey) -> bool:
             return False
 
         if locked_key.project_id is None:
-            locked_key.project = locked_key.organization.ensure_default_project()
+            locked_key.project = locked_key.organization.get_default_project()
 
         update_fields = ["expired_webhook_sent_at"]
         if locked_key.project_id:
@@ -39,7 +39,13 @@ def emit_api_key_expiry_webhook(api_key: APIKey) -> bool:
         locked_key.expired_webhook_sent_at = emitted_at
         locked_key.save(update_fields=update_fields)
 
-    project = locked_key.project if locked_key.project_id else locked_key.organization.ensure_default_project()
+    project = locked_key.project if locked_key.project_id else locked_key.organization.get_default_project()
+    if project is None:
+        logger.info(
+            "Skipping api_key.expired webhook for key=%s because no project is attached",
+            locked_key.id,
+        )
+        return False
 
     trigger_webhook_event(
         organization=locked_key.organization,

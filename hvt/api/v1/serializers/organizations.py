@@ -314,7 +314,7 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
     project_id = serializers.UUIDField(
         required=False,
         write_only=True,
-        help_text="Optional project ID. Defaults to the organization's default project.",
+        help_text="Project ID. Defaults to the organization's primary project when one exists.",
     )
     project = serializers.UUIDField(source="project_id", read_only=True, allow_null=True)
     project_name = serializers.CharField(
@@ -378,11 +378,17 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Organization context is required.")
 
         if project_id is None:
-            attrs["project"] = getattr(
-                self.instance,
-                "project",
-                organization.ensure_default_project(),
-            )
+            attrs["project"] = getattr(self.instance, "project", None)
+            if attrs["project"] is None:
+                attrs["project"] = organization.get_default_project()
+            if attrs["project"] is None:
+                raise serializers.ValidationError(
+                    {
+                        "project_id": [
+                            "Create a project first, then issue an API key for it."
+                        ]
+                    }
+                )
             self._validate_project_api_key_limit(attrs["project"])
             return attrs
 
@@ -485,7 +491,7 @@ class WebhookSerializer(serializers.ModelSerializer):
     project_id = serializers.UUIDField(
         required=False,
         write_only=True,
-        help_text="Optional project ID. Defaults to the organization's default project.",
+        help_text="Project ID. Defaults to the organization's primary project when one exists.",
     )
     project = serializers.UUIDField(source="project_id", read_only=True)
     project_name = serializers.CharField(source="project.name", read_only=True)
@@ -548,11 +554,17 @@ class WebhookSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Organization context is required.")
 
         if project_id is None:
-            attrs["project"] = getattr(
-                self.instance,
-                "project",
-                organization.ensure_default_project(),
-            )
+            attrs["project"] = getattr(self.instance, "project", None)
+            if attrs["project"] is None:
+                attrs["project"] = organization.get_default_project()
+            if attrs["project"] is None:
+                raise serializers.ValidationError(
+                    {
+                        "project_id": [
+                            "Create a project first, then add a webhook for it."
+                        ]
+                    }
+                )
             return attrs
 
         try:

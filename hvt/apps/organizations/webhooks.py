@@ -175,7 +175,9 @@ def trigger_webhook_event(organization, event_type: str, payload: dict, project=
     from .models import Webhook
 
     try:
-        target_project = project or organization.ensure_default_project()
+        target_project = project or organization.get_default_project()
+        if target_project is None:
+            return
         webhooks = Webhook.objects.select_related("project").filter(
             organization=organization,
             project=target_project,

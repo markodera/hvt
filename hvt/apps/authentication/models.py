@@ -38,6 +38,7 @@ class AuditLog(models.Model):
         # API key events
         API_KEY_CREATED = "api_key.created", "API Key Created"
         API_KEY_REVOKED = "api_key.revoked", "API Key Revoked"
+        API_KEY_DELETED = "api_key.deleted", "API Key Deleted"
         API_KEY_USED = "api_key.used", "API Key Used"
 
         # User managment
