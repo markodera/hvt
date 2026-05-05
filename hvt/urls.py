@@ -14,6 +14,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+import os
 from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
@@ -30,9 +31,9 @@ urlpatterns = [
     path("readyz/", readyz, name="readyz"),
     path("api/v1/", include("hvt.api.v1.urls")),
 ]
-
+admin_url = os.environ.get('ADMIN_URL', 'admin/')
 if settings.EXPOSE_ADMIN:
-    urlpatterns.append(path("admin/", admin.site.urls))
+    urlpatterns.append(path(admin_url, admin.site.urls))
 
 if settings.EXPOSE_API_DOCS:
     urlpatterns.extend(
