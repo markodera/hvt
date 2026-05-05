@@ -1,0 +1,32 @@
+name: Deploy to DigitalOcean
+
+# 1. The Trigger
+on:
+  push:
+    branches:
+      - main
+
+# 2. The Job Definition
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    # 3. The Deployment Steps
+    steps:
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            cd /home/hvt/hvt
+            git pull origin main
+            
+            source venv/bin/activate
+            pip install -r requirements.txt
+            python manage.py migrate
+            python manage.py collectstatic --noinput
+            
+            # Graceful Zero-Downtime Reload
+            kill -HUP $(cat /tmp/hvt-gunicorn.pid)
