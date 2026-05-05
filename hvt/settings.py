@@ -61,8 +61,6 @@ elif not SECRET_KEY or SECRET_KEY.startswith("django-insecure-") or SECRET_KEY =
     raise ImproperlyConfigured("SECRET_KEY must be set to a strong value when DEBUG is false.")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
-RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
-RAILWAY_PUBLIC_HOST = _host_from_url(RAILWAY_PUBLIC_DOMAIN) or RAILWAY_PUBLIC_DOMAIN
 
 ALLOWED_HOSTS = _env_list(
     "ALLOWED_HOSTS",
@@ -77,22 +75,10 @@ ALLOWED_HOSTS = _env_list(
         ]
     )
     if DEBUG
-    else ",".join(
-        [
-            host
-            for host in [
-                RAILWAY_PUBLIC_HOST,
-                "healthcheck.railway.app",
-            ]
-            if host
-        ]
-    ),
+    else ""
 )
-for extra_host in [RAILWAY_PUBLIC_HOST, "healthcheck.railway.app"]:
-    if extra_host and extra_host not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append(extra_host)
-configured_public_hosts = [host for host in ALLOWED_HOSTS if host != "healthcheck.railway.app"]
-if not DEBUG and not configured_public_hosts:
+
+if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be configured when DEBUG is false.")
 
 default_frontend_origins = []

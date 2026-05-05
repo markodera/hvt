@@ -1,17 +1,29 @@
-name: Deploy to DigitalOcean
+name: Deploy to Production SSH
 
-# 1. The Trigger
+# ==============================================================================
+# HVT Continuous Deployment Workflow
+# ==============================================================================
+# This workflow automatically deploys the latest code to a self-hosted Linux
+# server via SSH whenever a commit is pushed to the 'main' branch.
+# It performs a zero-downtime deployment by gracefully reloading Gunicorn.
+#
+# To use this in your own self-hosted deployment:
+# 1. Go to your GitHub repository -> Settings -> Secrets and variables -> Actions
+# 2. Add the following Repository Secrets:
+#    - DO_HOST    : The IP address or domain of your server
+#    - DO_USER    : The SSH username (e.g., ubuntu, root, or whatever you created)
+#    - DO_SSH_KEY : The private SSH key allowing access to the server
+# ==============================================================================
+
 on:
   push:
     branches:
       - main
 
-# 2. The Job Definition
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
-    # 3. The Deployment Steps
     steps:
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -20,13 +32,25 @@ jobs:
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
+            # 1. Navigate to the project directory
             cd /home/hvt/hvt
+            
+            # 2. Pull the latest code from the main branch
             git pull origin main
             
+            # 3. Activate the virtual environment
             source venv/bin/activate
+            
+            # 4. Install any new dependencies
             pip install -r requirements.txt
+            
+            # 5. Apply any pending database migrations
             python manage.py migrate
+            
+            # 6. Collect new static files for Nginx to serve
             python manage.py collectstatic --noinput
             
-            # Graceful Zero-Downtime Reload
+            # 7. Graceful Zero-Downtime Reload
+            # Sending the HUP signal tells Gunicorn to gracefully finish current 
+            # requests, replace its workers with the new code, and avoid downtime.
             kill -HUP $(cat /tmp/hvt-gunicorn.pid)

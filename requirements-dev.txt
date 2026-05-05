@@ -1,0 +1,8 @@
+# Development Dependencies
+-r requirements.txt
+
+black==24.4.2
+flake8==7.0.0
+pytest-django==4.8.0
+coverage==7.5.0
+factory-boy==3.3.0

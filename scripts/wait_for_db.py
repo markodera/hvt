@@ -50,7 +50,7 @@ def main() -> int:
             print(
                 (
                     "Production startup is pointing at localhost for Postgres. "
-                    "On Railway, this usually means the web service does not have "
+                    "On a self-hosted cloud provider, this usually means the web service does not have "
                     "DATABASE_URL referenced from the Postgres service."
                 ),
                 file=sys.stderr,

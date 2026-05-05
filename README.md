@@ -59,7 +59,7 @@ The compose stack starts PostgreSQL, Redis, and the Django API.
 
 ## Configuration
 
-Start from [`.env.example`](.env.example). The checked-in defaults are intentionally local-development oriented. For hosted or production deployment, override the security and domain settings documented in [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md).
+Start from [`.env.example`](.env.example). The checked-in defaults are intentionally local-development oriented. For hosted or production deployment to a VPS (e.g., DigitalOcean), see the setup scripts and `.github/workflows/deploy.yml` for the standard Nginx and Gunicorn configuration.
 
 If you use runtime auth in a customer-facing app, set each project's `frontend_url` so email verification and password reset links land on the correct frontend.
 
@@ -93,7 +93,6 @@ POST /api/v1/auth/runtime/password/reset/confirm/<uidb64>/<token>/
 - [Developer quickstart](docs/QUICKSTART.md)
 - [Browser authentication guide](docs/BROWSER_AUTHENTICATION.md)
 - [Webhook guide](docs/WEBHOOKS.md)
-- [Railway deployment](docs/RAILWAY_DEPLOYMENT.md)
 - [Runtime/frontend handoff](docs/RUNTIME_FRONTEND_HANDOFF.md)
 - [SDK repo split guide](docs/SDK_REPO_SPLIT.md)
 - [Open-source release checklist](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md)
