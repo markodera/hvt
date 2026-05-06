@@ -270,13 +270,28 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         data = getattr(request, "data", None)
         if data is not None:
             return data
+            
+        try:
+            data = getattr(request, "POST", None)
+            if data:
+                return data
+        except (AttributeError, Exception):
+            pass
 
         request_meta = getattr(request, "META", {}) or {}
         content_type = str(
             getattr(request, "content_type", "") or request_meta.get("CONTENT_TYPE", "")
         ).lower()
+        
         if "json" in content_type:
-            body = getattr(request, "body", b"") or b""
+            # We catch RawPostDataException which happens if DRF already read the stream
+            # but didn't populate request.data for some reason
+            from django.http.request import RawPostDataException
+            try:
+                body = getattr(request, "body", b"") or b""
+            except RawPostDataException:
+                return {}
+                
             if isinstance(body, bytes):
                 encoding = getattr(request, "encoding", None) or "utf-8"
                 try:
