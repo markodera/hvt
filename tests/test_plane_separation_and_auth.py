@@ -183,3 +183,105 @@ class PlaneSeparationAndAuthTests(TestCase):
         view_with_scopes = DummyWriteViewWithScopes()
         allowed_with_scopes = _allow_api_key(request, view_with_scopes, "TestPerm")
         self.assertTrue(allowed_with_scopes)
+
+    def test_all_runtime_endpoints_reject_management_key_via_http_client(self):
+        """Integration test verifying every runtime route rejects management keys with 403 and records AuditLog."""
+        from rest_framework.test import APIClient
+        from rest_framework import status
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        runtime_routes = [
+            ("/api/v1/auth/runtime/login/", "post", {"email": "test@example.com", "password": "password123"}),
+            ("/api/v1/auth/runtime/register/", "post", {"email": "test@example.com", "password": "password123"}),
+            ("/api/v1/auth/runtime/password/reset/", "post", {"email": "test@example.com"}),
+            ("/api/v1/auth/runtime/passkey/authenticate/options/", "post", {}),
+            ("/api/v1/auth/runtime/magic-link/request/", "post", {"email": "test@example.com"}),
+            ("/api/v1/runtime/invitations/", "get", {}),
+        ]
+
+        for path, method, data in runtime_routes:
+            initial_count = AuditLog.objects.filter(event_type=AuditLog.EventType.SECURITY_VIOLATION).count()
+            if method == "post":
+                response = client.post(path, data=data, format="json")
+            else:
+                response = client.get(path)
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_403_FORBIDDEN,
+                f"Route {path} did not reject management key with 403; got {response.status_code}: {response.data}"
+            )
+            self.assertIn(
+                "Management keys cannot be used for runtime authentication. Use a runtime client key.",
+                str(response.data)
+            )
+
+            # Assert AuditLog event was recorded
+            new_count = AuditLog.objects.filter(event_type=AuditLog.EventType.SECURITY_VIOLATION).count()
+            self.assertGreater(
+                new_count,
+                initial_count,
+                f"Route {path} did not create a security.violation AuditLog entry"
+            )
+
+    def test_permission_matrix_for_schema_sync(self):
+        """Verifies exact permission matrix: schema:plan vs schema:sync vs insufficient scopes."""
+        from rest_framework.test import APIClient
+        from rest_framework import status
+
+        sync_url = f"/api/v1/organizations/current/projects/{self.project.id}/sync/"
+
+        # 1. Key with only roles:read (insufficient for dry_run and live)
+        _, read_raw, read_hash = APIKey.generate_key(
+            environment="test", key_type=APIKey.KeyType.MANAGEMENT
+        )
+        read_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Read-Only Key",
+            environment="test",
+            key_type=APIKey.KeyType.MANAGEMENT,
+            prefix=read_raw[len("hvt_mgmt_test_"):len("hvt_mgmt_test_") + 8],
+            hashed_key=read_hash,
+            scopes=["roles:read"],
+        )
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=read_raw)
+        res = client.post(sync_url + "?dry_run=true", {"schema_version": 1}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("permission", str(res.data).lower())
+
+        # 2. Key with schema:plan (allowed for dry_run=true, forbidden for dry_run=false)
+        _, plan_raw, plan_hash = APIKey.generate_key(
+            environment="test", key_type=APIKey.KeyType.MANAGEMENT
+        )
+        plan_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Plan Key",
+            environment="test",
+            key_type=APIKey.KeyType.MANAGEMENT,
+            prefix=plan_raw[len("hvt_mgmt_test_"):len("hvt_mgmt_test_") + 8],
+            hashed_key=plan_hash,
+            scopes=["schema:plan"],
+        )
+        client.credentials(HTTP_X_API_KEY=plan_raw)
+        res_plan_ok = client.post(sync_url + "?dry_run=true", {"schema_version": 1}, format="json")
+        self.assertEqual(res_plan_ok.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_plan_ok.data["status"], "planned")
+
+        res_plan_fail = client.post(sync_url, {"schema_version": 1}, format="json")
+        self.assertEqual(res_plan_fail.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("The 'schema:plan' scope permits dry-run only", str(res_plan_fail.data))
+
+        # 3. Key with schema:sync (allowed for both dry_run=true and dry_run=false)
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+        res_sync_dry = client.post(sync_url + "?dry_run=true", {"schema_version": 1}, format="json")
+        self.assertEqual(res_sync_dry.status_code, status.HTTP_200_OK)
+
+        res_sync_live = client.post(sync_url, {"schema_version": 1}, format="json")
+        self.assertEqual(res_sync_live.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_sync_live.data["status"], "applied")
