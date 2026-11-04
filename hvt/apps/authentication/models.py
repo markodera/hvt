@@ -99,6 +99,7 @@ class AuditLog(models.Model):
         MAGIC_LINK_REQUESTED = "magic_link.requested", "Magic Link Requested"
         MAGIC_LINK_VERIFIED = "magic_link.verified", "Magic Link Verified"
         MAGIC_LINK_FAILED = "magic_link.failed", "Magic Link Failed"
+        SECURITY_VIOLATION = "security.violation", "Security Violation"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
