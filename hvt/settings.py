@@ -61,6 +61,13 @@ if DEBUG:
 elif not SECRET_KEY or SECRET_KEY.startswith("django-insecure-") or SECRET_KEY == "change-me-in-production":
     raise ImproperlyConfigured("SECRET_KEY must be set to a strong value when DEBUG is false.")
 
+# MultiFernet keys
+HVT_ENCRYPTION_KEYS = _env_list("HVT_ENCRYPTION_KEYS")
+TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+if TESTING and not HVT_ENCRYPTION_KEYS:
+    HVT_ENCRYPTION_KEYS = ["TWSlhosVb6FmvGMQNRARDCDoZuZ1xWHO2zjeLNoDb8A="]
+
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 ALLOWED_HOSTS = _env_list(
