@@ -23,6 +23,11 @@ urlpatterns = [
         name="project_detail",
     ),
     path(
+        "current/projects/<uuid:project_pk>/sync/",
+        views.ProjectSchemaSyncView.as_view(),
+        name="project_schema_sync",
+    ),
+    path(
         "current/projects/<uuid:project_pk>/permissions/",
         views.ProjectPermissionListCreateView.as_view(),
         name="project_permission_list_create",
