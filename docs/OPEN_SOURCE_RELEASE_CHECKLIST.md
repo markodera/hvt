@@ -11,7 +11,7 @@ Use this before flipping the repository public.
 
 ## Security and Governance
 
-- choose and commit a license
+- choose and commit a license (Apache-2.0, see LICENSE and NOTICE)
 - add a code of conduct, contributing guide, and security policy
 - enable GitHub private vulnerability reporting
 - enable Dependabot alerts and secret scanning
