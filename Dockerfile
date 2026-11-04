@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1
 
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 WORKDIR /app
 
 # ----- Dependencies -----
