@@ -749,6 +749,10 @@ class RuntimeAPIKeyScopedRequestMixin:
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
             raise NotAuthenticated("A valid X-API-Key header is required.")
+        if getattr(api_key, "key_type", None) == APIKey.KeyType.MANAGEMENT:
+            raise PermissionDenied(
+                "Management keys cannot be used for runtime authentication. Use a runtime client key."
+            )
         if not api_key.has_scope("auth:runtime"):
             raise PermissionDenied(
                 "This API key does not have the required auth:runtime scope."

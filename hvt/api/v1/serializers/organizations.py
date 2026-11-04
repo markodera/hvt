@@ -311,6 +311,11 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
         default=APIKey.Environment.TEST,
         help_text="'test' for sandbox, 'live' for production",
     )
+    key_type = serializers.ChoiceField(
+        choices=APIKey.KeyType.choices,
+        default=APIKey.KeyType.RUNTIME,
+        help_text="'runtime' for app client authentication, 'management' for schema provisioning",
+    )
     project_id = serializers.UUIDField(
         required=False,
         write_only=True,
@@ -334,6 +339,7 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "environment",
+            "key_type",
             "scopes",
             "expires_at",
             "project_id",
@@ -371,6 +377,23 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        key_type = attrs.get("key_type", getattr(self.instance, "key_type", APIKey.KeyType.RUNTIME))
+        scopes = set(attrs.get("scopes", []))
+        if key_type == APIKey.KeyType.RUNTIME:
+            prohibited = scopes.intersection({"schema:sync", "schema:plan", "api_keys:write"})
+            if prohibited:
+                raise serializers.ValidationError({
+                    "scopes": [f"Runtime client keys cannot carry provisioning or key-management scopes: {sorted(prohibited)}"]
+                })
+        elif key_type == APIKey.KeyType.MANAGEMENT:
+            if "auth:runtime" in scopes or "auth:*" in scopes:
+                raise serializers.ValidationError({
+                    "scopes": ["Management keys cannot carry runtime authentication scopes (auth:runtime)."]
+                })
+            if "api_keys:write" in scopes or "api_keys:*" in scopes:
+                raise serializers.ValidationError({
+                    "scopes": ["Management keys cannot create or rotate API keys."]
+                })
         organization = self.context.get("organization")
         project_id = attrs.pop("project_id", None)
 
@@ -423,14 +446,18 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         environment = validated_data.pop("environment", "test")
+        key_type = validated_data.pop("key_type", APIKey.KeyType.RUNTIME)
         # Generate the key
-        prefix, full_key, hashed_key = APIKey.generate_key(environment=environment)
+        prefix, full_key, hashed_key = APIKey.generate_key(
+            environment=environment, key_type=key_type
+        )
 
         # Create the API Key object (organization and created_by come from perform_create)
         api_key = APIKey.objects.create(
             prefix=prefix,
             hashed_key=hashed_key,
             environment=environment,
+            key_type=key_type,
             **validated_data,
         )
 
@@ -471,6 +498,7 @@ class APIKeyListSerializer(serializers.ModelSerializer):
             "prefix",
             "environment",
             "environment_display",
+            "key_type",
             "project",
             "project_name",
             "project_slug",

@@ -411,6 +411,25 @@ class APIKey(models.Model):
         TEST = "test", "Test"
         LIVE = "live", "Live"
 
+    class KeyType(models.TextChoices):
+        RUNTIME = "runtime", "Runtime Client Key"
+        MANAGEMENT = "management", "Management / Provisioning Key"
+
+    PROVISIONING_SCOPES = (
+        "schema:sync",
+        "schema:plan",
+        "roles:read",
+        "roles:write",
+        "permissions:read",
+        "permissions:write",
+        "providers:read",
+        "providers:write",
+    )
+
+    RUNTIME_SCOPES = (
+        "auth:runtime",
+    )
+
     CANONICAL_SCOPES = (
         "organization:read",
         "organization:write",
@@ -422,6 +441,7 @@ class APIKey(models.Model):
         "webhooks:write",
         "audit_logs:read",
         "auth:runtime",
+        *PROVISIONING_SCOPES,
     )
     SUPPORTED_SCOPES = (
         *CANONICAL_SCOPES,
@@ -468,6 +488,14 @@ class APIKey(models.Model):
         "webhooks:write": {"webhooks:write", "webhooks:*", "write", "*"},
         "audit_logs:read": {"audit_logs:read", "audit_logs:*", "read", "write", "*"},
         "auth:runtime": {"auth:runtime", "auth:*", "write", "*"},
+        "schema:sync": {"schema:sync", "*"},
+        "schema:plan": {"schema:plan", "schema:sync", "*"},
+        "roles:write": {"roles:write", "roles:*", "schema:sync", "*"},
+        "roles:read": {"roles:read", "roles:*", "roles:write", "schema:sync", "schema:plan", "*"},
+        "permissions:write": {"permissions:write", "permissions:*", "schema:sync", "*"},
+        "permissions:read": {"permissions:read", "permissions:*", "permissions:write", "schema:sync", "schema:plan", "*"},
+        "providers:write": {"providers:write", "providers:*", "schema:sync", "*"},
+        "providers:read": {"providers:read", "providers:*", "providers:write", "schema:sync", "schema:plan", "*"},
     }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -490,6 +518,13 @@ class APIKey(models.Model):
         choices=Environment.choices,
         default=Environment.TEST,
         help_text="Test keys only access test data, live keys access production data",
+    )
+    key_type = models.CharField(
+        max_length=16,
+        choices=KeyType.choices,
+        default=KeyType.RUNTIME,
+        db_index=True,
+        help_text="Runtime client key for app authentication, or Management key for schema provisioning.",
     )
 
     # Key identification
@@ -529,19 +564,45 @@ class APIKey(models.Model):
         return f"{self.name} ({self.prefix}...)"
 
     @classmethod
-    def generate_key(cls, environment="test"):
+    def generate_key(cls, environment="test", key_type="runtime"):
         """
         Generate a new API key.
         Returns (prefix, full_key, hashed_key)
-        Key format:
+        Runtime format:
         Test: hvt_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
         Live: hvt_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        Management format:
+        Test: hvt_mgmt_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        Live: hvt_mgmt_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
         """
         raw_key = secrets.token_hex(32)
         prefix = raw_key[:8]
-        full_key = f"hvt_{environment}_{raw_key}"
+        is_mgmt = (key_type == cls.KeyType.MANAGEMENT or str(key_type).lower() == "management")
+        if is_mgmt:
+            full_key = f"hvt_mgmt_{environment}_{raw_key}"
+        else:
+            full_key = f"hvt_{environment}_{raw_key}"
         hashed_key = cls.hash_key(full_key)
         return prefix, full_key, hashed_key
+
+    def clean(self):
+        super().clean()
+        normalized = self.normalized_scopes()
+        if self.key_type == self.KeyType.RUNTIME:
+            prohibited = normalized.intersection({"schema:sync", "schema:plan", "api_keys:write"})
+            if prohibited:
+                raise ValidationError(
+                    f"Runtime client keys cannot carry provisioning or key-management scopes: {sorted(prohibited)}"
+                )
+        elif self.key_type == self.KeyType.MANAGEMENT:
+            if "auth:runtime" in normalized or "auth:*" in normalized:
+                raise ValidationError(
+                    "Management keys cannot carry runtime authentication scopes (auth:runtime)."
+                )
+            if "api_keys:write" in normalized or "api_keys:*" in normalized:
+                raise ValidationError(
+                    "Management keys cannot carry API key creation/rotation scopes."
+                )
 
     @staticmethod
     def hash_key(key: str) -> str:
