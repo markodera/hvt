@@ -1,3 +1,4 @@
+from hvt.crypto import EncryptedTextField
 import uuid
 import secrets
 import hashlib
@@ -22,6 +23,11 @@ APP_ACCESS_SLUG_VALIDATOR = RegexValidator(
 def _runtime_invitation_default_expiry():
     return timezone.now() + timedelta(hours=72)
 
+
+
+class ManagedBy(models.TextChoices):
+    DASHBOARD = "dashboard", "Dashboard"
+    MANIFEST = "manifest", "Manifest"
 
 class Organization(models.Model):
     """
@@ -161,6 +167,7 @@ class ProjectPermission(models.Model):
     )
     name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
+    managed_by = models.CharField(max_length=16, choices=ManagedBy.choices, default=ManagedBy.DASHBOARD, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -208,6 +215,7 @@ class ProjectRole(models.Model):
         default=False,
         help_text="Allow runtime users to request this role during registration.",
     )
+    managed_by = models.CharField(max_length=16, choices=ManagedBy.choices, default=ManagedBy.DASHBOARD, db_index=True)
     permissions = models.ManyToManyField(
         ProjectPermission,
         through="ProjectRolePermission",
@@ -292,7 +300,7 @@ class UserProjectRole(models.Model):
     )
     role = models.ForeignKey(
         ProjectRole,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="assignments",
     )
     assigned_by = models.ForeignKey(
@@ -357,7 +365,15 @@ class SocialProviderConfig(models.Model):
     )
     provider = models.CharField(max_length=32, choices=Provider.choices)
     client_id = models.CharField(max_length=255)
-    client_secret = models.CharField(max_length=255)
+    client_secret = EncryptedTextField(
+        help_text="OAuth client secret (encrypted at rest via MultiFernet).",
+    )
+    managed_by = models.CharField(
+        max_length=16,
+        choices=ManagedBy.choices,
+        default=ManagedBy.DASHBOARD,
+        db_index=True,
+    )
     redirect_uris = models.JSONField(
         default=list,
         blank=True,
