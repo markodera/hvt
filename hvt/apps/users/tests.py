@@ -538,6 +538,7 @@ class RoleUpdateEndpointTest(APITestCase):
             role="member",
         )
         prefix, self.api_key_full, hashed = APIKey.generate_key(environment="test")
+        self.org.ensure_default_project()
         self.api_key_obj = APIKey.objects.create(
             organization=self.org,
             name="Role Update Test Key",
