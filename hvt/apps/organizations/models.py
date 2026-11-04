@@ -344,6 +344,10 @@ class SocialProviderConfig(models.Model):
     class Provider(models.TextChoices):
         GOOGLE = "google", "Google"
         GITHUB = "github", "GitHub"
+        DISCORD = "discord", "Discord"
+        APPLE = "apple", "Apple"
+        MICROSOFT = "microsoft", "Microsoft"
+        GITLAB = "gitlab", "GitLab"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(

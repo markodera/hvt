@@ -95,7 +95,10 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed("API key organization is inactive.")
 
         if api_key_obj.project_id is None:
-            default_project = api_key_obj.organization.get_default_project()
+            default_project = (
+                api_key_obj.organization.get_default_project()
+                or api_key_obj.organization.ensure_default_project()
+            )
             if default_project is None:
                 raise exceptions.AuthenticationFailed(
                     "API key is not attached to a project."

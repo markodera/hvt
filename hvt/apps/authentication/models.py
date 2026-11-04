@@ -79,6 +79,27 @@ class AuditLog(models.Model):
             "Project Social Provider Deleted",
         )
 
+        # MFA events
+        MFA_SETUP = "mfa.setup", "MFA Setup Initiated"
+        MFA_ENABLED = "mfa.enabled", "MFA Enabled"
+        MFA_DISABLED = "mfa.disabled", "MFA Disabled"
+        MFA_VERIFIED = "mfa.verified", "MFA Verified"
+
+        # Passkey events
+        PASSKEY_REGISTER_INITIATED = (
+            "passkey.register.initiated",
+            "Passkey Registration Initiated",
+        )
+        PASSKEY_REGISTERED = "passkey.registered", "Passkey Registered"
+        PASSKEY_LOGIN = "passkey.login", "Passkey Login"
+        PASSKEY_LOGIN_FAILED = "passkey.login.failed", "Passkey Login Failed"
+        PASSKEY_DELETED = "passkey.deleted", "Passkey Deleted"
+
+        # Magic Link events
+        MAGIC_LINK_REQUESTED = "magic_link.requested", "Magic Link Requested"
+        MAGIC_LINK_VERIFIED = "magic_link.verified", "Magic Link Verified"
+        MAGIC_LINK_FAILED = "magic_link.failed", "Magic Link Failed"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Event details
@@ -235,3 +256,92 @@ class AuditLog(models.Model):
         else:
             ip = request.META.get("REMOTE_ADDR")
         return ip
+
+
+class TOTPDevice(models.Model):
+    """
+    TOTP Two-Factor Authentication device for a user.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="totp_device",
+    )
+    secret = models.CharField(max_length=64)
+    is_confirmed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "auth_totp_devices"
+
+    def __str__(self):
+        return f"TOTP for {self.user.email} (confirmed={self.is_confirmed})"
+
+
+class UserPasskeyCredential(models.Model):
+    """
+    FIDO2 / WebAuthn Passkey credential for biometric and hardware security key authentication.
+    Stores public key and signature counter to detect authenticator cloning.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="passkey_credentials",
+    )
+    name = models.CharField(max_length=120, default="Passkey")
+    credential_id = models.CharField(max_length=512, unique=True, db_index=True)
+    public_key = models.TextField(help_text="Base64URL-encoded COSE public key")
+    sign_count = models.BigIntegerField(default=0)
+    transports = models.JSONField(default=list, blank=True)
+    aaguid = models.CharField(max_length=64, blank=True)
+    backed_up = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "auth_passkey_credentials"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} for {self.user.email}"
+
+
+class MagicLinkToken(models.Model):
+    """
+    Cryptographically secure, single-use passwordless authentication token.
+    Stores only the SHA-256 hash of the token to prevent database leakage exploits.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="magic_link_tokens",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="magic_link_tokens",
+    )
+    token_hash = models.CharField(max_length=64, db_index=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_magic_link_tokens"
+        ordering = ["-created_at"]
+
+    def is_valid(self):
+        from django.utils import timezone
+
+        return not self.is_used and self.expires_at > timezone.now()
+
+
