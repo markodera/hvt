@@ -144,9 +144,47 @@ export function resolveConfig(options: {
 }
 
 /**
+ * Warns if a sensitive file like .env.local is not excluded by .gitignore.
+ */
+export function warnIfNotGitignored(filename: string = ".env.local", cwd: string = process.cwd()): boolean {
+  const gitignorePath = path.join(cwd, ".gitignore");
+  if (!fs.existsSync(gitignorePath)) {
+    console.warn(`[WARNING] No .gitignore file found in ${cwd}. Ensure '${filename}' is never committed to version control!`);
+    return false;
+  }
+  const content = fs.readFileSync(gitignorePath, "utf-8");
+  const lines = content.split(/\r?\n/).map((line) => line.trim());
+  const isIgnored = lines.some((line) => {
+    if (!line || line.startsWith("#")) return false;
+    return (
+      line === filename ||
+      line === `/${filename}` ||
+      line === ".env*" ||
+      line === "*.local" ||
+      line === ".env.local"
+    );
+  });
+  if (!isIgnored) {
+    console.warn(`[WARNING] '${filename}' does not appear to be ignored in .gitignore! Add '${filename}' or '.env*' to prevent leaking secrets.`);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Updates or creates .env.local with NEXT_PUBLIC_HVT_CLIENT_KEY.
+ * Strictly refuses to write management keys into NEXT_PUBLIC_* variables.
  */
 export function writeClientKeyToEnvLocal(clientKey: string, cwd: string = process.cwd()): string {
+  if (clientKey.startsWith("hvt_mgmt_")) {
+    throw new Error(
+      "SECURITY ERROR: Management keys must never be written to NEXT_PUBLIC_* variables. " +
+      "Only runtime client keys (hvt_test_*, hvt_live_*) can be exposed to frontend environments."
+    );
+  }
+
+  warnIfNotGitignored(".env.local", cwd);
+
   const envLocalPath = path.join(cwd, ".env.local");
   let content = "";
   if (fs.existsSync(envLocalPath)) {
