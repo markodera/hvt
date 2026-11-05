@@ -5,8 +5,29 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { parseManifestContent, writeClientKeyToEnvLocal } from "./config.js";
+import { buildStarterSchema, SUPPORTED_PROVIDERS } from "./commands/init.js";
 
 describe("CLI Config & Manifest Parser", () => {
+  it("builds starter schema with specific selected providers", () => {
+    const schema = buildStarterSchema(["google", "github", "discord"]);
+    assert.strictEqual(schema.social_providers?.length, 3);
+    const providers = schema.social_providers?.map((p) => p.provider);
+    assert.deepStrictEqual(providers, ["google", "github", "discord"]);
+  });
+
+  it("builds starter schema with all 6 supported providers", () => {
+    const schema = buildStarterSchema([...SUPPORTED_PROVIDERS]);
+    assert.strictEqual(schema.social_providers?.length, 6);
+    const providers = schema.social_providers?.map((p) => p.provider);
+    assert.deepStrictEqual(providers, [
+      "google",
+      "github",
+      "discord",
+      "apple",
+      "microsoft",
+      "gitlab",
+    ]);
+  });
   it("parses valid JSON manifest with schema_version 1", () => {
     const raw = JSON.stringify({
       schema_version: 1,
