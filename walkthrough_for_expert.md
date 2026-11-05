@@ -38,7 +38,7 @@ All 11 atomic commits have been implemented, tested, and verified with **26 back
   - Iterates through `/login/`, `/register/`, `/password/reset/`, `/passkey/...`, `/magic-link/...`, and `/invitations/` using an HTTP API client with a management key.
   - **Result:** Every endpoint returns HTTP `403 Forbidden` with the exact message:  
     `"Management keys cannot be used for runtime authentication. Use a runtime client key."`
-  - **Audit Proof:** Confirms an immutable `AuditLog` event is recorded for each attempt (`event_type="security.violation"`, `reason="management_key_runtime_violation"`).
+  - **Audit Proof:** Confirms an append-only `AuditLog` event is recorded for each attempt (`event_type="security.violation"`, `reason="management_key_runtime_violation"`).
 * **Permission Matrix Test:** Added `test_permission_matrix_for_schema_sync`:
   - `roles:read` only: Blocked with HTTP 403 on both dry-run and live sync.
   - `schema:plan` only: Allowed for dry-run plan (`status: "planned"`), blocked with HTTP 403 on live apply (`"The 'schema:plan' scope permits dry-run only. Use 'schema:sync' to apply changes."`).

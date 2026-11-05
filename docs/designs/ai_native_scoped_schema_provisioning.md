@@ -27,7 +27,7 @@ HVT maintains a strict, cryptographic, and operational separation between two di
    - **Authentication Class:** `ManagementAPIKeyAuthentication`.
    - **Allowed Scopes:** Provisioning scopes only (`schema:sync`, `schema:plan`, `roles:read/write`, `permissions:read/write`, `providers:read/write`).
    - **Restrictions:** Cannot be used on runtime authentication endpoints. Cannot create or rotate arbitrary API keys (apart from the runtime client key automatically minted by the sync service).
-   - **Plane Violation:** Any management key presented to runtime routes (`/api/v1/auth/runtime/*`) is immediately rejected with HTTP `403 Forbidden` (`"Management keys cannot be used for runtime authentication. Use a runtime client key."`) and logs an immutable `security.violation` `AuditLog` event.
+   - **Plane Violation:** Any management key presented to runtime routes (`/api/v1/auth/runtime/*`) is immediately rejected with HTTP `403 Forbidden` (`"Management keys cannot be used for runtime authentication. Use a runtime client key."`) and logs an append-only `security.violation` `AuditLog` event.
 
 2. **Runtime Plane:**
    - **Key Format:** `hvt_test_<64_hex_chars>` and `hvt_live_<64_hex_chars>` (and legacy `hvt_client_*`).
