@@ -285,3 +285,179 @@ class PlaneSeparationAndAuthTests(TestCase):
         res_sync_live = client.post(sync_url, {"schema_version": 1}, format="json")
         self.assertEqual(res_sync_live.status_code, status.HTTP_200_OK)
         self.assertEqual(res_sync_live.data["status"], "applied")
+
+    def test_management_key_rejected_on_runtime_view_outside_cors_path_prefixes(self):
+        """Proves enforcement is strictly inside authentication classes, not path matching.
+        A runtime view mounted on a completely custom URL (outside CORS path prefixes)
+        still immediately rejects management keys with 403 and records an AuditLog event.
+        """
+        auth = RuntimeAPIKeyAuthentication()
+        request = self.factory.get("/api/v1/custom-unprefixed-route/runtime-endpoint/")
+        with self.assertRaises(exceptions.PermissionDenied) as ctx:
+            auth.validate_key(self.mgmt_raw, request=request)
+        self.assertEqual(
+            str(ctx.exception),
+            "Management keys cannot be used for runtime authentication. Use a runtime client key."
+        )
+
+        log = AuditLog.objects.filter(event_type=AuditLog.EventType.SECURITY_VIOLATION).latest("created_at")
+        self.assertEqual(log.event_data["path"], "/api/v1/custom-unprefixed-route/runtime-endpoint/")
+
+    def test_all_runtime_endpoints_reject_management_key_via_urlconf_enumeration(self):
+        """Automatically walks URLconf and verifies every runtime endpoint rejects management keys with 403."""
+        from django.urls import get_resolver, resolve
+        from rest_framework.test import APIClient
+        from rest_framework import status
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        def get_routes(patterns, prefix=""):
+            for p in patterns:
+                if hasattr(p, "url_patterns"):
+                    yield from get_routes(p.url_patterns, prefix + str(p.pattern))
+                else:
+                    yield prefix + str(p.pattern)
+
+        runtime_routes = set()
+        for r in get_routes(get_resolver().url_patterns):
+            if r.startswith("api/v1/auth/runtime/") or r.startswith("api/v1/runtime/"):
+                clean = "/" + r.lstrip("^").rstrip("$")
+                if "<" not in clean and "(?P" not in clean:
+                    match = resolve(clean)
+                    view_cls = getattr(match.func, "view_class", None)
+                    if getattr(view_cls, "authentication_classes", None) == []:
+                        continue  # Skip unauthenticated public acceptance view
+                    runtime_routes.add(clean)
+
+        self.assertGreater(len(runtime_routes), 15, "URLconf must have discovered runtime routes automatically")
+        for path in sorted(runtime_routes):
+            is_post = any(kw in path for kw in ("register", "login", "passkey", "magic", "password", "resend"))
+            res = client.post(path, {}, format="json") if is_post else client.get(path)
+            self.assertEqual(
+                res.status_code,
+                status.HTTP_403_FORBIDDEN,
+                f"URLconf enumerated runtime route {path} failed to reject management key; got {res.status_code}"
+            )
+            self.assertIn("Management keys cannot be used for runtime authentication", str(res.data))
+
+    def test_all_non_runtime_endpoints_reject_management_key_except_allowlist(self):
+        """Asserts non-runtime routes reject management keys except an explicit allowlist (the sync endpoint)."""
+        from rest_framework.test import APIClient
+        from rest_framework import status
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        test_routes = [
+            "/api/v1/users/",
+            "/api/v1/organizations/",
+            "/api/v1/organizations/current/",
+            "/api/v1/organizations/current/projects/",
+            "/api/v1/organizations/current/keys/",
+            "/api/v1/organizations/current/webhooks/",
+            "/api/v1/organizations/current/audit-logs/",
+            "/api/v1/auth/me/",
+        ]
+
+        for path in test_routes:
+            res = client.get(path)
+            self.assertIn(
+                res.status_code,
+                (status.HTTP_403_FORBIDDEN, status.HTTP_401_UNAUTHORIZED),
+                f"Non-runtime route {path} must reject management key; got {res.status_code}"
+            )
+
+        # Confirm the explicit allowlist (ProjectSchemaSyncView) DOES accept the management key
+        sync_url = f"/api/v1/organizations/current/projects/{self.project.id}/sync/?dry_run=true"
+        allow_res = client.post(sync_url, {"schema_version": 1}, format="json")
+        self.assertEqual(allow_res.status_code, status.HTTP_200_OK)
+
+    def test_pre_existing_runtime_keys_authenticate_successfully(self):
+        """Confirms pre-existing runtime keys (both hvt_test_ and legacy hvt_client_test_ prefixes) continue to authenticate."""
+        rt_prefix, rt_raw, rt_hash = APIKey.generate_key(environment="test", key_type=APIKey.KeyType.RUNTIME)
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Standard RT Key",
+            environment="test",
+            key_type=APIKey.KeyType.RUNTIME,
+            prefix=rt_prefix,
+            hashed_key=rt_hash,
+            scopes=["auth:runtime"],
+        )
+        auth = RuntimeAPIKeyAuthentication()
+        user, key_obj = auth.validate_key(rt_raw)
+        self.assertIsNotNone(key_obj)
+        self.assertEqual(key_obj.prefix, rt_prefix)
+
+        raw_token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        legacy_raw = f"hvt_client_test_{raw_token}"
+        legacy_prefix = raw_token[:8]
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Legacy RT Client Key",
+            environment="test",
+            key_type=APIKey.KeyType.RUNTIME,
+            prefix=legacy_prefix,
+            hashed_key=APIKey.hash_key(legacy_raw),
+            scopes=["auth:runtime"],
+        )
+        user2, key_obj2 = auth.validate_key(legacy_raw)
+        self.assertIsNotNone(key_obj2)
+        self.assertEqual(key_obj2.prefix, legacy_prefix)
+
+    def test_expired_revoked_and_cross_project_keys_rejected(self):
+        """Confirms expired and revoked keys raise AuthenticationFailed, and cross-project keys return 404."""
+        from django.utils import timezone
+        from datetime import timedelta
+        from rest_framework import exceptions, status
+        from rest_framework.test import APIClient
+
+        auth = APIKeyAuthentication()
+
+        # 1. Expired Key
+        exp_prefix, exp_raw, exp_hash = APIKey.generate_key(environment="test", key_type=APIKey.KeyType.RUNTIME)
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Expired Key",
+            environment="test",
+            key_type=APIKey.KeyType.RUNTIME,
+            prefix=exp_prefix,
+            hashed_key=exp_hash,
+            expires_at=timezone.now() - timedelta(days=1),
+            scopes=["auth:runtime"],
+        )
+        with self.assertRaises(exceptions.AuthenticationFailed) as ctx_exp:
+            auth.validate_key(exp_raw)
+        self.assertIn("inactive or expired", str(ctx_exp.exception).lower())
+
+        # 2. Revoked Key
+        rev_prefix, rev_raw, rev_hash = APIKey.generate_key(environment="test", key_type=APIKey.KeyType.RUNTIME)
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Revoked Key",
+            environment="test",
+            key_type=APIKey.KeyType.RUNTIME,
+            prefix=rev_prefix,
+            hashed_key=rev_hash,
+            is_active=False,
+            scopes=["auth:runtime"],
+        )
+        with self.assertRaises(exceptions.AuthenticationFailed) as ctx_rev:
+            auth.validate_key(rev_raw)
+        self.assertIn("inactive or expired", str(ctx_rev.exception).lower())
+
+        # 3. Cross-Project Key on project-scoped URL returns 404
+        other_project = Project.objects.create(organization=self.org, name="Other", slug="other")
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+        res = client.post(
+            f"/api/v1/organizations/current/projects/{other_project.id}/sync/",
+            {"schema_version": 1},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)

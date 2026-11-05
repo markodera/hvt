@@ -52,7 +52,7 @@ def parse_api_key_components(key: str) -> tuple[str, str, str]:
 
 
 def emit_management_key_runtime_violation_audit(request, prefix: str, environment: str):
-    """Write an immutable security AuditLog entry when a management key is used on runtime routes."""
+    """Write an append-only security AuditLog entry when a management key is used on runtime routes."""
     try:
         from hvt.apps.authentication.models import AuditLog
 
@@ -88,6 +88,7 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
     """
 
     keyword = "X-API-Key"
+    allow_management_keys = False
 
     def authenticate(self, request):
         api_key = request.headers.get(self.keyword) or request.META.get(
@@ -105,13 +106,16 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         key_type, environment, prefix = parse_api_key_components(key)
 
-        # Plane check: runtime routes never accept management keys
-        if request is not None and request_targets_runtime_api_key_endpoint(request):
-            if key_type == "management":
-                emit_management_key_runtime_violation_audit(request, prefix, environment)
-                raise exceptions.PermissionDenied(
-                    "Management keys cannot be used for runtime authentication. Use a runtime client key."
-                )
+        # Plane check: management keys are rejected unless authenticator explicitly allows them
+        if key_type == "management" and not self.allow_management_keys:
+            emit_management_key_runtime_violation_audit(request, prefix, environment)
+            is_runtime = request is not None and request_targets_runtime_api_key_endpoint(request)
+            msg = (
+                "Management keys cannot be used for runtime authentication. Use a runtime client key."
+                if is_runtime
+                else "Management keys are not permitted on this endpoint."
+            )
+            raise exceptions.PermissionDenied(msg)
 
         try:
             api_key_obj = APIKey.objects.select_related("organization", "project").get(
@@ -156,13 +160,19 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
         elif not api_key_obj.project.is_active:
             raise exceptions.AuthenticationFailed("API key project is inactive.")
 
-        # If targeting runtime route, enforce key_type and origin
+        # Plane check: management keys must not be used unless allow_management_keys is True
+        if api_key_obj.key_type == APIKey.KeyType.MANAGEMENT and not self.allow_management_keys:
+            emit_management_key_runtime_violation_audit(request, prefix, environment)
+            is_runtime = request is not None and request_targets_runtime_api_key_endpoint(request)
+            msg = (
+                "Management keys cannot be used for runtime authentication. Use a runtime client key."
+                if is_runtime
+                else "Management keys are not permitted on this endpoint."
+            )
+            raise exceptions.PermissionDenied(msg)
+
+        # If targeting runtime route, enforce origin
         if request is not None and request_targets_runtime_api_key_endpoint(request):
-            if api_key_obj.key_type == APIKey.KeyType.MANAGEMENT:
-                emit_management_key_runtime_violation_audit(request, prefix, environment)
-                raise exceptions.PermissionDenied(
-                    "Management keys cannot be used for runtime authentication. Use a runtime client key."
-                )
 
             request_origin = (request.headers.get("origin") or "").strip()
             if request_origin:
@@ -217,6 +227,7 @@ class ManagementAPIKeyAuthentication(APIKeyAuthentication):
     Dedicated authentication class for management / schema provisioning routes.
     Accepts ONLY management keys. Rejects runtime client keys with 403.
     """
+    allow_management_keys = True
 
     def validate_key(self, key: str, request=None):
         key_type, environment, prefix = parse_api_key_components(key)
