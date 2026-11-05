@@ -1,0 +1,14 @@
+# Gitleaks configuration file
+title = "HVT Gitleaks Configuration"
+
+[allowlist]
+description = "Allowlist for test fixtures, mocks, and CI test environment variables"
+paths = [
+  '''.github/workflows/ci\.yml''',
+  '''tests/''',
+  '''cli/src/.*\.test\.ts''',
+]
+regexes = [
+  '''hvt_mgmt_test_0123456789abcdef''',
+  '''TWSlhosVb6FmvGMQNRARDCDoZuZ1xWHO2zjeLNoDb8A=''',
+]
