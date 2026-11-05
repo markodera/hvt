@@ -73,4 +73,37 @@ roles:
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("refuses to write management keys into NEXT_PUBLIC_HVT_CLIENT_KEY", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hvt-cli-test-mgmt-"));
+    assert.throws(
+      () => {
+        writeClientKeyToEnvLocal("hvt_mgmt_test_forbidden1234567890", tmpDir);
+      },
+      /SECURITY ERROR: Management keys must never be written to NEXT_PUBLIC_\* variables/
+    );
+    const envLocalPath = path.join(tmpDir, ".env.local");
+    assert.strictEqual(fs.existsSync(envLocalPath), false);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("warns if .env.local is not gitignored", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hvt-cli-test-warn-"));
+    let warningLogged = false;
+    const origWarn = console.warn;
+    console.warn = (msg: string) => {
+      if (typeof msg === "string" && msg.includes("not appear to be ignored in .gitignore")) {
+        warningLogged = true;
+      }
+    };
+
+    try {
+      fs.writeFileSync(path.join(tmpDir, ".gitignore"), "node_modules/\ndist/\n", "utf-8");
+      writeClientKeyToEnvLocal("hvt_test_samplekey123", tmpDir);
+      assert.strictEqual(warningLogged, true);
+    } finally {
+      console.warn = origWarn;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
