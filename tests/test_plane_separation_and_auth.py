@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from django.test import TestCase, RequestFactory
 from django.core.exceptions import ValidationError
-from rest_framework import exceptions, permissions
+from rest_framework import exceptions, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.test import APIClient
 
 from hvt.apps.organizations.models import Organization, Project, APIKey
 from hvt.apps.authentication.models import AuditLog
@@ -461,3 +462,48 @@ class PlaneSeparationAndAuthTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_fabricated_management_key_does_not_create_audit_violation(self):
+        """Unauthenticated clients sending bogus management key strings cannot spam AuditLog."""
+        client = APIClient()
+        bogus_key = "hvt_mgmt_test_00000000000000000000000000000000"
+        client.credentials(HTTP_X_API_KEY=bogus_key)
+        initial_violations = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.SECURITY_VIOLATION
+        ).count()
+
+        res = client.post("/api/v1/auth/runtime/login/", {"email": "user@example.com"}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # AuditLog count must NOT increase because the key was not authentic
+        after_violations = AuditLog.objects.filter(
+            event_type=AuditLog.EventType.SECURITY_VIOLATION
+        ).count()
+        self.assertEqual(initial_violations, after_violations)
+
+    def test_passkey_runtime_endpoints_require_auth_runtime_scope(self):
+        """Passkey login options and verify endpoints strictly require auth:runtime scope on APIKey."""
+        # Create a client key with users:read scope only (no auth:runtime)
+        scoped_prefix, scoped_raw, scoped_hash = APIKey.generate_key(
+            environment="test", key_type=APIKey.KeyType.RUNTIME
+        )
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Read-Only Client Key",
+            environment="test",
+            key_type=APIKey.KeyType.RUNTIME,
+            prefix=scoped_prefix,
+            hashed_key=scoped_hash,
+            scopes=["users:read"],
+        )
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=scoped_raw)
+        res = client.post("/api/v1/auth/runtime/passkey/authenticate/options/", {"email": "user@example.com"}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("auth:runtime", str(res.data))
+
+        res_verify = client.post("/api/v1/auth/runtime/passkey/authenticate/verify/", {}, format="json")
+        self.assertEqual(res_verify.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("auth:runtime", str(res_verify.data))

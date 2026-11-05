@@ -2374,7 +2374,7 @@ class ProjectSchemaSyncView(APIView):
         parsers.JSONParser,
         YAMLOrJSONParser,
     ]
-    permission_classes = [permissions.IsAuthenticated | IsOrgOwnerOrAPIKey]
+    permission_classes = [IsOrgOwnerOrAPIKey]
     api_key_write_scopes = ("schema:sync",)
     api_key_scope_map = {
         "POST": ("schema:sync", "schema:plan"),
@@ -2403,6 +2403,8 @@ class ProjectSchemaSyncView(APIView):
             user = request.user
             if not getattr(user, "is_authenticated", False) or not user.organization_id:
                 raise NotAuthenticated("Authentication required.")
+            if not user.is_org_owner():
+                raise PermissionDenied("You must be the organization owner to perform this action.")
             project = get_object_or_404(
                 Project.objects.select_related("organization"),
                 id=project_pk,

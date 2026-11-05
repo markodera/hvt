@@ -546,6 +546,11 @@ class RuntimePasskeyAuthOptionsView(views.APIView):
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
             return Response({"error": "X-API-Key required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not api_key.has_scope("auth:runtime"):
+            return Response(
+                {"detail": "This API key does not have the required auth:runtime scope."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         project = api_key.project
         email = str(request.data.get("email", "")).strip()
@@ -589,6 +594,11 @@ class RuntimePasskeyAuthVerifyView(views.APIView):
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
             return Response({"error": "X-API-Key required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not api_key.has_scope("auth:runtime"):
+            return Response(
+                {"detail": "This API key does not have the required auth:runtime scope."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         challenge_key = request.data.get("challenge_key")
         expected_challenge = cache.get(f"runtime_passkey_auth_{challenge_key}") if challenge_key else None
