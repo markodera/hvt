@@ -79,6 +79,30 @@ class ProjectSerializer(serializers.ModelSerializer):
 
         return normalize_runtime_origins(normalized_origins)
 
+    has_active_live_keys = serializers.SerializerMethodField()
+    can_use_setup_prompt = serializers.SerializerMethodField()
+    setup_prompt_notice = serializers.SerializerMethodField()
+
+    def get_has_active_live_keys(self, obj) -> bool:
+        from hvt.apps.organizations.models import APIKey
+        return APIKey.objects.filter(
+            project=obj,
+            environment=APIKey.Environment.LIVE,
+            is_active=True,
+        ).exists()
+
+    def get_can_use_setup_prompt(self, obj) -> bool:
+        return not self.get_has_active_live_keys(obj)
+
+    def get_setup_prompt_notice(self, obj) -> str | None:
+        if self.get_has_active_live_keys(obj):
+            return (
+                "This project already has an active live API key. Under Option C plane isolation, "
+                "AI setup prompts with test keys cannot modify projects in live mode. "
+                "Use a live management key in CI/CD or apply changes via the dashboard."
+            )
+        return None
+
     class Meta:
         model = Project
         fields = [
@@ -90,10 +114,21 @@ class ProjectSerializer(serializers.ModelSerializer):
             "allow_signup",
             "frontend_url",
             "allowed_origins",
+            "has_active_live_keys",
+            "can_use_setup_prompt",
+            "setup_prompt_notice",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "is_default", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "is_default",
+            "has_active_live_keys",
+            "can_use_setup_prompt",
+            "setup_prompt_notice",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class ProjectPermissionSerializer(serializers.ModelSerializer):
