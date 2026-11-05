@@ -65,7 +65,8 @@ elif not SECRET_KEY or SECRET_KEY.startswith("django-insecure-") or SECRET_KEY =
 HVT_ENCRYPTION_KEYS = _env_list("HVT_ENCRYPTION_KEYS")
 TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
 if TESTING and not HVT_ENCRYPTION_KEYS:
-    HVT_ENCRYPTION_KEYS = ["TWSlhosVb6FmvGMQNRARDCDoZuZ1xWHO2zjeLNoDb8A="]
+    from cryptography.fernet import Fernet
+    HVT_ENCRYPTION_KEYS = [Fernet.generate_key().decode("utf-8")]
 
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
