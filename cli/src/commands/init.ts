@@ -24,7 +24,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
       "http://localhost:3000/auth/callback",
       "http://127.0.0.1:3000/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
   github: {
     provider: "github",
@@ -34,7 +34,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
       "http://localhost:3000/auth/callback",
       "http://127.0.0.1:3000/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
   discord: {
     provider: "discord",
@@ -43,7 +43,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
     allowed_redirect_uris: [
       "http://localhost:3000/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
   apple: {
     provider: "apple",
@@ -52,7 +52,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
     allowed_redirect_uris: [
       "https://example.com/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
   microsoft: {
     provider: "microsoft",
@@ -61,7 +61,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
     allowed_redirect_uris: [
       "http://localhost:3000/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
   gitlab: {
     provider: "gitlab",
@@ -70,7 +70,7 @@ export const SOCIAL_PROVIDER_TEMPLATES: Record<SupportedProvider, HVTManifestSoc
     allowed_redirect_uris: [
       "http://localhost:3000/auth/callback"
     ],
-    is_enabled: true,
+    is_active: true,
   },
 };
 
@@ -86,13 +86,6 @@ export function buildStarterSchema(providerKeys: SupportedProvider[]): HVTManife
   return {
     "$schema": "https://hvts.app/schemas/hvt.schema.v1.json",
     schema_version: 1,
-    auth_methods: {
-      password_enabled: true,
-      passkeys_enabled: true,
-      magic_links_enabled: true,
-      social_oauth_enabled: true,
-      totp_2fa_enabled: true,
-    },
     permissions: [
       {
         slug: "documents:create",
@@ -120,7 +113,7 @@ export function buildStarterSchema(providerKeys: SupportedProvider[]): HVTManife
         slug: "admin",
         name: "Administrator",
         description: "Full access to all project resources",
-        is_default: false,
+        is_default_signup: false,
         permissions: [
           "documents:create",
           "documents:read",
@@ -132,7 +125,7 @@ export function buildStarterSchema(providerKeys: SupportedProvider[]): HVTManife
         slug: "member",
         name: "Member",
         description: "Standard team member with document authoring rights",
-        is_default: true,
+        is_default_signup: true,
         permissions: [
           "documents:create",
           "documents:read",

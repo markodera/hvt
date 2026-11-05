@@ -10,6 +10,7 @@ export interface HVTManifestRole {
   slug: string;
   name?: string;
   description?: string;
+  is_default_signup?: boolean;
   is_default?: boolean;
   permissions?: string[];
 }
@@ -19,20 +20,12 @@ export interface HVTManifestSocialProvider {
   client_id: string;
   client_secret?: string;
   allowed_redirect_uris?: string[];
+  is_active?: boolean;
   is_enabled?: boolean;
-}
-
-export interface HVTManifestAuthMethods {
-  password_enabled?: boolean;
-  passkeys_enabled?: boolean;
-  magic_links_enabled?: boolean;
-  social_oauth_enabled?: boolean;
-  totp_2fa_enabled?: boolean;
 }
 
 export interface HVTManifest {
   schema_version: number;
-  auth_methods?: HVTManifestAuthMethods;
   permissions?: HVTManifestPermission[];
   roles?: HVTManifestRole[];
   social_providers?: HVTManifestSocialProvider[];
