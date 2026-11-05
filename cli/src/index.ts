@@ -27,6 +27,8 @@ program
   .command("init")
   .description("Create a starter 'hvt.schema.json' file in the current directory")
   .option("-f, --force", "Overwrite existing schema file if present")
+  .option("--providers <list>", "Comma-separated list of OAuth providers to scaffold (e.g. google,github,discord)")
+  .option("--all-providers", "Scaffold all 6 supported OAuth providers (google, github, discord, apple, microsoft, gitlab)")
   .action(async (opts) => {
     try {
       await initCommand(opts);
