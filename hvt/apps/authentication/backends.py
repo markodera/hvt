@@ -51,20 +51,16 @@ def parse_api_key_components(key: str) -> tuple[str, str, str]:
         )
 
 
-def emit_management_key_runtime_violation_audit(request, prefix: str, environment: str):
-    """Write an append-only security AuditLog entry when a management key is used on runtime routes."""
+def emit_management_key_runtime_violation_audit(request, api_key_obj: APIKey):
+    """Write an append-only security AuditLog entry when a verified management key is used on runtime routes."""
     try:
         from hvt.apps.authentication.models import AuditLog
-
-        api_key_obj = APIKey.objects.select_related("organization", "project").filter(
-            prefix=prefix, environment=environment
-        ).first()
 
         AuditLog.objects.create(
             event_type=AuditLog.EventType.SECURITY_VIOLATION,
             actor_api_key=api_key_obj,
-            organization=api_key_obj.organization if api_key_obj else None,
-            project=api_key_obj.project if api_key_obj else None,
+            organization=api_key_obj.organization,
+            project=api_key_obj.project,
             ip_address=request.META.get("REMOTE_ADDR") if request else None,
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:500] if request else "",
             success=False,
@@ -72,8 +68,8 @@ def emit_management_key_runtime_violation_audit(request, prefix: str, environmen
             event_data={
                 "path": getattr(request, "path", ""),
                 "method": getattr(request, "method", ""),
-                "key_prefix": prefix,
-                "environment": environment,
+                "key_prefix": api_key_obj.prefix,
+                "environment": api_key_obj.environment,
                 "reason": "management_key_runtime_violation",
             },
         )
@@ -106,17 +102,6 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         key_type, environment, prefix = parse_api_key_components(key)
 
-        # Plane check: management keys are rejected unless authenticator explicitly allows them
-        if key_type == "management" and not self.allow_management_keys:
-            emit_management_key_runtime_violation_audit(request, prefix, environment)
-            is_runtime = request is not None and request_targets_runtime_api_key_endpoint(request)
-            msg = (
-                "Management keys cannot be used for runtime authentication. Use a runtime client key."
-                if is_runtime
-                else "Management keys are not permitted on this endpoint."
-            )
-            raise exceptions.PermissionDenied(msg)
-
         try:
             api_key_obj = APIKey.objects.select_related("organization", "project").get(
                 prefix=prefix,
@@ -129,6 +114,19 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
         if not api_key_obj.verify_key(key):
             logger.warning(f"[APIKeyAuthentication] Hash mismatch for: {prefix}")
             raise exceptions.AuthenticationFailed("Invalid API key.")
+
+        # Plane check: verified management keys are rejected unless authenticator explicitly allows them
+        if api_key_obj.key_type == APIKey.KeyType.MANAGEMENT and not self.allow_management_keys:
+            emit_management_key_runtime_violation_audit(request, api_key_obj)
+            is_runtime = isinstance(self, RuntimeAPIKeyAuthentication) or (
+                request is not None and request_targets_runtime_api_key_endpoint(request)
+            )
+            msg = (
+                "Management keys cannot be used for runtime authentication. Use a runtime client key."
+                if is_runtime
+                else "Management keys are not permitted on this endpoint."
+            )
+            raise exceptions.PermissionDenied(msg)
 
         if api_key_obj.is_expired:
             emit_api_key_expiry_webhook(api_key_obj)
@@ -159,17 +157,6 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             )
         elif not api_key_obj.project.is_active:
             raise exceptions.AuthenticationFailed("API key project is inactive.")
-
-        # Plane check: management keys must not be used unless allow_management_keys is True
-        if api_key_obj.key_type == APIKey.KeyType.MANAGEMENT and not self.allow_management_keys:
-            emit_management_key_runtime_violation_audit(request, prefix, environment)
-            is_runtime = request is not None and request_targets_runtime_api_key_endpoint(request)
-            msg = (
-                "Management keys cannot be used for runtime authentication. Use a runtime client key."
-                if is_runtime
-                else "Management keys are not permitted on this endpoint."
-            )
-            raise exceptions.PermissionDenied(msg)
 
         # If targeting runtime route, enforce origin
         if request is not None and request_targets_runtime_api_key_endpoint(request):
@@ -204,22 +191,10 @@ class RuntimeAPIKeyAuthentication(APIKeyAuthentication):
     Dedicated authentication class for runtime client routes.
     Accepts ONLY runtime keys. Rejects management keys with 403 and writes security AuditLog.
     """
+    allow_management_keys = False
 
     def validate_key(self, key: str, request=None):
-        key_type, environment, prefix = parse_api_key_components(key)
-        if key_type == "management":
-            emit_management_key_runtime_violation_audit(request, prefix, environment)
-            raise exceptions.PermissionDenied(
-                "Management keys cannot be used for runtime authentication. Use a runtime client key."
-            )
-
-        user, api_key_obj = super().validate_key(key, request=request)
-        if api_key_obj.key_type == APIKey.KeyType.MANAGEMENT:
-            emit_management_key_runtime_violation_audit(request, prefix, environment)
-            raise exceptions.PermissionDenied(
-                "Management keys cannot be used for runtime authentication. Use a runtime client key."
-            )
-        return user, api_key_obj
+        return super().validate_key(key, request=request)
 
 
 class ManagementAPIKeyAuthentication(APIKeyAuthentication):
