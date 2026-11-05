@@ -506,3 +506,82 @@ class SchemaSyncConcurrencyAndSecurityTests(TransactionTestCase):
         res_error = client.post(self.sync_url, manifest_error, format="json")
         self.assertEqual(res_error.status_code, 400)
         self.assertNotIn(secret_value, str(res_error.data))
+
+    def test_schema_sync_requires_organization_owner_for_jwt_users(self):
+        """JWT user calling sync must be the organization owner; non-owner members are rejected with 403."""
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+
+        # Create a non-owner organization member
+        member = User.objects.create_user(
+            email="member@example.com",
+            password="StrongPassword123!",
+            organization=self.org,
+            role="member",
+        )
+        client = APIClient()
+        client.force_authenticate(user=member)
+
+        manifest = {"schema_version": 1}
+        res = client.post(self.sync_url, manifest, format="json")
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("organization owner", str(res.data))
+
+        # Create an organization owner
+        owner = User.objects.create_user(
+            email="owner@example.com",
+            password="StrongPassword123!",
+            organization=self.org,
+            role="owner",
+        )
+        client.force_authenticate(user=owner)
+        res_owner = client.post(self.sync_url, manifest, format="json")
+        self.assertEqual(res_owner.status_code, 200)
+
+    def test_sync_response_includes_project_id_and_environment(self):
+        """Verify SyncResult to_dict includes project_id and environment expected by CLI whoami."""
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        manifest = {"schema_version": 1}
+        res = client.post(f"{self.sync_url}?environment=test", manifest, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["project_id"], str(self.project.id))
+        self.assertEqual(res.data["environment"], "test")
+
+    def test_role_and_provider_field_fallbacks(self):
+        """Verify manifest supports is_default alongside is_default_signup, and is_enabled alongside is_active."""
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        manifest = {
+            "schema_version": 1,
+            "roles": [
+                {
+                    "slug": "guest",
+                    "name": "Guest",
+                    "is_default": True,
+                }
+            ],
+            "social_providers": [
+                {
+                    "provider": "google",
+                    "client_id": "google-client-fallback",
+                    "client_secret": "my-secret-fallback-123",
+                    "allowed_redirect_uris": ["http://localhost:3000/callback"],
+                    "is_enabled": False,
+                }
+            ],
+        }
+        res = client.post(self.sync_url, manifest, format="json")
+        self.assertEqual(res.status_code, 200)
+
+        # Assert role has is_default_signup=True
+        from hvt.apps.organizations.models import ProjectRole, SocialProviderConfig
+        role = ProjectRole.objects.get(project=self.project, slug="guest")
+        self.assertTrue(role.is_default_signup)
+
+        # Assert provider has is_active=False
+        provider = SocialProviderConfig.objects.get(project=self.project, provider="google")
+        self.assertFalse(provider.is_active)

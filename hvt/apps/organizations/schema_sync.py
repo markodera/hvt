@@ -81,6 +81,8 @@ class ObjectChange:
 class SyncResult:
     dry_run: bool
     status: str
+    project_id: str = ""
+    environment: str = "test"
     client_key: Optional[str] = None
     client_key_prefix: Optional[str] = None
     summary: Dict[str, int] = field(default_factory=dict)
@@ -92,6 +94,8 @@ class SyncResult:
         return {
             "dry_run": self.dry_run,
             "status": self.status,
+            "project_id": self.project_id,
+            "environment": self.environment,
             "client_key": self.client_key,
             "client_key_prefix": self.client_key_prefix,
             "summary": self.summary,
@@ -199,7 +203,7 @@ def parse_manifest_payload(payload: Any) -> SchemaManifest:
                 name=str(r.get("name", "")).strip() or str(r["slug"]).strip().lower(),
                 description=str(r.get("description", "")).strip(),
                 permissions=perms,
-                is_default_signup=bool(r.get("is_default_signup", False)),
+                is_default_signup=bool(r.get("is_default_signup") if r.get("is_default_signup") is not None else r.get("is_default", False)),
                 is_self_assignable=bool(r.get("is_self_assignable", False)),
             )
         )
@@ -215,13 +219,17 @@ def parse_manifest_payload(payload: Any) -> SchemaManifest:
         if isinstance(uris, str):
             uris = [uris]
 
+        is_act = sp.get("is_active")
+        if is_act is None:
+            is_act = sp.get("is_enabled", True)
+
         manifest.social_providers.append(
             ManifestSocialProvider(
                 provider=str(sp["provider"]).strip().lower(),
                 client_id=str(sp["client_id"]).strip(),
                 client_secret=str(sp["client_secret"]).strip() if sp.get("client_secret") else None,
                 allowed_redirect_uris=[str(u).strip() for u in uris if str(u).strip()],
-                is_active=bool(sp.get("is_active", True)),
+                is_active=bool(is_act),
             )
         )
 
@@ -633,6 +641,8 @@ class SchemaSyncService:
         return SyncResult(
             dry_run=dry_run,
             status="planned" if dry_run else "applied",
+            project_id=str(project.id),
+            environment=environment,
             client_key=client_key,
             client_key_prefix=client_key_prefix,
             summary=summary,
