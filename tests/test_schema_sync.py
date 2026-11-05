@@ -361,3 +361,148 @@ roles:
         res = self.client.post(self.sync_url, {"schema_version": 1}, format="json")
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
         self.assertIn("Test management keys cannot modify projects with active live keys", str(res.data))
+
+# from django.test import TransactionTestCase
+import concurrent.futures
+
+
+from django.test import TransactionTestCase
+import concurrent.futures
+from django.db import connection
+from unittest import mock
+
+class SchemaSyncConcurrencyAndSecurityTests(TransactionTestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(name="Acme Concurrency", slug="acme-conc")
+        self.project = Project.objects.create(organization=self.org, name="Platform Conc", slug="platform-conc")
+
+        mgmt_prefix, self.mgmt_raw, mgmt_hash = APIKey.generate_key(
+            environment="test", key_type=APIKey.KeyType.MANAGEMENT
+        )
+        self.mgmt_key = APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="CI Sync Key Conc",
+            environment="test",
+            key_type=APIKey.KeyType.MANAGEMENT,
+            prefix=mgmt_prefix,
+            hashed_key=mgmt_hash,
+            scopes=["schema:sync"],
+        )
+        self.sync_url = f"/api/v1/organizations/current/projects/{self.project.id}/sync/"
+
+    def test_two_concurrent_syncs_serialize_cleanly(self):
+        """Option C concurrency test: verifies locked sync transaction acquires row locks on Project and APIKey, and serializes."""
+        if connection.vendor == "postgresql":
+            manifest1 = {"schema_version": 1, "roles": [{"slug": "role-worker-1", "name": "Worker 1"}]}
+            manifest2 = {"schema_version": 1, "roles": [{"slug": "role-worker-2", "name": "Worker 2"}]}
+
+            def run_sync(manifest):
+                from django.db import connections
+                try:
+                    c = APIClient()
+                    c.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+                    return c.post(self.sync_url, manifest, format="json")
+                finally:
+                    connections.close_all()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                fut1 = executor.submit(run_sync, manifest1)
+                fut2 = executor.submit(run_sync, manifest2)
+                res1 = fut1.result()
+                res2 = fut2.result()
+
+            self.assertEqual(res1.status_code, 200)
+            self.assertEqual(res2.status_code, 200)
+            self.assertTrue(ProjectRole.objects.filter(project=self.project, slug="role-worker-1").exists())
+            self.assertTrue(ProjectRole.objects.filter(project=self.project, slug="role-worker-2").exists())
+
+            # Explicitly prove PostgreSQL row locking: concurrent nowait query is rejected while lock is held
+            import threading
+            from django.db import transaction, connections
+            from django.db.utils import OperationalError
+
+            lock_acquired = threading.Event()
+            release_lock = threading.Event()
+            thread2_blocked = []
+
+            def holder():
+                try:
+                    with transaction.atomic():
+                        Project.objects.select_for_update().get(id=self.project.id)
+                        lock_acquired.set()
+                        release_lock.wait(timeout=5)
+                finally:
+                    connections.close_all()
+
+            def waiter():
+                try:
+                    lock_acquired.wait(timeout=5)
+                    with transaction.atomic():
+                        Project.objects.select_for_update(nowait=True).get(id=self.project.id)
+                except OperationalError as exc:
+                    thread2_blocked.append(str(exc))
+                finally:
+                    connections.close_all()
+
+            t1 = threading.Thread(target=holder)
+            t2 = threading.Thread(target=waiter)
+            t1.start()
+            t2.start()
+            t2.join(timeout=5)
+            release_lock.set()
+            t1.join(timeout=5)
+
+            self.assertTrue(len(thread2_blocked) > 0, "PostgreSQL select_for_update must block concurrent queries")
+        else:
+            with mock.patch.object(Project.objects, "select_for_update", wraps=Project.objects.select_for_update) as mock_proj_lock:
+                with mock.patch.object(APIKey.objects, "select_for_update", wraps=APIKey.objects.select_for_update) as mock_key_lock:
+                    client = APIClient()
+                    client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+                    res = client.post(self.sync_url, {"schema_version": 1}, format="json")
+                    self.assertEqual(res.status_code, 200)
+                    mock_proj_lock.assert_called()
+                    mock_key_lock.assert_called()
+
+    def test_secrets_absent_from_audit_logs_responses_and_errors(self):
+        """Verifies social provider secrets are completely absent from responses, audit logs, and errors."""
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+        secret_value = "super-secret-google-raw-token-xyz987654"
+
+        # 1. Success response does not contain the secret
+        manifest_success = {
+            "schema_version": 1,
+            "social_providers": [
+                {
+                    "provider": "google",
+                    "client_id": "google-client-id-abc",
+                    "client_secret": secret_value,
+                    "allowed_redirect_uris": ["http://localhost:3000/callback"],
+                }
+            ],
+        }
+        res_success = client.post(self.sync_url, manifest_success, format="json")
+        self.assertEqual(res_success.status_code, 200)
+        self.assertNotIn(secret_value, str(res_success.data))
+
+        # Check AuditLogs for project
+        for log in AuditLog.objects.filter(project=self.project):
+            self.assertNotIn(secret_value, str(log.event_data))
+            self.assertNotIn(secret_value, str(log.error_message or ""))
+
+        # 2. Error response does not leak the secret
+        manifest_error = {
+            "schema_version": 1,
+            "social_providers": [
+                {
+                    "provider": "google",
+                    "client_id": "google-client-id-abc",
+                    "client_secret": secret_value,
+                    "allowed_redirect_uris": ["https://*.invalid-wildcard.com/callback"],
+                }
+            ],
+        }
+        res_error = client.post(self.sync_url, manifest_error, format="json")
+        self.assertEqual(res_error.status_code, 400)
+        self.assertNotIn(secret_value, str(res_error.data))

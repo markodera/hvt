@@ -102,3 +102,45 @@ class ManagedByAndProtectedRoleTests(TestCase):
         # Attempting to delete the role while user is assigned must raise ProtectedError
         with self.assertRaises(models.ProtectedError):
             role.delete()
+
+    def test_migration_0024_encrypt_existing_plaintext_secrets(self):
+        import importlib
+        from django.db import connection
+        from django.apps import apps
+        mig = importlib.import_module("hvt.apps.organizations.migrations.0024_encrypt_existing_social_provider_secrets")
+        encrypt_existing_secrets = mig.encrypt_existing_secrets
+
+        social = SocialProviderConfig.objects.create(
+            project=self.project,
+            provider=SocialProviderConfig.Provider.GITHUB,
+            client_id="github-app-id",
+            client_secret="initial-secret",
+        )
+        table = SocialProviderConfig._meta.db_table
+        pk_val = social.id.hex if hasattr(social.id, "hex") else str(social.id)
+        # Directly insert plaintext in the DB column simulating pre-0024 release state
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {table} SET client_secret = %s WHERE id = %s",
+                ["unencrypted-pre-release-plaintext-secret", pk_val],
+            )
+        # Verify it is raw plaintext in the DB
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT client_secret FROM {table} WHERE id = %s", [pk_val])
+            raw_val = cursor.fetchone()[0]
+        self.assertEqual(raw_val, "unencrypted-pre-release-plaintext-secret")
+        self.assertFalse(raw_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
+        # Run migration 0024
+        encrypt_existing_secrets(apps, None)
+
+        # DB column must now be encrypted with v1:
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT client_secret FROM {table} WHERE id = %s", [pk_val])
+            enc_val = cursor.fetchone()[0]
+        self.assertTrue(enc_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
+        # Model field must transparently decrypt back to original plaintext
+        social.refresh_from_db()
+        self.assertEqual(social.client_secret, "unencrypted-pre-release-plaintext-secret")
+

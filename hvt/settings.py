@@ -281,6 +281,13 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Fast password hashing for tests only
+if "test" in sys.argv or any("test" in arg for arg in sys.argv):
+    PASSWORD_HASHERS = [
+        "django.contrib.auth.hashers.MD5PasswordHasher",
+    ]
+
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
