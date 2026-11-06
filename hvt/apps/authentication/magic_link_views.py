@@ -3,8 +3,10 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.core import signing
 from django.db import transaction
 from django.utils import timezone
+import pyotp
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiResponse
@@ -14,7 +16,7 @@ from hvt.apps.authentication.identity import (
     get_control_plane_users_by_email,
     get_runtime_user_for_api_key,
 )
-from hvt.apps.authentication.models import AuditLog, MagicLinkToken
+from hvt.apps.authentication.models import AuditLog, MagicLinkToken, TOTPDevice
 from hvt.apps.authentication.tokens import build_hvt_token_pair
 from hvt.apps.authentication.views import (
     CONTROL_PLANE_LOGIN_THROTTLES,
@@ -144,6 +146,46 @@ class MagicLinkVerifyView(views.APIView):
             record.save(update_fields=["is_used"])
 
         user = record.user
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    success=False,
+                    error_message="Invalid 2FA code during magic link verification",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                event_data={"email": user.email, "method": "totp"},
+            )
+
         access_token, refresh_token = build_hvt_token_pair(user)
 
         AuditLog.log(
@@ -282,6 +324,48 @@ class RuntimeMagicLinkVerifyView(views.APIView):
             record.save(update_fields=["is_used"])
 
         user = record.user
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "project_id": str(project.id), "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    project=project,
+                    success=False,
+                    error_message="Invalid 2FA code during runtime magic link verification",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                project=project,
+                event_data={"email": user.email, "method": "totp", "project_id": str(project.id)},
+            )
+
         access_token, refresh_token = build_hvt_token_pair(user, project=project)
 
         AuditLog.log(

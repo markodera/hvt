@@ -561,9 +561,22 @@ class SchemaSyncService:
                     .exclude(provider__in=declared_providers)
                 )
                 for candidate in configs_to_prune:
-                    # Safety check: block prune if end users are linked to this provider
+                    # Safety check: block prune if end users or project-accessible legacy users are linked to this provider
+                    linked_users_filter = (
+                        models.Q(user__project_id=locked_project.id)
+                        | (
+                            models.Q(
+                                user__project_id__isnull=True,
+                                user__organization_id=locked_project.organization_id,
+                            )
+                            & (
+                                models.Q(user__project_role_assignments__role__project=locked_project)
+                                | models.Q(user__role="member")
+                            )
+                        )
+                    )
                     if SocialAccount.objects.filter(
-                        user__project_id=locked_project.id, provider=candidate.provider
+                        linked_users_filter, provider=candidate.provider
                     ).exists():
                         raise DRFValidationError(
                             f"Cannot prune social provider '{candidate.provider}': active user social accounts are linked to it."

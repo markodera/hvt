@@ -195,4 +195,14 @@ class ManagedByAndProtectedRoleTests(TestCase):
         device.refresh_from_db()
         self.assertEqual(device.secret, "LEGACYPLAINTEXTSEED123")
 
+        # 3. Test migration rollback (decrypt_existing_totp_secrets)
+        decrypt_existing_totp_secrets = mig.decrypt_existing_totp_secrets
+        decrypt_existing_totp_secrets(apps, None)
+
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT secret FROM {table} WHERE id = %s", [pk_val])
+            dec_db_val = cursor.fetchone()[0]
+        self.assertEqual(dec_db_val, "LEGACYPLAINTEXTSEED123")
+        self.assertFalse(dec_db_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
 

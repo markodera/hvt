@@ -18,6 +18,8 @@ from hvt.apps.users.models import User
 
 class PasskeysAndMagicLinksTestCase(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.client = APIClient()
         self.org = Organization.objects.create(name="Acme Corp", slug="acme")
         self.project = Project.objects.create(
@@ -242,3 +244,63 @@ class PasskeysAndMagicLinksTestCase(TestCase):
 
         magic_req = rf.options("/api/v1/auth/runtime/magic-link/request/")
         self.assertTrue(request_targets_runtime_public_endpoint(magic_req))
+
+    def test_magic_link_verify_requires_totp_when_enabled(self):
+        """When user has confirmed TOTP, magic link verification gates on MFA before issuing tokens."""
+        import pyotp
+        from hvt.apps.authentication.models import TOTPDevice
+        from hvt.apps.authentication.magic_link_views import _create_magic_link_token
+
+        secret = pyotp.random_base32()
+        TOTPDevice.objects.create(user=self.user, secret=secret, is_confirmed=True)
+
+        token = _create_magic_link_token(self.user)
+        # Attempt verify without MFA code
+        res = self.client.post("/api/v1/auth/magic-link/verify/", {"token": token})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(res.data.get("mfa_required"))
+        self.assertIn("mfa_token", res.data)
+        self.assertNotIn("access", res.data)
+
+        # Complete login using the MFA token at TOTPLoginView
+        totp = pyotp.TOTP(secret)
+        code = totp.now()
+        login_res = self.client.post("/api/v1/auth/mfa/totp/login/", {
+            "mfa_token": res.data["mfa_token"],
+            "code": code,
+        })
+        self.assertEqual(login_res.status_code, status.HTTP_200_OK)
+        self.assertIn("access", login_res.data)
+        self.assertIn("refresh", login_res.data)
+
+    def test_runtime_magic_link_verify_requires_totp_when_enabled(self):
+        """When runtime user has confirmed TOTP, runtime magic link verification gates on MFA."""
+        import pyotp
+        from hvt.apps.authentication.models import TOTPDevice
+        from hvt.apps.authentication.magic_link_views import _create_magic_link_token
+
+        secret = pyotp.random_base32()
+        TOTPDevice.objects.create(user=self.runtime_user, secret=secret, is_confirmed=True)
+
+        token = _create_magic_link_token(self.runtime_user, project=self.project)
+        # Attempt verify without MFA code
+        res = self.client.post(
+            "/api/v1/auth/runtime/magic-link/verify/",
+            {"token": token},
+            HTTP_X_API_KEY=self.raw_api_key,
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(res.data.get("mfa_required"))
+        self.assertIn("mfa_token", res.data)
+        self.assertNotIn("access", res.data)
+
+        # Complete runtime login with code
+        totp = pyotp.TOTP(secret)
+        code = totp.now()
+        login_res = self.client.post("/api/v1/auth/mfa/totp/login/", {
+            "mfa_token": res.data["mfa_token"],
+            "code": code,
+        })
+        self.assertEqual(login_res.status_code, status.HTTP_200_OK)
+        self.assertIn("access", login_res.data)
+        self.assertIn("refresh", login_res.data)

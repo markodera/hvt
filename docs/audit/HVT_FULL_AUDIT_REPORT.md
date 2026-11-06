@@ -1,15 +1,15 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `1315c8ff3e8ddc9355dbb6d1dd7c9ebc56706840`  
-> **Last Synchronized:** `2026-11-06 16:30:37 UTC`  
+> **Latest Commit:** `179c40a62f743582b068e8f19daad09ca9e9c87c`  
+> **Last Synchronized:** `2026-11-06 21:03:31 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 16,792 words (138,285 characters)  
+> **Total Volume:** 16,818 words (138,522 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
-| 01 | 00 Summary | 1,804 words | [00-summary.md](#00-summary) |
+| 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
 | 02 | 01 Architecture And Data | 2,678 words | [01-architecture-and-data.md](#01-architecture-and-data) |
 | 03 | 02 Features And Endpoints | 2,581 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 1,268 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
@@ -18,8 +18,8 @@
 | 07 | 06 Testing Ops Quality | 1,219 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
-| 10 | 09 Fe2Proposal Audit | 1,383 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **16,792 words** | |
+| 10 | 09 Fe2Proposal Audit | 1,392 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
+| | **TOTAL** | **16,818 words** | |
 
 ---
 
@@ -60,7 +60,7 @@ This report reflects code-verified reality extracted from direct source inspecti
 | **2** | **Full SSRF Vector via Custom Webhook Deliveries**<br>The webhook creation endpoint accepts arbitrary URLs with zero IP/hostname blocklisting (e.g., internal subnets, loopback `127.0.0.1`, AWS metadata `169.254.169.254`). Outbound dispatch synchronously calls `requests.post(webhook.url, ...)` and stores the response status, response headers, and the first 5,000 characters of the response body in `WebhookDelivery`, which is returned via the REST API to the org owner. | Critical Security Vulnerability | [VERIFIED hvt/apps/organizations/webhooks.py:85-94], [VERIFIED hvt/api/v1/serializers/organizations.py:580-610] |
 | **3** | **Symmetric HS256 Token Bottleneck & No JWKS**<br>All JWTs are signed with symmetric `HS256` using Django's single root `SECRET_KEY`. No public-key endpoint (`/.well-known/jwks.json`) exists. Downstream customer backend services cannot verify tokens locally without possessing HVT's master secret, forcing all microservices to call HVT over the network. | Architectural Blocker | [VERIFIED hvt/settings.py:434-441], [VERIFIED hvt/apps/authentication/tokens.py:19-37] |
 | **4** | **Social OAuth Auto-Linking Account Takeover (ATO) Risk**<br>When a social OAuth callback arrives, `pre_social_login` queries users by email and automatically attaches the social identity to an existing account. If the provider did not verify the email (or if the email attribute falls back to unverified profile data), an attacker registering that email on an external OAuth provider can hijack an existing victim account. | High Security Risk | [VERIFIED hvt/apps/authentication/adapters.py:260-267, 312-340] |
-| **5** | **Plaintext TOTP Secrets & Missing Backup Codes**<br>TOTP secrets are stored in plaintext in the database (`auth_totp_devices.secret` as `VARCHAR(64)`), completely unencrypted and unhashed. Furthermore, backup recovery codes are completely unimplemented across the codebase; a user who loses their phone is permanently locked out. | Security & Usability Defect | [VERIFIED hvt/apps/authentication/models.py:273], [VERIFIED hvt/apps/authentication/totp_views.py:42-46] |
+| **5** | **Missing TOTP Backup Codes (Secrets Encrypted via MultiFernet)**<br>While TOTP secrets are now securely encrypted at rest via MultiFernet (`TOTPDevice.secret` as `EncryptedTextField` with `v1:` version prefix and migration `0014`), backup recovery codes remain completely unimplemented across the codebase. A user who loses their 2FA device has no self-serve recovery option and is permanently locked out without operator intervention. | Usability & Security Risk | [VERIFIED hvt/apps/authentication/models.py:274], [VERIFIED hvt/apps/authentication/totp_views.py:42-46], [VERIFIED tests/test_crypto.py:148-208] |
 | **6** | **Two-Plane Separation Is Strictly Enforced in Code**<br>Runtime endpoints (`/api/v1/auth/runtime/*`) strictly reject management keys (`hvt_mgmt_*`) with HTTP 403 and automatically append a `security.violation` record to `AuditLog`. Conversely, runtime client keys (`hvt_test_*`) cannot access management or schema provisioning routes. | Architecture Strength | [VERIFIED tests/test_plane_separation_and_auth.py:25-90], [RAN live test -> HTTP 403 + AuditLog recorded] |
 | **7** | **Option C Concurrency Lock & Live Project Safety Verified**<br>Test management keys are cryptographically prevented from synchronizing or mutating any project that has active live keys, avoiding development-stage pollution of production authorization states. | Architecture Strength | [VERIFIED hvt/apps/organizations/schema_sync.py:346-385], [VERIFIED tests/test_schema_sync.py:346-363] |
 | **8** | **Registration User Creation vs. Email Send Atomic Decoupling (RESOLVED)**<br>Previously, `HVTRegisterView` created the `User` before email dispatch, leaving unverified zombie users on provider failure. The view is now wrapped in `transaction.atomic()`, ensuring atomic rollback of User, Organization, and Project if email delivery fails. | Resolved UX Defect | [VERIFIED hvt/apps/authentication/views.py:829-840], [VERIFIED hvt.apps.organizations.tests_onboarding] |
@@ -1392,7 +1392,7 @@ flowchart TD
 | Step # | Roadmap Milestone | Codebase Prerequisites & Blockers | Feasibility | Technical Risk Level |
 | :---: | :--- | :--- | :---: | :---: |
 | **Step 1** | **v0.2.0 Preview Release** | Baseline completed. | **100% Shipped** | None |
-| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), encrypt TOTP secrets, add backup codes model, and inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`. (`HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
+| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), add backup codes model, and inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`. (TOTP secret encryption at rest via MultiFernet is **SHIPPED** [VERIFIED `models.py:274`, `tests/test_crypto.py`]; `HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
 | **Step 3** | **Copy AI Setup Prompt & Onboarding Journey** | Fully implemented: `POST /setup-prompt/` with Option C live-key lock, `GET /onboarding/` live checklist polling, `OnboardingQuickstart.jsx` mounted in `DashboardHome.jsx`, and atomic auto-provisioning (39 actions across 8 screens reduced to 4 actions across 2 screens). | **100% Shipped** | None |
 | **Step 4** | **Token Groundwork & JWKS** | Requires replacing SimpleJWT symmetric HS256 with asymmetric RS256/EdDSA signing, deploying public JWKS view, and writing verification helpers in `hvt-sdk`. | **High** (~2 weeks) | **Medium** (Key rotation ceremony complexity) |
 | **Step 5** | **Per-Project Passkey Origins** | Currently `rp_id` derives from HTTP `request.get_host()`. Needs project-level domain configuration and origin matching in `passkey_views.py`. | **High** (~1 week) | **Low** |
