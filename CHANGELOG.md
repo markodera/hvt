@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **Invitation Token Hashing at Rest (SHA-256):**
+  - Stored organization and runtime invitation tokens as SHA-256 hashes at rest in the database.
+  - Exposed raw tokens strictly once upon creation in the response payload or email dispatch URL; subsequent list and retrieval operations do not disclose raw tokens.
+  - Looked up and accepted invitations by matching the SHA-256 hash of incoming raw tokens.
+  - Added data migration `0026_hash_existing_invitation_tokens` to hash all existing pending invitations so active invite links remain valid.
+  - Hardened invitation resending to regenerate a new raw token, update the database hash, and invalidate previous links.
+  - Added automated test suite `tests/test_invitation_hashing.py`.
 - **Anti-User Enumeration Hardening:**
   - Standardized registration endpoints (`/api/v1/auth/register/` and `/api/v1/auth/runtime/register/`) to return identical HTTP 201 Created and verification detail payload regardless of whether an account already exists or is verified; dispatched an "account already exists" notification email on duplicate registration instead of an error.
   - Standardized login endpoints (`/api/v1/auth/login/` and `/api/v1/auth/runtime/login/`) to return identical HTTP 400 Bad Request responses for nonexistent accounts, invalid passwords, unverified accounts, and tenant mismatches.

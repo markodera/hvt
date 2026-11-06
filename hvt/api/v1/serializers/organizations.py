@@ -790,9 +790,12 @@ class OrganizationInvitationCreateSerializer(serializers.ModelSerializer):
             invitation.app_roles.set(app_roles)
         return invitation
 
-    @extend_schema_field(serializers.URLField())
-    def get_accept_url(self, obj) -> str:
-        return f"{settings.FRONTEND_URL}/invite?token={obj.token}"
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_accept_url(self, obj) -> str | None:
+        raw = getattr(obj, "raw_token", None)
+        if raw:
+            return f"{settings.FRONTEND_URL}/invite?token={raw}"
+        return None
 
 
 class OrganizationInvitationSerializer(serializers.ModelSerializer):
@@ -836,9 +839,12 @@ class OrganizationInvitationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    @extend_schema_field(serializers.URLField())
-    def get_accept_url(self, obj) -> str:
-        return f"{settings.FRONTEND_URL}/invite?token={obj.token}"
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_accept_url(self, obj) -> str | None:
+        raw = getattr(obj, "raw_token", None)
+        if raw:
+            return f"{settings.FRONTEND_URL}/invite?token={raw}"
+        return None
 
 
 class OrganizationInvitationPublicSerializer(serializers.ModelSerializer):
@@ -921,6 +927,11 @@ class RuntimeInvitationCreateSerializer(serializers.Serializer):
 class RuntimeInvitationSerializer(serializers.ModelSerializer):
     project = serializers.UUIDField(source="project_id", read_only=True)
     project_slug = serializers.CharField(source="project.slug", read_only=True)
+    raw_token = serializers.SerializerMethodField(read_only=True)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_raw_token(self, obj) -> str | None:
+        return getattr(obj, "raw_token", None)
 
     class Meta:
         model = RuntimeInvitation
@@ -930,6 +941,7 @@ class RuntimeInvitationSerializer(serializers.ModelSerializer):
             "project_slug",
             "email",
             "role_slugs",
+            "raw_token",
             "status",
             "expires_at",
             "accepted_at",

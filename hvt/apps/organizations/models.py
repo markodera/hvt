@@ -776,7 +776,9 @@ class OrganizationInvitation(models.Model):
     def save(self, *args, **kwargs):
         self.email = (self.email or "").strip().lower()
         if not self.token:
-            self.token = secrets.token_hex(32)
+            raw = secrets.token_hex(32)
+            self.raw_token = raw
+            self.token = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -846,7 +848,9 @@ class RuntimeInvitation(models.Model):
     def save(self, *args, **kwargs):
         self.email = (self.email or "").strip().lower()
         if not self.token:
-            self.token = secrets.token_urlsafe(48)
+            raw = secrets.token_urlsafe(48)
+            self.raw_token = raw
+            self.token = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         self.full_clean()
         return super().save(*args, **kwargs)
 
