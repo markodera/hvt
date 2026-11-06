@@ -8,10 +8,13 @@ import { interpolateSchema } from "./interpolate.js";
 
 export const DEFAULT_API_URL = "https://api.hvts.app";
 
-export interface ResolvedConfig {
+export interface BaseResolvedConfig {
   apiUrl: string;
   projectId: string;
   managementKey: string;
+}
+
+export interface ResolvedConfig extends BaseResolvedConfig {
   schemaPath: string;
   schemaFormat: "json" | "yaml";
   rawManifest: HVTManifest;
@@ -105,7 +108,24 @@ export function resolveConfig(options: {
   key?: string;
   schema?: string;
   cwd?: string;
-}): ResolvedConfig {
+  requireSchema: false;
+}): BaseResolvedConfig;
+export function resolveConfig(options?: {
+  apiUrl?: string;
+  projectId?: string;
+  key?: string;
+  schema?: string;
+  cwd?: string;
+  requireSchema?: true;
+}): ResolvedConfig;
+export function resolveConfig(options: {
+  apiUrl?: string;
+  projectId?: string;
+  key?: string;
+  schema?: string;
+  cwd?: string;
+  requireSchema?: boolean;
+} = {}): ResolvedConfig | BaseResolvedConfig {
   const cwd = options.cwd || process.cwd();
   loadEnvFiles(cwd);
 
@@ -125,6 +145,14 @@ export function resolveConfig(options: {
       "Provide it via --key <key>, HVT_MANAGEMENT_KEY environment variable, or in .env.\n" +
       "Expected format: hvt_mgmt_test_... or hvt_mgmt_live_..."
     );
+  }
+
+  if (options.requireSchema === false) {
+    return {
+      apiUrl,
+      projectId,
+      managementKey,
+    };
   }
 
   const { path: schemaPath, format: schemaFormat } = findSchemaFile(cwd, options.schema);

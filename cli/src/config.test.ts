@@ -4,7 +4,7 @@ import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { parseManifestContent, writeClientKeyToEnvLocal } from "./config.js";
+import { parseManifestContent, writeClientKeyToEnvLocal, resolveConfig } from "./config.js";
 import { buildStarterSchema, SUPPORTED_PROVIDERS } from "./commands/init.js";
 
 describe("CLI Config & Manifest Parser", () => {
@@ -103,6 +103,23 @@ roles:
       assert.strictEqual(warningLogged, true);
     } finally {
       console.warn = origWarn;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows resolveConfig without schema when requireSchema is false", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hvt-cli-whoami-"));
+    try {
+      const cfg = resolveConfig({
+        cwd: tmpDir,
+        apiUrl: "http://localhost:8000",
+        projectId: "proj_test_123",
+        key: "hvt_mgmt_test_validkey",
+        requireSchema: false,
+      });
+      assert.strictEqual(cfg.projectId, "proj_test_123");
+      assert.strictEqual(cfg.managementKey, "hvt_mgmt_test_validkey");
+    } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

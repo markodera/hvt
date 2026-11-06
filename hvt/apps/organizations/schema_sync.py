@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 import yaml
 from allauth.socialaccount.models import SocialAccount
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
@@ -593,29 +594,39 @@ class SchemaSyncService:
 
             if not dry_run:
                 if active_runtime_key is None or issue_client_key:
-                    prefix, raw_key, hashed_key = APIKey.generate_key(
-                        environment=environment, key_type=APIKey.KeyType.RUNTIME
-                    )
-                    APIKey.objects.create(
-                        organization=locked_project.organization,
-                        project=locked_project,
-                        name=f"Auto-generated Client Key ({environment})",
-                        environment=environment,
-                        key_type=APIKey.KeyType.RUNTIME,
-                        prefix=prefix,
-                        hashed_key=hashed_key,
-                        scopes=["auth:runtime"],
-                    )
-                    client_key = raw_key
-                    client_key_prefix = prefix
-                    changes.append(
-                        ObjectChange(
-                            action="minted",
-                            object_type="api_key",
-                            slug=prefix,
-                            details={"environment": environment},
+                    max_keys = int(getattr(settings, "API_KEY_MAX_PER_PROJECT", 25) or 25)
+                    if max_keys > 0 and APIKey.objects.filter(project=locked_project).count() >= max_keys:
+                        if active_runtime_key is not None:
+                            client_key = None
+                            client_key_prefix = active_runtime_key.prefix
+                        else:
+                            raise DRFValidationError(
+                                {"detail": f"This project has reached the API key limit of {max_keys}."}
+                            )
+                    else:
+                        prefix, raw_key, hashed_key = APIKey.generate_key(
+                            environment=environment, key_type=APIKey.KeyType.RUNTIME
                         )
-                    )
+                        APIKey.objects.create(
+                            organization=locked_project.organization,
+                            project=locked_project,
+                            name=f"Auto-generated Client Key ({environment})",
+                            environment=environment,
+                            key_type=APIKey.KeyType.RUNTIME,
+                            prefix=prefix,
+                            hashed_key=hashed_key,
+                            scopes=["auth:runtime"],
+                        )
+                        client_key = raw_key
+                        client_key_prefix = prefix
+                        changes.append(
+                            ObjectChange(
+                                action="minted",
+                                object_type="api_key",
+                                slug=prefix,
+                                details={"environment": environment},
+                            )
+                        )
                 else:
                     client_key = None
                     client_key_prefix = active_runtime_key.prefix

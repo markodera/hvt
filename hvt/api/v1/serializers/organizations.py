@@ -422,7 +422,21 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
         key_type = attrs.get("key_type", getattr(self.instance, "key_type", APIKey.KeyType.RUNTIME))
         scopes = set(attrs.get("scopes", []))
         if key_type == APIKey.KeyType.RUNTIME:
-            prohibited = scopes.intersection({"schema:sync", "schema:plan", "api_keys:write"})
+            prohibited_wildcards = {
+                "*", "read", "write", "api_keys:*", "schema:*", "roles:*",
+                "permissions:*", "providers:*", "organization:*", "org:*",
+                "users:*", "webhooks:*", "audit_logs:*"
+            }
+            found_wildcards = scopes.intersection(prohibited_wildcards)
+            if found_wildcards:
+                raise serializers.ValidationError({
+                    "scopes": [f"Runtime client keys cannot carry wildcard or management scopes: {sorted(found_wildcards)}"]
+                })
+            prohibited = scopes.intersection({
+                "schema:sync", "schema:plan", "api_keys:write", "api_keys:read",
+                "roles:write", "permissions:write", "providers:write",
+                "organization:write", "webhooks:write", "users:read", "users:write", "audit_logs:read"
+            })
             if prohibited:
                 raise serializers.ValidationError({
                     "scopes": [f"Runtime client keys cannot carry provisioning or key-management scopes: {sorted(prohibited)}"]

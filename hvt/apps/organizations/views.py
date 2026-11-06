@@ -2449,6 +2449,10 @@ class ProjectSchemaSyncView(APIView):
                 is_active=True,
             )
             environment = request.query_params.get("environment", "test")
+            if environment not in (APIKey.Environment.TEST, APIKey.Environment.LIVE):
+                raise serializers.ValidationError(
+                    {"environment": f"Invalid environment '{environment}'. Expected '{APIKey.Environment.TEST}' or '{APIKey.Environment.LIVE}'."}
+                )
             actor_api_key = None
 
         raw_body = request.data

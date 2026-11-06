@@ -89,11 +89,11 @@ ALLOWED_HOSTS = _env_list(
     else ""
 )
 
-if "testserver" not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append("testserver")
-
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be configured when DEBUG is false.")
+
+if (DEBUG or TESTING) and "testserver" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("testserver")
 
 default_frontend_origins = []
 if DEBUG:
@@ -190,6 +190,8 @@ if not _db_default:
             f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
             f"/{os.getenv('DB_NAME', '')}"
         )
+    elif not DEBUG and not TESTING:
+        raise ImproperlyConfigured("DATABASE_URL or DB_NAME must be configured when DEBUG is false.")
     else:
         _db_default = f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
 

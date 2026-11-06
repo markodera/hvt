@@ -117,7 +117,7 @@ class InvitationHashingTests(APITestCase):
         # 5. Acceptance with raw token succeeds
         invitee = User.objects.create_user(
             email="newmember@invitest.com",
-            password="NewMemberPass123!@",
+            password=secrets.token_hex(16),
         )
         self.client.force_authenticate(user=invitee)
         accept_resp = self.client.post(

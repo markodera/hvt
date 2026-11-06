@@ -589,7 +589,22 @@ class APIKey(models.Model):
         super().clean()
         normalized = self.normalized_scopes()
         if self.key_type == self.KeyType.RUNTIME:
-            prohibited = normalized.intersection({"schema:sync", "schema:plan", "api_keys:write"})
+            prohibited_wildcards = {
+                "*", "read", "write", "api_keys:*", "schema:*", "roles:*",
+                "permissions:*", "providers:*", "organization:*", "org:*",
+                "users:*", "webhooks:*", "audit_logs:*"
+            }
+            raw_scopes = set(self.scopes or [])
+            found_wildcards = raw_scopes.intersection(prohibited_wildcards)
+            if found_wildcards:
+                raise ValidationError(
+                    f"Runtime client keys cannot carry wildcard or management scopes: {sorted(found_wildcards)}"
+                )
+            prohibited = normalized.intersection({
+                "schema:sync", "schema:plan", "api_keys:write", "api_keys:read",
+                "roles:write", "permissions:write", "providers:write",
+                "organization:write", "webhooks:write", "users:read", "users:write", "audit_logs:read"
+            })
             if prohibited:
                 raise ValidationError(
                     f"Runtime client keys cannot carry provisioning or key-management scopes: {sorted(prohibited)}"
