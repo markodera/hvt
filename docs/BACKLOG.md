@@ -1,10 +1,10 @@
 # HVT Backlog & Architectural Decisions
 
-This document tracks pending architectural decisions, technical debt remediations, and developer experience enhancements from **`fe2proposal.md` v1.2**, alongside deferred enterprise capabilities.
+This document tracks pending architectural decisions, technical debt remediations, and developer experience enhancements from **`fe2proposal.md` v1.3**, alongside deferred enterprise capabilities.
 
 ---
 
-## 1. Architectural Decisions Needed (`fe2proposal.md` v1.2)
+## 1. Architectural Decisions Needed (`fe2proposal.md` v1.3)
 
 * [ ] **Worker Choice:** Decide between a database outbox pattern with a lightweight worker management command (`python manage.py run_worker`) vs a traditional Celery + Redis worker cluster.
 * [ ] **Signing Key Storage:** Decide whether asymmetric private signing keys are stored in environment variables, a Multi-Fernet encrypted database table, or an external cloud KMS (AWS KMS / HashiCorp Vault).
@@ -28,8 +28,24 @@ This document tracks pending architectural decisions, technical debt remediation
 
 ## 3. Deferred Enterprise & Out-of-Scope Items
 
-* **Enterprise SSO & Identity Federation:** SAML 2.0 (Okta, Azure AD / Entra ID, PingIdentity) and SCIM 2.0 automated employee directory synchronization.
-* **Advanced Multi-Tenancy & Governance:** Tenant deletion lifecycles, soft-delete cascades, and dynamic role permissions matrices.
-* **Custom Domains & Infrastructure Automation:** Automated Let's Encrypt / Cloudflare SSL certificate provisioning for vanity domains (`auth.customer.com`).
-* **Monetization & Billing:** Stripe / LemonSqueezy subscription integration, MAU quotas, and metered API limits.
-* **Security & Compliance Operations:** SIEM audit log streaming (AWS S3, Datadog, Splunk) and webhook replay simulators.
+This section captures features intentionally deferred or kept out of scope from the streamlined **Onboarding Journey Pass** (which is strictly bounded from **sign-up to first successful runtime login**):
+
+* **Enterprise SSO & Identity Federation:**
+  - SAML 2.0 (Okta, Azure AD / Entra ID, PingIdentity) identity provider connections.
+  - SCIM 2.0 automated employee directory synchronization.
+  - Custom domain enterprise identity broker endpoints.
+* **Advanced Multi-Tenancy & Governance:**
+  - Multi-organization switcher and tenant context selector.
+  - Tenant deletion lifecycles, soft-delete cascades, and data purging.
+  - Dynamic role permissions matrices and fine-grained ACL editors.
+  - Team seat allocation, member invite policies, and expiration rules.
+* **Custom Domains & Infrastructure Automation:**
+  - Automated Let's Encrypt / Cloudflare SSL certificate provisioning for vanity domains (`auth.customer.com`).
+  - Multi-region runtime data routing and geo-distributed read replicas.
+* **Monetization & Billing:**
+  - Stripe / LemonSqueezy subscription integration and invoice portal.
+  - Usage-based billing (MAUs, active passkeys) and metered API rate limit tiers.
+* **Security & Compliance Operations:**
+  - External SIEM audit log streaming (AWS S3, Datadog, Splunk, Google Cloud Storage).
+  - Automated cloud OAuth credential provisioning (auto-scraping or direct cloud API provisioning).
+  - Webhook replay debugger and event delivery simulator.

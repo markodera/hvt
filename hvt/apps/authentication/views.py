@@ -4,6 +4,7 @@ from rest_framework import generics, permissions, serializers, status, views
 from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.response import Response
 from django.conf import settings
+from django.db import transaction
 from django.utils.encoding import force_str
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -830,6 +831,10 @@ class HVTRegisterView(RegisterView):
 
     serializer_class = ControlPlaneRegisterSerializer
     throttle_classes = CONTROL_PLANE_REGISTER_THROTTLES
+
+    def create(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         try:

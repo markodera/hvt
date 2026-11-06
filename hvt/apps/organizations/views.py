@@ -2456,3 +2456,204 @@ class ProjectSchemaSyncView(APIView):
         )
 
         return Response(result.to_dict(), status=status.HTTP_200_OK)
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Projects"],
+        summary="Get project onboarding status",
+        description="Returns live checklist status for project onboarding (project created, schema synced, first signup, first login).",
+    )
+)
+class ProjectOnboardingStatusView(APIView):
+    """
+    GET /api/v1/organizations/current/projects/<uuid:project_pk>/onboarding/
+    Returns live checklist status for the project:
+    - project_created
+    - schema_synced
+    - first_signup
+    - first_login
+    - all_completed
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+    def get(self, request, project_pk):
+        user = request.user
+        if not user.organization_id:
+            raise PermissionDenied("You must belong to an organization.")
+        project = get_object_or_404(
+            Project.objects.select_related("organization"),
+            id=project_pk,
+            organization_id=user.organization_id,
+            is_active=True,
+        )
+
+        schema_synced = (
+            ProjectRole.objects.filter(project=project).exists()
+            or ProjectPermission.objects.filter(project=project).exists()
+            or SocialProviderConfig.objects.filter(project=project).exists()
+            or AuditLog.objects.filter(
+                project=project,
+                event_data__action="schema_sync",
+            ).exists()
+        )
+
+        first_signup = (
+            User.objects.filter(project=project).exists()
+            or AuditLog.objects.filter(
+                project=project,
+                event_type=AuditLog.EventType.USER_REGISTER,
+            ).exists()
+        )
+
+        first_login = AuditLog.objects.filter(
+            project=project,
+            event_type=AuditLog.EventType.USER_LOGIN,
+        ).exists()
+
+        all_completed = bool(schema_synced and first_signup and first_login)
+
+        serializer = ProjectSerializer(project)
+
+        return Response(
+            {
+                "project_id": str(project.id),
+                "project_name": project.name,
+                "project_slug": project.slug,
+                "project_created": True,
+                "schema_synced": bool(schema_synced),
+                "first_signup": bool(first_signup),
+                "first_login": bool(first_login),
+                "all_completed": all_completed,
+                "has_active_live_keys": serializer.data.get("has_active_live_keys", False),
+                "can_use_setup_prompt": serializer.data.get("can_use_setup_prompt", True),
+                "setup_prompt_notice": serializer.data.get("setup_prompt_notice"),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Projects"],
+        summary="Generate AI setup prompt and temporary test management key",
+        description="Mints a temporary 15-minute test management key and returns a structured setup prompt for AI coding agents.",
+    )
+)
+class ProjectSetupPromptView(APIView):
+    """
+    POST /api/v1/organizations/current/projects/<uuid:project_pk>/setup-prompt/
+    Mints a temporary 15-minute test management key and returns a formatted prompt.
+    Enforces Option C plane isolation: blocked if project has active live keys.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+    def post(self, request, project_pk):
+        user = request.user
+        if not user.organization_id:
+            raise PermissionDenied("You must belong to an organization.")
+        if not user.is_org_owner():
+            raise PermissionDenied("You must be an organization owner or admin to generate setup prompts.")
+
+        project = get_object_or_404(
+            Project.objects.select_related("organization"),
+            id=project_pk,
+            organization_id=user.organization_id,
+            is_active=True,
+        )
+
+        proj_serializer = ProjectSerializer(project)
+        if not proj_serializer.get_can_use_setup_prompt(project):
+            return Response(
+                {"detail": proj_serializer.get_setup_prompt_notice(project)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        APIKey.objects.filter(
+            project=project,
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.MANAGEMENT,
+            name__startswith="AI Setup Prompt",
+            is_active=True,
+        ).update(is_active=False)
+
+        prefix, full_key, hashed_key = APIKey.generate_key(
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.MANAGEMENT,
+        )
+        expires_at = timezone.now() + timedelta(minutes=15)
+        api_key = APIKey.objects.create(
+            name=f"AI Setup Prompt ({timezone.now().strftime('%b %d %H:%M')})",
+            prefix=prefix,
+            hashed_key=hashed_key,
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.MANAGEMENT,
+            organization=project.organization,
+            project=project,
+            scopes=list(APIKey.PROVISIONING_SCOPES),
+            expires_at=expires_at,
+            created_by=user,
+        )
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.API_KEY_CREATED,
+            request=request,
+            user=user,
+            organization=project.organization,
+            project=project,
+            target=api_key,
+            event_data={
+                "key_name": api_key.name,
+                "environment": api_key.environment,
+                "key_type": api_key.key_type,
+                "project_id": str(project.id),
+                "scopes": api_key.scopes,
+                "purpose": "ai_setup_prompt",
+            },
+            success=True,
+        )
+
+        backend_host = request.build_absolute_uri("/").rstrip("/")
+        docs_url = getattr(settings, "DOCS_URL", "https://docs.hvts.app").rstrip("/")
+
+        prompt_text = (
+            f"You are setting up HVT Authentication for this project.\n\n"
+            f"## Project Information\n"
+            f"- Project ID: {project.id}\n"
+            f"- Project Name: {project.name}\n"
+            f"- Project Slug: {project.slug}\n"
+            f"- Environment: test (safe sandbox mode)\n"
+            f"- HVT Host: {backend_host}\n"
+            f"- Temporary Management Key: {full_key} (expires in 15 minutes; shown once)\n\n"
+            f"## Integration Instructions\n"
+            f"1. Install the HVT SDK and CLI:\n"
+            f"   npm install @hvt/sdk\n"
+            f"   npm install -D @hvt/cli\n\n"
+            f"2. Configure environment variables in `.env.local`:\n"
+            f"   NEXT_PUBLIC_HVT_HOST=\"{backend_host}\"\n"
+            f"   NEXT_PUBLIC_HVT_PROJECT_ID=\"{project.id}\"\n"
+            f"   HVT_MANAGEMENT_KEY=\"{full_key}\"\n\n"
+            f"3. Preview authentication schema:\n"
+            f"   npx @hvt/cli schema plan --project-id {project.id}\n\n"
+            f"4. Apply declarative schema to initialize auth methods, roles, and mint runtime client key:\n"
+            f"   npx @hvt/cli schema sync --project-id {project.id}\n\n"
+            f"5. Save the returned client key as `NEXT_PUBLIC_HVT_CLIENT_KEY` in `.env.local`.\n"
+            f"   Initialize `@hvt/sdk` in your client/server code. Never commit management keys.\n\n"
+            f"Specification: {docs_url}/llms.txt\n"
+        )
+
+        suffix = full_key[-4:]
+        prefix_part = full_key[:14]
+        masked_key = f"{prefix_part}{'•' * 16}{suffix}"
+
+        return Response(
+            {
+                "key": full_key,
+                "prefix": prefix,
+                "masked_key": masked_key,
+                "expires_at": expires_at.isoformat(),
+                "expires_in_seconds": 900,
+                "prompt": prompt_text,
+            },
+            status=status.HTTP_201_CREATED,
+        )

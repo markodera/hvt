@@ -24,6 +24,7 @@ def _stamp_org_claims(token, user, project=None) -> None:
     )
 
     org = getattr(user, "organization", None)
+
     token["org_id"] = str(org.id) if org else None
     token["org_slug"] = org.slug if org else ""
     token["project_id"] = str(project.id) if project else None

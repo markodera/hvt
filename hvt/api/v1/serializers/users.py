@@ -29,7 +29,9 @@ from hvt.apps.organizations.access import (
     user_has_project_access,
 )
 from hvt.apps.users.models import User
-from hvt.apps.organizations.models import APIKey, SocialProviderConfig, UserProjectRole
+import uuid
+from django.utils.text import slugify
+from hvt.apps.organizations.models import APIKey, Organization, Project, SocialProviderConfig, UserProjectRole
 from hvt.apps.organizations.runtime_roles import assign_requested_registration_role
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.registration.serializers import SocialLoginSerializer
@@ -89,6 +91,49 @@ def _hydrate_runtime_user_organization(user: User) -> User:
     return user
 
 
+def _auto_provision_organization_and_project(user: User):
+    """
+    Ensure every control-plane user has an organization and default test project.
+
+    Does not apply to runtime users (scoped to a project).
+    """
+    if getattr(user, "project_id", None):
+        return None
+
+    if user.organization_id:
+        # Already assigned to an organization; do not overwrite or duplicate
+        return user.organization
+        # (already returned)
+
+    owned_org = user.owned_organization.first()
+    if owned_org:
+        user.organization = owned_org
+        if user.role != User.Role.OWNER:
+            user.role = User.Role.OWNER
+        user.save(update_fields=["organization", "role"])
+        # User owns an organization; link without creating a new one
+        return owned_org
+
+    first_name = (getattr(user, "first_name", "") or "").strip()
+    base_name = f"{first_name}'s Workspace" if first_name else "My Workspace"
+    base_slug = slugify(base_name) or "workspace"
+    slug = f"{base_slug}-{uuid.uuid4().hex[:6]}"
+
+    while Organization.objects.filter(slug=slug).exists():
+        slug = f"{base_slug}-{uuid.uuid4().hex[:6]}"
+
+    org = Organization.objects.create(
+        name=base_name,
+        slug=slug,
+        owner=user,
+    )
+    user.organization = org
+    user.role = User.Role.OWNER
+    user.save(update_fields=["organization", "role"])
+    org.ensure_default_project()
+    return org
+
+
 def _require_runtime_scope(api_key: APIKey) -> None:
     if isinstance(api_key, APIKey) and not api_key.has_scope("auth:runtime"):
         raise serializers.ValidationError(
@@ -106,6 +151,7 @@ def _create_registered_user(
     organization=None,
     project=None,
     role=None,
+    auto_provision_org=False,
 ):
     """Persist a new user with consistent error handling for register flows."""
     try:
@@ -130,6 +176,8 @@ def _create_registered_user(
                 user.role = role
 
             user.save()
+            if auto_provision_org and user.project_id is None and not user.organization_id and not user.owned_organization.exists():
+                _auto_provision_organization_and_project(user)
             serializer.custom_signup(request, user)
             setup_user_email(request, user, [])
             return user
@@ -252,7 +300,8 @@ class ControlPlaneRegisterSerializer(BaseRegisterSerializer):
                 {"detail": self.error_messages["runtime_route_required"]}
             )
 
-        user = _create_registered_user(self, request)
+        user = _create_registered_user(self, request, auto_provision_org=True)
+        # Auto-provisioned inside atomic transaction block in _create_registered_user
         _log_registration_event(request, user)
         return user
 
@@ -384,6 +433,7 @@ class CustomLoginSerializer(LoginSerializer):
 
         self.validate_auth_user_status(user)
         self.validate_email_verification_status(user, email=email)
+
         attrs["email"] = email
         attrs["user"] = user
         return attrs
@@ -457,6 +507,7 @@ class RuntimeLoginSerializer(CustomLoginSerializer):
         except serializers.ValidationError as exc:
             raise serializers.ValidationError(self.error_messages["wrong_project"]) from exc
 
+
         attrs["email"] = email
         attrs["user"] = user
         return attrs
@@ -490,7 +541,11 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
 
     def validate(self, attrs):
         try:
-            return super().validate(attrs)
+            validated_data = super().validate(attrs)
+            user = getattr(self, "user", None)
+            if user and not self._is_runtime_social_request():
+                _auto_provision_organization_and_project(user)
+            return validated_data
         except serializers.ValidationError as exc:
             detail_str = str(exc)
             if "Failed to exchange code" in detail_str:
