@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **Anti-User Enumeration Hardening:**
+  - Standardized registration endpoints (`/api/v1/auth/register/` and `/api/v1/auth/runtime/register/`) to return identical HTTP 201 Created and verification detail payload regardless of whether an account already exists or is verified; dispatched an "account already exists" notification email on duplicate registration instead of an error.
+  - Standardized login endpoints (`/api/v1/auth/login/` and `/api/v1/auth/runtime/login/`) to return identical HTTP 400 Bad Request responses for nonexistent accounts, invalid passwords, unverified accounts, and tenant mismatches.
+  - Preserved anti-enumeration posture on password reset returning HTTP 200 OK across control and runtime planes.
+  - Retained strict rate throttling across all registration, login, and password reset routes.
+  - Added test suite `tests/test_user_enumeration.py` covering control and runtime planes.
 - **Signup Limbo Prevention (Atomic Rollback on Email Failure):**
   - Wrapped user creation and verification email dispatch inside an atomic transaction (`transaction.atomic()`).
   - If sending the verification email fails (e.g. SMTP or Resend outage), the transaction rolls back cleanly, preventing abandoned unusable accounts.

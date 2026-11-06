@@ -878,6 +878,8 @@ class HVTRegisterView(RegisterView):
         try:
             with transaction.atomic():
                 user = serializer.save(self.request)
+                if getattr(serializer, "account_already_exists", False):
+                    return user
                 if (
                     allauth_account_settings.EMAIL_VERIFICATION
                     != allauth_account_settings.EmailVerificationMethod.NONE
