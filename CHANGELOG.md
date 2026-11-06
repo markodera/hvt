@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **Social OAuth Account Linking Verification:**
+  - Enforced that social identities are linked to existing accounts only when the provider explicitly confirms the email is verified.
+  - If unverified or if the provider does not state verification status, account linking is refused with a clear message: "Cannot link social identity: email is not verified by provider. Please log in to your existing account first."
+  - Comprehensive test suite covering all 6 social providers (Google, GitHub, Discord, Apple, Microsoft, GitLab) with verified and unverified payloads across control and runtime planes.
+
 - **Webhook SSRF & Exfiltration Hardening:**
   - Enforced HTTPS scheme in production (HTTP permitted only when DEBUG=True).
   - Prohibited embedded user credentials in webhook destination URLs.
