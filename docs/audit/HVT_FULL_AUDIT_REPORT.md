@@ -1,20 +1,24 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Commit Audited:** `1c05dcff9e9b9f723adfbce6ed02ed74d6358bb0`  
-> **Date Audited:** `2026-11-05`  
-> **Total Chapters:** 9 chapters (14,856 words)  
+> **Latest Commit:** `cc7645325654a3129fe42b18a0c216ac79d10e24`  
+> **Last Synchronized:** `2026-11-06 07:45:14 UTC`  
+> **Total Chapters:** 9  
+> **Total Volume:** 14,856 words (122,821 characters)  
 
 ## Table of Contents
 
-- [00 Summary](#00-summary)
-- [01 Architecture And Data](#01-architecture-and-data)
-- [02 Features And Endpoints](#02-features-and-endpoints)
-- [03 Tokens Sessions Passkeys](#03-tokens-sessions-passkeys)
-- [04 Security](#04-security)
-- [05 Live Behavior](#05-live-behavior)
-- [06 Testing Ops Quality](#06-testing-ops-quality)
-- [07 Roadmap Readiness](#07-roadmap-readiness)
-- [08 Unknowns And Surprises](#08-unknowns-and-surprises)
+| # | Chapter | Word Count | Direct Link |
+|---|---|---|---|
+| 01 | 00 Summary | 1,832 words | [00-summary.md](#00-summary) |
+| 02 | 01 Architecture And Data | 2,662 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 2,330 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 1,215 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 05 | 04 Security | 1,672 words | [04-security.md](#04-security) |
+| 06 | 05 Live Behavior | 1,377 words | [05-live-behavior.md](#05-live-behavior) |
+| 07 | 06 Testing Ops Quality | 1,219 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
+| 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
+| 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
+| | **TOTAL** | **14,856 words** | |
 
 ---
 

@@ -278,11 +278,17 @@ class SchemaSyncService:
             # Option C environment restriction check:
             # Test keys/environments cannot mutate projects with active live keys
             if environment == "test":
-                has_active_live_keys = APIKey.objects.select_for_update().filter(
-                    project=locked_project,
-                    environment=APIKey.Environment.LIVE,
-                    is_active=True,
-                ).exists()
+                now = timezone.now()
+                has_active_live_keys = (
+                    APIKey.objects.select_for_update()
+                    .filter(
+                        project=locked_project,
+                        environment=APIKey.Environment.LIVE,
+                        is_active=True,
+                    )
+                    .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+                    .exists()
+                )
                 if has_active_live_keys:
                     raise PermissionDenied(
                         "Test management keys cannot modify projects with active live keys. (Option C limitation)"
