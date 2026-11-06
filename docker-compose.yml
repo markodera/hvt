@@ -5,11 +5,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=${DB_NAME:?DB_NAME is required}
-      - POSTGRES_USER=${DB_USER:?DB_USER is required}
+      - POSTGRES_DB=${DB_NAME:-hvt}
+      - POSTGRES_USER=${DB_USER:-hvt}
       - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-hvt} -d ${DB_NAME:-hvt}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -37,18 +37,20 @@ services:
     environment:
       - DEBUG=0
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - HVT_ENCRYPTION_KEYS=${HVT_ENCRYPTION_KEYS:?HVT_ENCRYPTION_KEYS is required}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
       - FRONTEND_URL=${FRONTEND_URL:?FRONTEND_URL is required}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:?CSRF_TRUSTED_ORIGINS is required}
-      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      - DATABASE_URL=postgres://${DB_USER:-hvt}:${DB_PASSWORD}@db:5432/${DB_NAME:-hvt}
       - REDIS_URL=redis://redis:6379/0
       - USE_REDIS_CACHE=1
       - STATIC_ROOT=/app/staticfiles
-      - EXPOSE_ADMIN=0
-      - EXPOSE_API_DOCS=0
-      - RUN_MIGRATIONS=1
-      - COLLECTSTATIC_ON_START=1
+      - EXPOSE_ADMIN=${EXPOSE_ADMIN:-0}
+      - DJANGO_ADMIN_PATH=${DJANGO_ADMIN_PATH:-admin/}
+      - EXPOSE_API_DOCS=${EXPOSE_API_DOCS:-0}
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
+      - COLLECTSTATIC_ON_START=${COLLECTSTATIC_ON_START:-1}
     depends_on:
       db:
         condition: service_healthy

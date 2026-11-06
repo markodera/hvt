@@ -67,6 +67,8 @@ TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
 if TESTING and not HVT_ENCRYPTION_KEYS:
     from cryptography.fernet import Fernet
     HVT_ENCRYPTION_KEYS = [Fernet.generate_key().decode("utf-8")]
+elif not DEBUG and not HVT_ENCRYPTION_KEYS:
+    raise ImproperlyConfigured("HVT_ENCRYPTION_KEYS must be configured when DEBUG is false.")
 
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
@@ -249,7 +251,8 @@ SECURE_REFERRER_POLICY = os.getenv(
     "strict-origin-when-cross-origin" if not DEBUG else "same-origin",
 )
 X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
-EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", DEBUG)
+EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", False if not DEBUG else True)
+DJANGO_ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", os.getenv("ADMIN_URL", "admin/")).strip("/") + "/"
 EXPOSE_API_DOCS = _env_bool("EXPOSE_API_DOCS", DEBUG)
 SILENCED_SYSTEM_CHECKS = ["auth.E003"]
 # Custom User model

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1] - 2026-11-06
 
+### Operations & Self-Hosting
+- **Production Self-Hosting & Docker Compose Basics:**
+  - Configured `docker-compose.yml` to boot strictly in production mode (`DEBUG=0`) with Gunicorn, health checks, automatic migrations, and static asset collection.
+  - Enforced `SECRET_KEY` and `HVT_ENCRYPTION_KEYS` in docker-compose environment variables with fast startup validation.
+  - Added `.env.example` with clear, reproducible generation commands for `SECRET_KEY` and `HVT_ENCRYPTION_KEYS` (MultiFernet) and strictly no real credentials checked in.
+  - Hardened Django Admin to be disabled by default in production (`EXPOSE_ADMIN=0`, opt-in), and added support for custom administration URL paths via `DJANGO_ADMIN_PATH`.
+  - Updated `README.md` with complete self-hosting instructions, key generation commands, database migrations, initial owner setup, and admin interface customization.
+  - Added automated test suite `tests/test_self_hosting.py` verifying production settings enforcement, environment template integrity, and admin routing.
+
 ### Security
 - **Invitation Token Hashing at Rest (SHA-256):**
   - Stored organization and runtime invitation tokens as SHA-256 hashes at rest in the database.
