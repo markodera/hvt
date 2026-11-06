@@ -70,6 +70,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Dependency vulnerability audit (pip-audit)
+        run: python scripts/audit_dependencies.py
+
       - name: Django system checks
         run: python manage.py check
 

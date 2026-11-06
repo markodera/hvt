@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-11-06
+
+### Security
+- **Dependencies (pip-audit CI):**
+  - Upgraded Python dependencies with known vulnerabilities (Django to 5.2.19, django-allauth to 65.21.1, djangorestframework to 3.18.3, python-dotenv to 1.2.2, oauthlib to 4.0.1, urllib3 to 2.8.0, pyjwt to 2.15.0).
+  - Added automated dependency security auditing with pip-audit to CI pipeline (.github/workflows/ci.yml) and script scripts/audit_dependencies.py.
+  - Added pip-audit-exceptions.txt to enforce failure on unaccepted vulnerabilities while tracking documented exceptions.
+
 ## [0.2.0] - 2026-11-05
 
 ### Relicensing & Governance
