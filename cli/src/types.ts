@@ -32,15 +32,18 @@ export interface HVTManifest {
 }
 
 export interface SchemaChangeItem {
-  type: "permission" | "role" | "social_provider" | "auth_methods" | "runtime_key";
-  action: "created" | "adopted" | "reconciled" | "pruned" | "minted" | "updated";
+  type?: "permission" | "role" | "social_provider" | "auth_methods" | "runtime_key" | "api_key" | string;
+  object_type?: "permission" | "role" | "social_provider" | "auth_methods" | "runtime_key" | "api_key" | string;
+  action: "created" | "adopted" | "reconciled" | "pruned" | "minted" | "updated" | "deleted";
   slug: string;
   details?: Record<string, unknown>;
 }
 
 export interface LinkRemovalItem {
-  role_slug: string;
-  permission_slug: string;
+  role?: string;
+  role_slug?: string;
+  permission?: string;
+  permission_slug?: string;
 }
 
 export interface SchemaSyncResponse {

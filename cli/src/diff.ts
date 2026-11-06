@@ -24,11 +24,13 @@ export function printDiff(response: SchemaSyncResponse, options: { isDryRun: boo
     return;
   }
 
-  // Group by change type
-  const permissions = changes.filter((c) => c.type === "permission");
-  const roles = changes.filter((c) => c.type === "role");
-  const providers = changes.filter((c) => c.type === "social_provider");
-  const authMethods = changes.filter((c) => c.type === "auth_methods");
+  // Group by change type (support both object_type from server and legacy type)
+  const getObjectType = (c: SchemaChangeItem) => c.object_type || c.type || "unknown";
+  const permissions = changes.filter((c) => getObjectType(c) === "permission");
+  const roles = changes.filter((c) => getObjectType(c) === "role");
+  const providers = changes.filter((c) => getObjectType(c) === "social_provider");
+  const authMethods = changes.filter((c) => getObjectType(c) === "auth_methods");
+  const apiKeys = changes.filter((c) => getObjectType(c) === "api_key" || getObjectType(c) === "runtime_key");
 
   if (permissions.length > 0) {
     console.log(pc.bold("  Permissions:"));
@@ -49,7 +51,9 @@ export function printDiff(response: SchemaSyncResponse, options: { isDryRun: boo
   if (link_removals.length > 0) {
     console.log(pc.bold("  Role-Permission Detachments:"));
     for (const removal of link_removals) {
-      console.log(`    ${pc.red("-")} Detach permission ${pc.bold(removal.permission_slug)} from role ${pc.bold(removal.role_slug)}`);
+      const perm = removal.permission || removal.permission_slug || "unknown";
+      const role = removal.role || removal.role_slug || "unknown";
+      console.log(`    ${pc.red("-")} Detach permission ${pc.bold(perm)} from role ${pc.bold(role)}`);
     }
     console.log("");
   }
@@ -84,22 +88,27 @@ export function printDiff(response: SchemaSyncResponse, options: { isDryRun: boo
 }
 
 function printChangeItem(item: SchemaChangeItem): void {
+  const targetType = item.object_type || item.type || "object";
   switch (item.action) {
     case "created":
-      console.log(`    ${pc.green("+")} Create ${item.type} ${pc.bold(pc.green(item.slug))}`);
+      console.log(`    ${pc.green("+")} Create ${targetType} ${pc.bold(pc.green(item.slug))}`);
       break;
     case "adopted":
-      console.log(`    ${pc.cyan("~")} Adopt existing dashboard ${item.type} ${pc.bold(pc.cyan(item.slug))}`);
+      console.log(`    ${pc.cyan("~")} Adopt existing dashboard ${targetType} ${pc.bold(pc.cyan(item.slug))}`);
       break;
     case "reconciled":
     case "updated":
-      console.log(`    ${pc.yellow("~")} Reconcile ${item.type} ${pc.bold(pc.yellow(item.slug))}`);
+      console.log(`    ${pc.yellow("~")} Reconcile ${targetType} ${pc.bold(pc.yellow(item.slug))}`);
       break;
     case "pruned":
-      console.log(`    ${pc.red("-")} Prune manifest-owned ${item.type} ${pc.bold(pc.red(item.slug))}`);
+    case "deleted":
+      console.log(`    ${pc.red("-")} Prune manifest-owned ${targetType} ${pc.bold(pc.red(item.slug))}`);
+      break;
+    case "minted":
+      console.log(`    ${pc.green("*")} Mint ${targetType} ${pc.bold(pc.green(item.slug))}`);
       break;
     default:
-      console.log(`    ${pc.dim("•")} ${item.action} ${item.type} ${item.slug}`);
+      console.log(`    ${pc.dim("•")} ${item.action} ${targetType} ${item.slug}`);
       break;
   }
 }
