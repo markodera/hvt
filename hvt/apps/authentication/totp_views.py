@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import pyotp
 from django.utils import timezone
 from rest_framework import permissions, status
@@ -5,8 +7,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from hvt.apps.authentication.models import AuditLog, TOTPDevice
+from hvt.apps.authentication.models import AuditLog, TOTPDevice, TOTPBackupCode
 from hvt.apps.authentication.views import CONTROL_PLANE_LOGIN_THROTTLES
+
+
+def generate_backup_codes(count=10) -> list:
+    codes = set()
+    while len(codes) < count:
+        codes.add(secrets.token_hex(4))
+    return sorted(list(codes))
+
+
+def hash_backup_code(raw_code: str) -> str:
+    cleaned = raw_code.strip().replace("-", "").replace(" ", "").lower()
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
+
 
 
 class TOTPStatusView(APIView):
@@ -114,6 +129,14 @@ class TOTPVerifyView(APIView):
         device.last_verified_at = now
         device.save(update_fields=["is_confirmed", "last_verified_at"])
 
+        # Generate 10 single-use backup codes shown once
+        device.backup_codes.all().delete()
+        raw_backup_codes = generate_backup_codes(10)
+        TOTPBackupCode.objects.bulk_create([
+            TOTPBackupCode(device=device, hashed_code=hash_backup_code(c))
+            for c in raw_backup_codes
+        ])
+
         AuditLog.log(
             event_type=AuditLog.EventType.MFA_ENABLED,
             request=request,
@@ -126,6 +149,7 @@ class TOTPVerifyView(APIView):
                 "detail": "Two-factor authentication successfully enabled.",
                 "is_mfa_enabled": True,
                 "last_verified_at": now,
+                "backup_codes": raw_backup_codes,
             },
             status=status.HTTP_200_OK,
         )
@@ -241,22 +265,44 @@ class TOTPLoginView(APIView):
             )
 
         totp = pyotp.TOTP(device.secret)
-        if not totp.verify(code, valid_window=1):
+        code_verified = False
+        used_backup_code = False
+
+        if totp.verify(code, valid_window=1):
+            code_verified = True
+        else:
+            hashed = hash_backup_code(code)
+            backup_code_obj = device.backup_codes.filter(hashed_code=hashed, used_at__isnull=True).first()
+            if backup_code_obj:
+                backup_code_obj.used_at = timezone.now()
+                backup_code_obj.save(update_fields=["used_at"])
+                code_verified = True
+                used_backup_code = True
+
+        if not code_verified:
             AuditLog.log(
                 event_type=AuditLog.EventType.LOGIN_FAILED,
                 request=request,
                 user=user,
                 success=False,
-                error_message="Invalid 2FA authenticator code",
+                error_message="Invalid 2FA authenticator code or backup code",
             )
             return Response(
-                {"error": "Invalid or expired authenticator code. Check your authenticator app and device time.", "code": "invalid_code"},
+                {"error": "Invalid or expired authenticator code or backup code. Check your authenticator app or backup codes.", "code": "invalid_code"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         now = timezone.now()
         device.last_verified_at = now
         device.save(update_fields=["last_verified_at"])
+
+        if used_backup_code:
+            AuditLog.log(
+                event_type=AuditLog.EventType.TOTP_BACKUP_CODE_USED,
+                request=request,
+                user=user,
+                event_data={"email": user.email, "method": "backup_code"},
+            )
 
         project_id = payload.get("project_id")
         project = None
@@ -290,6 +336,65 @@ class TOTPLoginView(APIView):
                     "last_name": user.last_name,
                     "role": getattr(user, "role", "member"),
                 },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TOTPRegenerateBackupCodesView(APIView):
+    """
+    Regenerate single-use backup codes for an active TOTP device.
+    Requires fresh re-authentication via password.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Regenerate MFA TOTP backup codes",
+        responses={
+            200: OpenApiResponse(description="New backup codes returned"),
+            400: OpenApiResponse(description="Re-authentication failed or MFA not active"),
+        },
+    )
+    def post(self, request):
+        password = str(request.data.get("password", ""))
+        if not password or not request.user.check_password(password):
+            return Response(
+                {
+                    "error": "Password re-authentication required to regenerate backup codes.",
+                    "code": "invalid_password",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device = TOTPDevice.objects.filter(user=request.user, is_confirmed=True).first()
+        if not device:
+            return Response(
+                {
+                    "error": "Two-factor authentication is not active on this account.",
+                    "code": "mfa_not_active",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device.backup_codes.all().delete()
+        raw_codes = generate_backup_codes(10)
+        objs = [
+            TOTPBackupCode(device=device, hashed_code=hash_backup_code(c))
+            for c in raw_codes
+        ]
+        TOTPBackupCode.objects.bulk_create(objs)
+
+        AuditLog.log(
+            event_type=AuditLog.EventType.TOTP_BACKUP_CODES_REGENERATED,
+            request=request,
+            user=request.user,
+            event_data={"email": request.user.email},
+        )
+
+        return Response(
+            {
+                "detail": "Backup codes regenerated successfully. Store these in a safe place.",
+                "backup_codes": raw_codes,
             },
             status=status.HTTP_200_OK,
         )

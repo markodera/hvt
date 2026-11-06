@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **TOTP Encryption at Rest & Single-Use Backup Codes:**
+  - Encrypted TOTP secrets at rest with `EncryptedTextField` and MultiFernet (`v1:` prefix) via migration `0013` and idempotent backfill migration `0014`.
+  - Added 10 single-use cryptographically secure backup codes generated when TOTP is verified/enabled, displayed once to the user.
+  - Stored only SHA-256 hashes of backup codes in `auth_totp_backup_codes`.
+  - Accepted backup codes at the TOTP login step (`/api/v1/auth/mfa/totp/login/`) and standard login endpoint with atomic single-use invalidation (`used_at`).
+  - Added backup code regeneration endpoint (`/api/v1/auth/mfa/totp/backup-codes/regenerate/`) requiring fresh password re-authentication.
+  - Added structured audit-log events `totp.backup_code_used` and `totp.backup_codes_regenerated`.
 - **Social OAuth Account Linking Verification:**
   - Enforced that social identities are linked to existing accounts only when the provider explicitly confirms the email is verified.
   - If unverified or if the provider does not state verification status, account linking is refused with a clear message: "Cannot link social identity: email is not verified by provider. Please log in to your existing account first."

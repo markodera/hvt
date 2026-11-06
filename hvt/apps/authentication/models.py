@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from hvt.crypto import EncryptedTextField
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
@@ -84,6 +85,8 @@ class AuditLog(models.Model):
         MFA_ENABLED = "mfa.enabled", "MFA Enabled"
         MFA_DISABLED = "mfa.disabled", "MFA Disabled"
         MFA_VERIFIED = "mfa.verified", "MFA Verified"
+        TOTP_BACKUP_CODE_USED = "totp.backup_code_used", "TOTP Backup Code Used"
+        TOTP_BACKUP_CODES_REGENERATED = "totp.backup_codes_regenerated", "TOTP Backup Codes Regenerated"
 
         # Passkey events
         PASSKEY_REGISTER_INITIATED = (
@@ -270,7 +273,7 @@ class TOTPDevice(models.Model):
         on_delete=models.CASCADE,
         related_name="totp_device",
     )
-    secret = models.CharField(max_length=64)
+    secret = EncryptedTextField()
     is_confirmed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
@@ -280,6 +283,30 @@ class TOTPDevice(models.Model):
 
     def __str__(self):
         return f"TOTP for {self.user.email} (confirmed={self.is_confirmed})"
+
+
+class TOTPBackupCode(models.Model):
+    """
+    Single-use hashed backup codes for account recovery when TOTP device is unavailable.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        TOTPDevice,
+        on_delete=models.CASCADE,
+        related_name="backup_codes",
+    )
+    hashed_code = models.CharField(max_length=64, db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_totp_backup_codes"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "used" if self.used_at else "active"
+        return f"BackupCode ({status}) for {self.device.user.email}"
 
 
 class UserPasskeyCredential(models.Model):
