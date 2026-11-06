@@ -599,6 +599,14 @@ class WebhookSerializer(serializers.ModelSerializer):
             "consecutive_failures",
         ]
 
+    def validate_url(self, value):
+        from hvt.apps.organizations.ssrf import validate_webhook_url, SSRFValidationError
+        try:
+            validate_webhook_url(value)
+        except SSRFValidationError as exc:
+            raise serializers.ValidationError(str(exc))
+        return value
+
     def validate_events(self, value):
         normalized = []
         for event_name in value or []:
@@ -659,7 +667,6 @@ class WebhookDeliverySerializer(serializers.ModelSerializer):
             "payload",
             "status",
             "response_status_code",
-            "response_body",
             "error_message",
             "attempt_count",
             "max_attempts",

@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **Webhook SSRF & Exfiltration Hardening:**
+  - Enforced HTTPS scheme in production (HTTP permitted only when DEBUG=True).
+  - Prohibited embedded user credentials in webhook destination URLs.
+  - Added strict IP validation refusing loopback (127.0.0.1, ::1), cloud metadata (169.254.169.254), private RFC 1918 networks, multicast, and reserved ranges.
+  - Implemented connection-time socket IP verification (SSRFSafeHTTPAdapter) to prevent DNS rebinding attacks.
+  - Strictly disabled redirect following (allow_redirects=False) with short timeouts (3.0s).
+  - Stopped storing or returning response bodies through the API (response_body removed from WebhookDeliverySerializer; stored as empty with short error codes like SSRF_BLOCKED, REDIRECT_REFUSED).
+
 - **Dependencies (pip-audit CI):**
   - Upgraded Python dependencies with known vulnerabilities (Django to 5.2.19, django-allauth to 65.21.1, djangorestframework to 3.18.3, python-dotenv to 1.2.2, oauthlib to 4.0.1, urllib3 to 2.8.0, pyjwt to 2.15.0).
   - Added automated dependency security auditing with pip-audit to CI pipeline (.github/workflows/ci.yml) and script scripts/audit_dependencies.py.
