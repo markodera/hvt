@@ -22,6 +22,7 @@ from hvt.apps.authentication.views import (
     RUNTIME_PASSWORD_RESET_REQUEST_THROTTLES,
 )
 from hvt.apps.organizations.models import APIKey, ProjectRole, UserProjectRole
+from hvt.apps.organizations.access import assign_default_signup_roles
 from hvt.apps.users.models import User
 
 
@@ -195,10 +196,14 @@ class RuntimeMagicLinkRequestView(views.APIView):
                 role=User.Role.MEMBER,
             )
             role_slug = request.data.get("role_slug")
+            assigned = False
             if role_slug:
                 role_obj = ProjectRole.objects.filter(project=project, slug=role_slug, is_self_assignable=True).first()
                 if role_obj:
                     UserProjectRole.objects.create(user=user, role=role_obj)
+                    assigned = True
+            if not assigned:
+                assign_default_signup_roles(user, project)
 
         raw_token = _create_magic_link_token(user, project=project)
         _send_magic_link(user, raw_token, request, project=project)
@@ -227,6 +232,11 @@ class RuntimeMagicLinkVerifyView(views.APIView):
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
             return Response({"error": "Valid X-API-Key required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not api_key.has_scope("auth:runtime"):
+            return Response(
+                {"detail": "This API key does not have the required auth:runtime scope."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         project = api_key.project
         token = str(request.data.get("token", "")).strip()
