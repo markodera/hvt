@@ -3,16 +3,13 @@ name: Deploy to Production SSH
 # ==============================================================================
 # HVT Continuous Deployment Workflow
 # ==============================================================================
-# This workflow automatically deploys the latest code to a self-hosted Linux
-# server via SSH whenever a commit is pushed to the 'main' branch.
-# It performs a zero-downtime deployment by gracefully reloading Gunicorn.
+# This workflow automatically deploys the latest code to the Linux server via SSH
+# whenever a commit is pushed or merged to the 'main' branch.
 #
-# To use this in your own self-hosted deployment:
-# 1. Go to your GitHub repository -> Settings -> Secrets and variables -> Actions
-# 2. Add the following Repository Secrets:
-#    - DO_HOST    : The IP address or domain of your server
-#    - DO_USER    : The SSH username (e.g., ubuntu, root, or whatever you created)
-#    - DO_SSH_KEY : The private SSH key allowing access to the server
+# Required GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   - VPS_HOST    (or DO_HOST)    : 84.12.124.67
+#   - VPS_USER    (or DO_USER)    : ubuntu
+#   - VPS_SSH_KEY (or DO_SSH_KEY) : Private SSH Key
 # ==============================================================================
 
 on:
@@ -28,12 +25,13 @@ jobs:
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DO_HOST }}
-          username: ${{ secrets.DO_USER }}
-          key: ${{ secrets.DO_SSH_KEY }}
+          host: ${{ secrets.VPS_HOST || secrets.DO_HOST }}
+          username: ${{ secrets.VPS_USER || secrets.DO_USER }}
+          key: ${{ secrets.VPS_SSH_KEY || secrets.DO_SSH_KEY }}
           script: |
+            set -e
             # 1. Navigate to the project directory
-            cd /home/hvt/hvt
+            cd /home/ubuntu/hvt
             
             # 2. Pull the latest code from the main branch
             git pull origin main
@@ -45,12 +43,13 @@ jobs:
             pip install -r requirements.txt
             
             # 5. Apply any pending database migrations
-            python manage.py migrate
+            python manage.py migrate --noinput
             
             # 6. Collect new static files for Nginx to serve
             python manage.py collectstatic --noinput
             
-            # 7. Graceful Zero-Downtime Reload
-            # Sending the HUP signal tells Gunicorn to gracefully finish current 
-            # requests, replace its workers with the new code, and avoid downtime.
-            kill -HUP $(cat /tmp/hvt-gunicorn.pid)
+            # 7. Restart HVT service via systemd
+            sudo systemctl restart hvt
+            
+            # 8. Verify service is active
+            sudo systemctl is-active --quiet hvt && echo "HVT deployment successfully reloaded!" || exit 1
