@@ -12,7 +12,7 @@ from hvt.apps.authentication.models import (
     MagicLinkToken,
     UserPasskeyCredential,
 )
-from hvt.apps.organizations.models import APIKey, Organization, Project
+from hvt.apps.organizations.models import APIKey, Organization, Project, ProjectRole, UserProjectRole
 from hvt.apps.users.models import User
 
 
@@ -184,3 +184,61 @@ class PasskeysAndMagicLinksTestCase(TestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIn("challenge", res.data)
         self.assertIn("challenge_key", res.data)
+
+    def test_runtime_magic_link_verify_requires_auth_runtime_scope(self):
+        """Verify runtime magic link endpoints reject API keys lacking auth:runtime."""
+        scoped_prefix, scoped_raw, scoped_hash = APIKey.generate_key("test")
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Restricted Scope Key",
+            prefix=scoped_prefix,
+            hashed_key=scoped_hash,
+            environment=APIKey.Environment.TEST,
+            scopes=["users:read"],
+        )
+
+        res = self.client.post(
+            "/api/v1/auth/runtime/magic-link/verify/",
+            {"token": "dummy_token"},
+            HTTP_X_API_KEY=scoped_raw,
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("auth:runtime", str(res.data))
+
+    def test_runtime_magic_link_assigns_default_signup_role(self):
+        """New users signing up via runtime magic link receive the project's default signup role."""
+        member_role = ProjectRole.objects.create(
+            project=self.project,
+            slug="shopper",
+            name="Shopper",
+            is_default_signup=True,
+        )
+        new_email = "newuser@shopper.com"
+
+        with patch("hvt.apps.authentication.magic_link_views.send_email_async") as mock_send:
+            res = self.client.post(
+                "/api/v1/auth/runtime/magic-link/request/",
+                {"email": new_email},
+                HTTP_X_API_KEY=self.raw_api_key,
+            )
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        new_user = User.objects.filter(email=new_email, project=self.project).first()
+        self.assertIsNotNone(new_user)
+        self.assertTrue(
+            UserProjectRole.objects.filter(user=new_user, role=member_role).exists(),
+            "Default signup role must be assigned to new magic link user",
+        )
+
+    def test_passkey_and_magic_link_routes_in_public_cors_allowlist(self):
+        """Passkey and magic link paths must be recognized as runtime public endpoints for browser CORS preflights."""
+        from django.test import RequestFactory
+        from hvt.apps.organizations.runtime_origins import request_targets_runtime_public_endpoint
+
+        rf = RequestFactory()
+        passkey_req = rf.options("/api/v1/auth/runtime/passkey/authenticate/options/")
+        self.assertTrue(request_targets_runtime_public_endpoint(passkey_req))
+
+        magic_req = rf.options("/api/v1/auth/runtime/magic-link/request/")
+        self.assertTrue(request_targets_runtime_public_endpoint(magic_req))
