@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2026-11-06
 
 ### Security
+- **Signup Limbo Prevention (Atomic Rollback on Email Failure):**
+  - Wrapped user creation and verification email dispatch inside an atomic transaction (`transaction.atomic()`).
+  - If sending the verification email fails (e.g. SMTP or Resend outage), the transaction rolls back cleanly, preventing abandoned unusable accounts.
+  - Deferred registration webhook dispatch to `transaction.on_commit` to prevent spurious webhook events on signup failure.
+  - Allowed subsequent registration attempts with the same email to proceed immediately without collision once service recovers.
+  - Added test coverage in `tests/test_signup_limbo.py` covering control-plane and runtime registration flows with simulated email backend failures.
 - **TOTP Encryption at Rest & Single-Use Backup Codes:**
   - Encrypted TOTP secrets at rest with `EncryptedTextField` and MultiFernet (`v1:` prefix) via migration `0013` and idempotent backfill migration `0014`.
   - Added 10 single-use cryptographically secure backup codes generated when TOTP is verified/enabled, displayed once to the user.

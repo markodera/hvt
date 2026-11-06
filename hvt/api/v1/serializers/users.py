@@ -200,16 +200,22 @@ def _trigger_registration_webhook(
 
     from hvt.apps.organizations.webhooks import trigger_webhook_event
 
-    trigger_webhook_event(
-        organization=target_org,
-        project=target_project,
-        event_type="user.registered",
-        payload={
-            "user_id": str(user.id),
-            "email": user.email,
-            "registration_method": registration_method,
-        },
-    )
+    user_id_str = str(user.id)
+    user_email_str = user.email
+
+    def _fire():
+        trigger_webhook_event(
+            organization=target_org,
+            project=target_project,
+            event_type="user.registered",
+            payload={
+                "user_id": user_id_str,
+                "email": user_email_str,
+                "registration_method": registration_method,
+            },
+        )
+
+    transaction.on_commit(_fire)
 
 
 class BaseRegisterSerializer(RegisterSerializer):

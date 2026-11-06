@@ -4,6 +4,7 @@ from rest_framework import generics, permissions, serializers, status, views
 from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.response import Response
 from django.conf import settings
+from django.db import transaction
 from django.utils.encoding import force_str
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -875,29 +876,25 @@ class HVTRegisterView(RegisterView):
 
     def perform_create(self, serializer):
         try:
-            user = serializer.save(self.request)
-            if (
-                allauth_account_settings.EMAIL_VERIFICATION
-                != allauth_account_settings.EmailVerificationMethod.MANDATORY
-            ):
-                return user
-
-            complete_signup(
-                self.request._request,
-                user,
-                allauth_account_settings.EMAIL_VERIFICATION,
-                None,
-            )
-            return user
-        except Exception as exc:
-            if exc.__class__.__module__.startswith("resend.exceptions"):
-                raise serializers.ValidationError(
-                    (
-                        "Verification email could not be sent. "
-                        
+            with transaction.atomic():
+                user = serializer.save(self.request)
+                if (
+                    allauth_account_settings.EMAIL_VERIFICATION
+                    != allauth_account_settings.EmailVerificationMethod.NONE
+                ):
+                    complete_signup(
+                        getattr(self.request, "_request", self.request),
+                        user,
+                        allauth_account_settings.EMAIL_VERIFICATION,
+                        None,
                     )
-                ) from exc
-            raise
+                return user
+        except Exception as exc:
+            if isinstance(exc, serializers.ValidationError):
+                raise
+            raise serializers.ValidationError(
+                {"detail": "Verification email could not be sent. Please check your email address or try again later."}
+            ) from exc
 
 
 class HVTVerifyEmailView(VerifyEmailView):
