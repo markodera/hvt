@@ -1,10 +1,10 @@
-# HVT Architectural & Technical Backlog
+# HVT Backlog & Architectural Decisions
 
-This backlog tracks pending architectural decisions, technical debt remediations, and developer experience enhancements identified during the v0.2.0 audit and Phase 2 roadmap planning (`fe2proposal.md` v1.2).
+This document tracks pending architectural decisions, technical debt remediations, and developer experience enhancements from **`fe2proposal.md` v1.2**, alongside deferred enterprise capabilities.
 
 ---
 
-## 1. Architectural Decisions Needed (fe2proposal.md v1.2)
+## 1. Architectural Decisions Needed (`fe2proposal.md` v1.2)
 
 * [ ] **Worker Choice:** Decide between a database outbox pattern with a lightweight worker management command (`python manage.py run_worker`) vs a traditional Celery + Redis worker cluster.
 * [ ] **Signing Key Storage:** Decide whether asymmetric private signing keys are stored in environment variables, a Multi-Fernet encrypted database table, or an external cloud KMS (AWS KMS / HashiCorp Vault).
@@ -23,3 +23,13 @@ This backlog tracks pending architectural decisions, technical debt remediations
 
 * [ ] **CLI Custom Schema File Option:** Add support for `--file` / `-f <path>` options in `@hvt/cli` commands (`schema plan`, `schema sync`, `schema validate`) instead of strictly requiring `hvt.schema.json` in the current working directory.
 * [ ] **AI Context Linking in `llms.txt`:** Update `llms.txt` to explicitly reference and link to `/api/schema/` (the live OpenAPI 3.0 endpoint generated via `drf-spectacular`) so AI coding agents can discover and ingest API contracts automatically.
+
+---
+
+## 3. Deferred Enterprise & Out-of-Scope Items
+
+* **Enterprise SSO & Identity Federation:** SAML 2.0 (Okta, Azure AD / Entra ID, PingIdentity) and SCIM 2.0 automated employee directory synchronization.
+* **Advanced Multi-Tenancy & Governance:** Tenant deletion lifecycles, soft-delete cascades, and dynamic role permissions matrices.
+* **Custom Domains & Infrastructure Automation:** Automated Let's Encrypt / Cloudflare SSL certificate provisioning for vanity domains (`auth.customer.com`).
+* **Monetization & Billing:** Stripe / LemonSqueezy subscription integration, MAU quotas, and metered API limits.
+* **Security & Compliance Operations:** SIEM audit log streaming (AWS S3, Datadog, Splunk) and webhook replay simulators.

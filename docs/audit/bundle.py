@@ -24,7 +24,8 @@ CHAPTERS = [
     "05-live-behavior.md",
     "06-testing-ops-quality.md",
     "07-roadmap-readiness.md",
-    "08-unknowns-and-surprises.md"
+    "08-unknowns-and-surprises.md",
+    "09-fe2proposal-audit.md"
 ]
 
 OUTPUT_MD = os.path.join(AUDIT_DIR, "HVT_FULL_AUDIT_REPORT.md")
