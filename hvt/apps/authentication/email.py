@@ -243,3 +243,25 @@ class ResendEmailBackend(BaseEmailBackend):
             if not self.fail_silently:
                 raise
             return False
+
+
+def send_email_async(to_email: str, subject: str, html_content: str, text_content: Optional[str] = None):
+    """Dispatch an email asynchronously using the ResendEmailService."""
+    import threading
+
+    service = ResendEmailService()
+
+    def _worker():
+        try:
+            service.send(
+                to=to_email,
+                subject=subject,
+                html=html_content,
+                text=text_content,
+            )
+        except Exception:
+            logger.exception("Failed to send email to %s", to_email)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
+import sys
 from pathlib import Path
 from corsheaders.defaults import default_headers
 from corsheaders.signals import check_request_enabled
@@ -60,6 +61,16 @@ if DEBUG:
 elif not SECRET_KEY or SECRET_KEY.startswith("django-insecure-") or SECRET_KEY == "change-me-in-production":
     raise ImproperlyConfigured("SECRET_KEY must be set to a strong value when DEBUG is false.")
 
+# MultiFernet keys
+HVT_ENCRYPTION_KEYS = _env_list("HVT_ENCRYPTION_KEYS")
+TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+if TESTING and not HVT_ENCRYPTION_KEYS:
+    from cryptography.fernet import Fernet
+    HVT_ENCRYPTION_KEYS = [Fernet.generate_key().decode("utf-8")]
+elif not DEBUG and not HVT_ENCRYPTION_KEYS:
+    raise ImproperlyConfigured("HVT_ENCRYPTION_KEYS must be configured when DEBUG is false.")
+
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 ALLOWED_HOSTS = _env_list(
@@ -80,6 +91,9 @@ ALLOWED_HOSTS = _env_list(
 
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS must be configured when DEBUG is false.")
+
+if (DEBUG or TESTING) and "testserver" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("testserver")
 
 default_frontend_origins = []
 if DEBUG:
@@ -114,6 +128,10 @@ INSTALLED_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.github",
+    "allauth.socialaccount.providers.discord",
+    "allauth.socialaccount.providers.apple",
+    "allauth.socialaccount.providers.microsoft",
+    "allauth.socialaccount.providers.gitlab",
     "dj_rest_auth",
     "dj_rest_auth.registration",
     "drf_spectacular",
@@ -164,13 +182,22 @@ WSGI_APPLICATION = "hvt.wsgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 # Supports DATABASE_URL (production/Docker) with fallback to individual env vars (local dev)
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default=(
+_db_default = os.getenv("DATABASE_URL")
+if not _db_default:
+    if os.getenv("DB_NAME"):
+        _db_default = (
             f"postgres://{os.getenv('DB_USER', '')}:{os.getenv('DB_PASSWORD', '')}"
             f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
             f"/{os.getenv('DB_NAME', '')}"
-        ),
+        )
+    elif not DEBUG and not TESTING:
+        raise ImproperlyConfigured("DATABASE_URL or DB_NAME must be configured when DEBUG is false.")
+    else:
+        _db_default = f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+
+DATABASES = {
+    "default": dj_database_url.config(
+        default=_db_default,
         conn_max_age=600,
     )
 }
@@ -226,7 +253,8 @@ SECURE_REFERRER_POLICY = os.getenv(
     "strict-origin-when-cross-origin" if not DEBUG else "same-origin",
 )
 X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
-EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", DEBUG)
+EXPOSE_ADMIN = _env_bool("EXPOSE_ADMIN", False if not DEBUG else True)
+DJANGO_ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", os.getenv("ADMIN_URL", "admin/")).strip("/") + "/"
 EXPOSE_API_DOCS = _env_bool("EXPOSE_API_DOCS", DEBUG)
 SILENCED_SYSTEM_CHECKS = ["auth.E003"]
 # Custom User model
@@ -258,6 +286,13 @@ AUTH_PASSWORD_VALIDATORS = [
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
+
+# Fast password hashing for tests only
+if "test" in sys.argv or any("test" in arg for arg in sys.argv):
+    PASSWORD_HASHERS = [
+        "django.contrib.auth.hashers.MD5PasswordHasher",
+    ]
+
 
 
 # Internationalization
@@ -348,7 +383,7 @@ REST_FRAMEWORK = {
         "auth_social_login_ip": "10/min",
         "auth_runtime_login_api_key": "60/min",
         "auth_runtime_social_api_key": "60/min",
-        "auth_token_refresh": "60/hour",
+        "auth_token_refresh": "300/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # Standardized error envelope for all API errors
@@ -489,7 +524,10 @@ SOCIALACCOUNT_PROVIDERS = {
     },
 }
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_API_KEY = os.getenv(
+    "RESEND_API_KEY",
+    "re_test_dummy_key_for_testing" if ("test" in sys.argv or any("test" in arg for arg in sys.argv)) else "",
+)
 RESEND_WEBHOOK_SIGNING_KEY = os.getenv("RESEND_WEBHOOK_SIGNING_KEY", "")
 API_KEY_MAX_PER_PROJECT = int(os.getenv("API_KEY_MAX_PER_PROJECT", "25"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@hvt.dev")

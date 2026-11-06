@@ -48,14 +48,57 @@ python manage.py runserver
 
 The API will be available at `http://localhost:8000`.
 
-### Docker
+### Production Self-Hosting with Docker Compose
 
-```bash
-cp .env.example .env
-docker-compose up --build
-```
+HVT is designed to run securely in production with Docker Compose.
 
-The compose stack starts PostgreSQL, Redis, and the Django API.
+1. **Clone and create environment configuration:**
+   ```bash
+   git clone https://github.com/markodera/hvt.git
+   cd hvt
+   cp .env.example .env
+   ```
+
+2. **Generate required production secrets:**
+   ```bash
+   # Generate SECRET_KEY
+   python -c "import secrets; print(secrets.token_urlsafe(50))"
+
+   # Generate HVT_ENCRYPTION_KEYS (for MultiFernet encryption of TOTP and OAuth secrets)
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+   Add both generated keys and your production database password to `.env`:
+   ```env
+   SECRET_KEY=your_generated_secret_key_here
+   HVT_ENCRYPTION_KEYS=your_generated_fernet_key_here
+   DB_PASSWORD=your_secure_db_password
+   ALLOWED_HOSTS=api.yourdomain.com
+   FRONTEND_URL=https://app.yourdomain.com
+   CORS_ALLOWED_ORIGINS=https://app.yourdomain.com
+   CSRF_TRUSTED_ORIGINS=https://app.yourdomain.com
+   ```
+
+3. **Start the production stack:**
+   ```bash
+   docker compose up -d --build
+   ```
+   The container boots in production mode with Gunicorn, automatically waits for PostgreSQL health checks, runs database migrations, collects static assets, and exposes `http://0.0.0.0:8000`.
+
+4. **Create initial administrator / owner:**
+   ```bash
+   docker compose exec web python manage.py createsuperuser
+   ```
+
+### Django Admin Interface (Opt-In)
+
+For production security, the Django Admin interface is **disabled by default** (`EXPOSE_ADMIN=0`).
+To enable it:
+1. In `.env`, set `EXPOSE_ADMIN=1`.
+2. Optionally configure a non-standard custom path for defense-in-depth:
+   ```env
+   DJANGO_ADMIN_PATH=secure-mgmt-portal/
+   ```
+3. Restart the service (`docker compose up -d`). Visiting `/secure-mgmt-portal/` will open the admin interface; the default `/admin/` endpoint remains inaccessible.
 
 ## Configuration
 
@@ -120,8 +163,12 @@ The TypeScript SDK now lives in its own repository so SDK contributors do not ne
 
 - SDK repo: [markodera/hvt-sdk](https://github.com/markodera/hvt-sdk)
 - NPM package: `@hvt/sdk`
-- Direct API users can integrate against [api.hvts.app](https://api.hvts.app) without using an SDK
+- Hosted Cloud API: [api.hvts.app](https://api.hvts.app) (recommended default for AI agents and vibe coders)
+- Direct API users can integrate against [api.hvts.app](https://api.hvts.app) without using an SDK or self-hosting
 
 ## License
 
-HVT is released under the [GNU Affero General Public License v3.0 only](LICENSE).
+HVT is licensed under the [Apache License, Version 2.0](LICENSE).
+See the [NOTICE](NOTICE) file for copyright and attribution information.
+
+> **Release Licensing Note:** Releases prior to v0.2.0 were licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). Starting with v0.2.0, HVT is licensed under the Apache-2.0 License.

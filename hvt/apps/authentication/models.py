@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from hvt.crypto import EncryptedTextField
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
@@ -78,6 +79,30 @@ class AuditLog(models.Model):
             "project.social_provider.deleted",
             "Project Social Provider Deleted",
         )
+
+        # MFA events
+        MFA_SETUP = "mfa.setup", "MFA Setup Initiated"
+        MFA_ENABLED = "mfa.enabled", "MFA Enabled"
+        MFA_DISABLED = "mfa.disabled", "MFA Disabled"
+        MFA_VERIFIED = "mfa.verified", "MFA Verified"
+        TOTP_BACKUP_CODE_USED = "totp.backup_code_used", "TOTP Backup Code Used"
+        TOTP_BACKUP_CODES_REGENERATED = "totp.backup_codes_regenerated", "TOTP Backup Codes Regenerated"
+
+        # Passkey events
+        PASSKEY_REGISTER_INITIATED = (
+            "passkey.register.initiated",
+            "Passkey Registration Initiated",
+        )
+        PASSKEY_REGISTERED = "passkey.registered", "Passkey Registered"
+        PASSKEY_LOGIN = "passkey.login", "Passkey Login"
+        PASSKEY_LOGIN_FAILED = "passkey.login.failed", "Passkey Login Failed"
+        PASSKEY_DELETED = "passkey.deleted", "Passkey Deleted"
+
+        # Magic Link events
+        MAGIC_LINK_REQUESTED = "magic_link.requested", "Magic Link Requested"
+        MAGIC_LINK_VERIFIED = "magic_link.verified", "Magic Link Verified"
+        MAGIC_LINK_FAILED = "magic_link.failed", "Magic Link Failed"
+        SECURITY_VIOLATION = "security.violation", "Security Violation"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -235,3 +260,116 @@ class AuditLog(models.Model):
         else:
             ip = request.META.get("REMOTE_ADDR")
         return ip
+
+
+class TOTPDevice(models.Model):
+    """
+    TOTP Two-Factor Authentication device for a user.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="totp_device",
+    )
+    secret = EncryptedTextField()
+    is_confirmed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "auth_totp_devices"
+
+    def __str__(self):
+        return f"TOTP for {self.user.email} (confirmed={self.is_confirmed})"
+
+
+class TOTPBackupCode(models.Model):
+    """
+    Single-use hashed backup codes for account recovery when TOTP device is unavailable.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        TOTPDevice,
+        on_delete=models.CASCADE,
+        related_name="backup_codes",
+    )
+    hashed_code = models.CharField(max_length=64, db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_totp_backup_codes"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "used" if self.used_at else "active"
+        return f"BackupCode ({status}) for {self.device.user.email}"
+
+
+class UserPasskeyCredential(models.Model):
+    """
+    FIDO2 / WebAuthn Passkey credential for biometric and hardware security key authentication.
+    Stores public key and signature counter to detect authenticator cloning.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="passkey_credentials",
+    )
+    name = models.CharField(max_length=120, default="Passkey")
+    credential_id = models.CharField(max_length=512, unique=True, db_index=True)
+    public_key = models.TextField(help_text="Base64URL-encoded COSE public key")
+    sign_count = models.BigIntegerField(default=0)
+    transports = models.JSONField(default=list, blank=True)
+    aaguid = models.CharField(max_length=64, blank=True)
+    backed_up = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "auth_passkey_credentials"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} for {self.user.email}"
+
+
+class MagicLinkToken(models.Model):
+    """
+    Cryptographically secure, single-use passwordless authentication token.
+    Stores only the SHA-256 hash of the token to prevent database leakage exploits.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="magic_link_tokens",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="magic_link_tokens",
+    )
+    token_hash = models.CharField(max_length=64, db_index=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_magic_link_tokens"
+        ordering = ["-created_at"]
+
+    def is_valid(self):
+        from django.utils import timezone
+
+        return not self.is_used and self.expires_at > timezone.now()
+
+

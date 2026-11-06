@@ -7,7 +7,7 @@ from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.contrib.sites.shortcuts import get_current_site
 from django.db import transaction
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from hvt.apps.authentication.identity import (
     get_control_plane_users_by_email,
@@ -257,6 +257,67 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         self._isolate_runtime_apps_for_provider(request, provider)
         return super().get_app(request, provider, client_id=client_id)
 
+    def is_social_email_verified(self, sociallogin, email: str) -> bool:
+        """
+        Determine whether the identity provider has explicitly verified this email.
+        Supports all 6 providers: Google, GitHub, Discord, Apple, Microsoft, GitLab.
+        If unverified, or if the provider does not say, returns False.
+        """
+        if not email:
+            return False
+        email_clean = email.lower()
+
+        # 1. Check allauth normalized email_addresses
+        for email_address in getattr(sociallogin, "email_addresses", []) or []:
+            cand = getattr(email_address, "email", "") or ""
+            if cand.lower() == email_clean and getattr(email_address, "verified", False) is True:
+                return True
+
+        # 2. Check provider-specific payload in extra_data
+        account = getattr(sociallogin, "account", None)
+        extra_data = getattr(account, "extra_data", {}) or {}
+        provider = str(getattr(account, "provider", "") or getattr(sociallogin, "provider", "")).lower()
+
+        if "google" in provider:
+            if extra_data.get("email_verified") is True or extra_data.get("verified_email") is True:
+                return True
+
+        elif "github" in provider:
+            emails = extra_data.get("emails", [])
+            if isinstance(emails, list):
+                for item in emails:
+                    if isinstance(item, dict) and str(item.get("email", "")).lower() == email_clean:
+                        if item.get("verified") is True:
+                            return True
+            if extra_data.get("email_verified") is True or extra_data.get("verified") is True:
+                return True
+
+        elif "discord" in provider:
+            if extra_data.get("verified") is True:
+                return True
+
+        elif "apple" in provider:
+            val = extra_data.get("email_verified")
+            if val is True or str(val).lower() in ("true", "1"):
+                return True
+
+        elif "microsoft" in provider:
+            if extra_data.get("email_verified") is True:
+                return True
+
+        elif "gitlab" in provider:
+            confirmed_at = extra_data.get("confirmed_at")
+            if confirmed_at is not None and str(confirmed_at).strip() != "":
+                return True
+            if extra_data.get("email_verified") is True:
+                return True
+
+        # Generic fallback
+        if extra_data.get("email_verified") is True:
+            return True
+
+        return False
+
     def _get_sociallogin_email(self, sociallogin):
         for email_address in getattr(sociallogin, "email_addresses", []):
             if getattr(email_address, "verified", False) and getattr(email_address, "email", ""):
@@ -333,6 +394,11 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         if not user:
             return
+
+        if not self.is_social_email_verified(sociallogin, email):
+            raise ValidationError(
+                {"detail": "Cannot link social identity: email is not verified by provider. Please log in to your existing account first."}
+            )
 
         sociallogin.user = user
         sociallogin.account.user = user

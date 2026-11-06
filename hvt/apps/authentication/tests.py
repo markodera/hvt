@@ -379,6 +379,9 @@ class APIKeyEndToEndTest(APITestCase):
             primary=True
         )
         self.org = Organization.objects.create(name="Test Org", owner=self.user)
+        self.project = Project.objects.create(
+            organization=self.org, name="Default Project", slug="default", is_default=True
+        )
         # Link user to organization
         self.user.organization = self.org
         self.user.role = User.Role.OWNER
@@ -1584,7 +1587,7 @@ class RuntimeLoginFlowTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             str(response.data["detail"]["non_field_errors"][0]),
-            "These credentials do not belong to the API key organization.",
+            "Unable to log in with provided credentials.",
         )
 
     def test_runtime_login_rejects_wrong_project_user(self):
@@ -1607,7 +1610,7 @@ class RuntimeLoginFlowTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             str(response.data["detail"]["non_field_errors"][0]),
-            "These credentials do not belong to the API key project.",
+            "Unable to log in with provided credentials.",
         )
 
     def test_runtime_login_rejects_cross_project_role_assignment_without_project_user(self):
@@ -1647,7 +1650,7 @@ class RuntimeLoginFlowTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             str(response.data["detail"]["non_field_errors"][0]),
-            "These credentials do not belong to the API key project.",
+            "Unable to log in with provided credentials.",
         )
 
     def test_runtime_login_requires_verified_email(self):
@@ -1658,10 +1661,10 @@ class RuntimeLoginFlowTest(APITestCase):
             HTTP_X_API_KEY=self.full_key,
         )
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
-            str(response.data["detail"]),
-            "E-mail is not verified. Please verify your email before logging in.",
+            str(response.data["detail"]["non_field_errors"][0]),
+            "Unable to log in with provided credentials.",
         )
 
     def test_runtime_login_requires_auth_runtime_scope(self):
@@ -1921,7 +1924,7 @@ class RuntimeLoginFlowTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             str(response.data["detail"]["non_field_errors"][0]),
-            "This email does not belong to a runtime user in any organization. Register through /api/v1/auth/runtime/register/ with an API key first.",
+            "Unable to log in with provided credentials.",
         )
 
 

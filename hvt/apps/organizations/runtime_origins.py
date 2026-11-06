@@ -12,15 +12,13 @@ RUNTIME_PUBLIC_CORS_PATH_PREFIXES = (
     "/api/v1/auth/runtime/password/reset/validate",
     "/api/v1/auth/runtime/password/reset/confirm",
     "/api/v1/auth/runtime/social",
+    "/api/v1/auth/runtime/passkey",
+    "/api/v1/auth/runtime/magic-link",
     "/api/v1/runtime/invitations/accept",
 )
 RUNTIME_API_KEY_CORS_PATH_PREFIXES = (
-    "/api/v1/auth/runtime/register",
-    "/api/v1/auth/runtime/login",
-    "/api/v1/auth/runtime/register/resend-email",
-    "/api/v1/auth/runtime/password/reset",
-    "/api/v1/auth/runtime/social",
-    "/api/v1/runtime/invitations",
+    "/api/v1/auth/runtime",
+    "/api/v1/runtime",
 )
 
 

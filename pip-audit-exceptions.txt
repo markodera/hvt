@@ -1,0 +1,3 @@
+# pip-audit accepted exceptions
+# Any accepted vulnerabilities or upstream issues without available fixes are listed here with justifications.
+# Format: <VULN_ID> # <reason>
