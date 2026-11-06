@@ -30,6 +30,10 @@ from allauth.account.utils import complete_signup
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.github.views import GitHubOAuth2Adapter
+from allauth.socialaccount.providers.discord.views import DiscordOAuth2Adapter
+from allauth.socialaccount.providers.apple.views import AppleOAuth2Adapter
+from allauth.socialaccount.providers.microsoft.views import MicrosoftGraphOAuth2Adapter
+from allauth.socialaccount.providers.gitlab.views import GitLabOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from rest_framework_simplejwt.views import TokenRefreshView
 import hmac
@@ -40,6 +44,7 @@ import json
 from hvt.apps.users.models import User
 from hvt.apps.organizations.access import user_has_project_access
 from hvt.apps.organizations.models import APIKey, Project, SocialProviderConfig
+from hvt.apps.authentication.models import AuditLog, TOTPDevice
 from hvt.api.v1.serializers.users import (
     ControlPlaneRegisterSerializer,
     CustomSocialLoginSerializer,
@@ -160,6 +165,14 @@ def _provider_scope(provider: str):
         return ["openid", "email", "profile"]
     if provider == "github":
         return ["user:email"]
+    if provider == "discord":
+        return ["identify", "email"]
+    if provider == "apple":
+        return ["name", "email"]
+    if provider == "microsoft":
+        return ["User.Read", "email", "openid", "profile"]
+    if provider == "gitlab":
+        return ["read_user", "openid", "email"]
     return []
 
 
@@ -168,6 +181,14 @@ def _provider_authorization_url(provider: str) -> str:
         return "https://accounts.google.com/o/oauth2/v2/auth"
     if provider == "github":
         return "https://github.com/login/oauth/authorize"
+    if provider == "discord":
+        return "https://discord.com/api/oauth2/authorize"
+    if provider == "apple":
+        return "https://appleid.apple.com/auth/authorize"
+    if provider == "microsoft":
+        return "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+    if provider == "gitlab":
+        return "https://gitlab.com/oauth/authorize"
     return ""
 
 
@@ -366,6 +387,77 @@ class PlatformUserOnlyMixin:
 class HVTLoginView(PlatformUserOnlyMixin, LoginView):
     throttle_classes = CONTROL_PLANE_LOGIN_THROTTLES
 
+    def post(self, request, *args, **kwargs):
+        self.request = request
+        self.serializer = self.get_serializer(data=self.request.data)
+        try:
+            self.serializer.is_valid(raise_exception=True)
+        except PermissionDenied:
+            return self._platform_forbidden_response()
+        except serializers.ValidationError:
+            if self._resolve_project_scoped_password_user(request) is not None:
+                return self._platform_forbidden_response()
+            raise
+
+        user = self.serializer.validated_data["user"]
+        if is_project_scoped_user(user):
+            return self._platform_forbidden_response()
+
+        # Enforce 2FA if active
+        from hvt.apps.authentication.models import TOTPDevice, AuditLog
+        from django.core import signing
+        from django.utils import timezone
+        import pyotp
+
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    success=False,
+                    error_message="Invalid 2FA code during login",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                event_data={"email": user.email, "method": "totp"},
+            )
+
+        self.login()
+        AuditLog.log(
+            event_type=AuditLog.EventType.USER_LOGIN,
+            request=request,
+            user=user,
+            event_data={"email": user.email, "method": "password"},
+        )
+        return self.get_response()
+
 
 @extend_schema_view(
     post=extend_schema(
@@ -382,6 +474,65 @@ class RuntimeLoginView(LoginView):
 
     serializer_class = RuntimeLoginSerializer
     throttle_classes = RUNTIME_LOGIN_THROTTLES
+
+    def post(self, request, *args, **kwargs):
+        self.request = request
+        self.serializer = self.get_serializer(data=self.request.data)
+        self.serializer.is_valid(raise_exception=True)
+
+        user = self.serializer.validated_data["user"]
+        from hvt.apps.authentication.models import TOTPDevice
+        from django.core import signing
+        import pyotp
+
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            project = getattr(self.request.auth, "project", None)
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "project_id": str(project.id) if project else None, "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    success=False,
+                    error_message="Invalid 2FA code during runtime login",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                event_data={"email": user.email, "method": "totp"},
+            )
+
+        self.login()
+        AuditLog.log(
+            event_type=AuditLog.EventType.USER_LOGIN,
+            request=request,
+            user=user,
+            event_data={"email": user.email, "method": "runtime_password"},
+        )
+        return self.get_response()
 
     def login(self):
         self.user = self.serializer.validated_data["user"]
@@ -405,6 +556,38 @@ class GoogleLogin(PlatformUserOnlyMixin, SocialLoginView):
 class GithubLogin(PlatformUserOnlyMixin, SocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/github/callback")
+    client_class = HVTCompatibilityOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
+
+
+class DiscordLogin(PlatformUserOnlyMixin, SocialLoginView):
+    adapter_class = DiscordOAuth2Adapter
+    callback_url = _frontend_callback_url("/auth/discord/callback")
+    client_class = HVTCompatibilityOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
+
+
+class AppleLogin(PlatformUserOnlyMixin, SocialLoginView):
+    adapter_class = AppleOAuth2Adapter
+    callback_url = _frontend_callback_url("/auth/apple/callback")
+    client_class = HVTCompatibilityOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
+
+
+class MicrosoftLogin(PlatformUserOnlyMixin, SocialLoginView):
+    adapter_class = MicrosoftGraphOAuth2Adapter
+    callback_url = _frontend_callback_url("/auth/microsoft/callback")
+    client_class = HVTCompatibilityOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
+
+
+class GitlabLogin(PlatformUserOnlyMixin, SocialLoginView):
+    adapter_class = GitLabOAuth2Adapter
+    callback_url = _frontend_callback_url("/auth/gitlab/callback")
     client_class = HVTCompatibilityOAuth2Client
     serializer_class = CustomSocialLoginSerializer
     throttle_classes = SOCIAL_LOGIN_THROTTLES
@@ -436,6 +619,22 @@ class RuntimeGoogleLogin(RuntimeSocialLoginView):
 class RuntimeGithubLogin(RuntimeSocialLoginView):
     adapter_class = GitHubOAuth2Adapter
 
+
+class RuntimeDiscordLogin(RuntimeSocialLoginView):
+    adapter_class = DiscordOAuth2Adapter
+
+
+class RuntimeAppleLogin(RuntimeSocialLoginView):
+    adapter_class = AppleOAuth2Adapter
+
+
+class RuntimeMicrosoftLogin(RuntimeSocialLoginView):
+    adapter_class = MicrosoftGraphOAuth2Adapter
+
+
+class RuntimeGitlabLogin(RuntimeSocialLoginView):
+    adapter_class = GitLabOAuth2Adapter
+
 class ControlPlaneSocialProviderListView(views.APIView):
     """Expose configured control-plane social providers for the HVT dashboard."""
 
@@ -451,7 +650,7 @@ class ControlPlaneSocialProviderListView(views.APIView):
     def get(self, request, *args, **kwargs):
         providers = []
         adapter = CustomSocialAccountAdapter()
-        for provider in ("google", "github"):
+        for provider in ("google", "github", "discord", "apple", "microsoft", "gitlab"):
             config = settings.SOCIALACCOUNT_PROVIDERS.get(provider, {})
             app_config = config.get("APP") or {}
             client_id = app_config.get("client_id") or ""
@@ -550,6 +749,10 @@ class RuntimeAPIKeyScopedRequestMixin:
         api_key = getattr(request, "auth", None)
         if not isinstance(api_key, APIKey):
             raise NotAuthenticated("A valid X-API-Key header is required.")
+        if getattr(api_key, "key_type", None) == APIKey.KeyType.MANAGEMENT:
+            raise PermissionDenied(
+                "Management keys cannot be used for runtime authentication. Use a runtime client key."
+            )
         if not api_key.has_scope("auth:runtime"):
             raise PermissionDenied(
                 "This API key does not have the required auth:runtime scope."

@@ -1,0 +1,45 @@
+{
+  "name": "@hvt/cli",
+  "version": "0.1.0",
+  "description": "Official CLI for HVT — Declarative schema provisioning, plan previews, and auth synchronization.",
+  "bin": {
+    "hvt": "./bin/hvt.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/*.test.js",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "hvt",
+    "auth",
+    "authentication",
+    "rbac",
+    "cli",
+    "provisioning",
+    "schema"
+  ],
+  "author": "Mark Odera and HVT Contributors",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -79,6 +79,37 @@ class ProjectSerializer(serializers.ModelSerializer):
 
         return normalize_runtime_origins(normalized_origins)
 
+    has_active_live_keys = serializers.SerializerMethodField()
+    can_use_setup_prompt = serializers.SerializerMethodField()
+    setup_prompt_notice = serializers.SerializerMethodField()
+
+    def get_has_active_live_keys(self, obj) -> bool:
+        from hvt.apps.organizations.models import APIKey
+        from django.utils import timezone
+        from django.db import models
+        now = timezone.now()
+        return (
+            APIKey.objects.filter(
+                project=obj,
+                environment=APIKey.Environment.LIVE,
+                is_active=True,
+            )
+            .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+            .exists()
+        )
+
+    def get_can_use_setup_prompt(self, obj) -> bool:
+        return not self.get_has_active_live_keys(obj)
+
+    def get_setup_prompt_notice(self, obj) -> str | None:
+        if self.get_has_active_live_keys(obj):
+            return (
+                "This project already has an active live API key. Under Option C plane isolation, "
+                "AI setup prompts with test keys cannot modify projects in live mode. "
+                "Use a live management key in CI/CD or apply changes via the dashboard."
+            )
+        return None
+
     class Meta:
         model = Project
         fields = [
@@ -90,10 +121,21 @@ class ProjectSerializer(serializers.ModelSerializer):
             "allow_signup",
             "frontend_url",
             "allowed_origins",
+            "has_active_live_keys",
+            "can_use_setup_prompt",
+            "setup_prompt_notice",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "is_default", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "is_default",
+            "has_active_live_keys",
+            "can_use_setup_prompt",
+            "setup_prompt_notice",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class ProjectPermissionSerializer(serializers.ModelSerializer):
@@ -311,6 +353,11 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
         default=APIKey.Environment.TEST,
         help_text="'test' for sandbox, 'live' for production",
     )
+    key_type = serializers.ChoiceField(
+        choices=APIKey.KeyType.choices,
+        default=APIKey.KeyType.RUNTIME,
+        help_text="'runtime' for app client authentication, 'management' for schema provisioning",
+    )
     project_id = serializers.UUIDField(
         required=False,
         write_only=True,
@@ -334,6 +381,7 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "environment",
+            "key_type",
             "scopes",
             "expires_at",
             "project_id",
@@ -371,6 +419,23 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        key_type = attrs.get("key_type", getattr(self.instance, "key_type", APIKey.KeyType.RUNTIME))
+        scopes = set(attrs.get("scopes", []))
+        if key_type == APIKey.KeyType.RUNTIME:
+            prohibited = scopes.intersection({"schema:sync", "schema:plan", "api_keys:write"})
+            if prohibited:
+                raise serializers.ValidationError({
+                    "scopes": [f"Runtime client keys cannot carry provisioning or key-management scopes: {sorted(prohibited)}"]
+                })
+        elif key_type == APIKey.KeyType.MANAGEMENT:
+            if "auth:runtime" in scopes or "auth:*" in scopes:
+                raise serializers.ValidationError({
+                    "scopes": ["Management keys cannot carry runtime authentication scopes (auth:runtime)."]
+                })
+            if "api_keys:write" in scopes or "api_keys:*" in scopes:
+                raise serializers.ValidationError({
+                    "scopes": ["Management keys cannot create or rotate API keys."]
+                })
         organization = self.context.get("organization")
         project_id = attrs.pop("project_id", None)
 
@@ -423,14 +488,18 @@ class APIKeyCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         environment = validated_data.pop("environment", "test")
+        key_type = validated_data.pop("key_type", APIKey.KeyType.RUNTIME)
         # Generate the key
-        prefix, full_key, hashed_key = APIKey.generate_key(environment=environment)
+        prefix, full_key, hashed_key = APIKey.generate_key(
+            environment=environment, key_type=key_type
+        )
 
         # Create the API Key object (organization and created_by come from perform_create)
         api_key = APIKey.objects.create(
             prefix=prefix,
             hashed_key=hashed_key,
             environment=environment,
+            key_type=key_type,
             **validated_data,
         )
 
@@ -471,6 +540,7 @@ class APIKeyListSerializer(serializers.ModelSerializer):
             "prefix",
             "environment",
             "environment_display",
+            "key_type",
             "project",
             "project_name",
             "project_slug",

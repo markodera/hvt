@@ -491,7 +491,12 @@ class CustomSocialLoginSerializer(SocialLoginSerializer):
     def validate(self, attrs):
         try:
             return super().validate(attrs)
-        except serializers.ValidationError:
+        except serializers.ValidationError as exc:
+            detail_str = str(exc)
+            if "Failed to exchange code" in detail_str:
+                raise serializers.ValidationError(
+                    "Social login failed. Please try again."
+                ) from exc
             raise
         except exceptions.PermissionDenied:
             raise

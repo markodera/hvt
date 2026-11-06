@@ -78,3 +78,15 @@ If you add a migration, mention it explicitly in the PR description.
 ## Security
 
 Do not open public issues for vulnerabilities. Follow [SECURITY.md](SECURITY.md).
+
+## Licensing and Developer Certificate of Origin (DCO)
+
+All contributions to HVT are licensed under the [Apache License, Version 2.0](LICENSE).
+
+To ensure provenance, all commits must include a Developer Certificate of Origin (DCO) sign-off line:
+
+```text
+Signed-off-by: Developer Name <developer@example.com>
+```
+
+You can automatically add this when committing using `git commit -s`.

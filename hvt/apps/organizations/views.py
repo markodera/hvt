@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions, status, filters, serializers
+from rest_framework import generics, permissions, status, filters, serializers, parsers
 from rest_framework.response import Response
 from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
 from rest_framework.views import APIView
@@ -28,6 +28,7 @@ from .models import (
 )
 from hvt.apps.authentication.backends import (
     APIKeyAuthentication,
+    ManagementAPIKeyAuthentication,
     HVTJWTCookieAuthentication,
     HVTJWTAuthentication,
 )
@@ -2335,3 +2336,123 @@ class PermissionsMatrixView(APIView):
             "permissions": effective,
             "matrix": PERMISSION_MATRIX,
         })
+
+
+
+
+
+class YAMLOrJSONParser(parsers.BaseParser):
+    """Parses JSON or YAML payloads for declarative schema synchronization."""
+    media_type = "*/*"
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        import yaml
+        raw = stream.read()
+        if not raw:
+            return {}
+        try:
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8")
+            return yaml.safe_load(raw)
+        except Exception as exc:
+            raise serializers.ValidationError(f"Invalid YAML/JSON payload: {exc}")
+
+class ProjectSchemaSyncView(APIView):
+    """
+    Declarative Schema Sync endpoint for projects.
+    Synchronizes roles, permissions, and social provider configs.
+    Supports dry-run planning, pruning of missing manifest-owned objects,
+    and automatic runtime client key generation.
+    """
+
+    authentication_classes = [
+        ManagementAPIKeyAuthentication,
+        HVTJWTAuthentication,
+        HVTJWTCookieAuthentication,
+    ]
+    parser_classes = [
+        parsers.JSONParser,
+        YAMLOrJSONParser,
+    ]
+    permission_classes = [IsOrgOwnerOrAPIKey]
+    api_key_write_scopes = ("schema:sync",)
+    api_key_scope_map = {
+        "POST": ("schema:sync", "schema:plan"),
+    }
+
+    def post(self, request, project_pk):
+        from hvt.apps.organizations.schema_sync import (
+            SchemaSyncService,
+            parse_manifest_payload,
+        )
+
+        api_key = getattr(request, "auth", None)
+        if isinstance(api_key, APIKey):
+            # Derive org and project from key, return 404 if URL differs
+            if str(api_key.project_id) != str(project_pk):
+                raise NotFound("Project not found.")
+            project = get_object_or_404(
+                Project.objects.select_related("organization"),
+                id=project_pk,
+                organization_id=api_key.organization_id,
+                is_active=True,
+            )
+            environment = api_key.environment
+            actor_api_key = api_key
+        else:
+            user = request.user
+            if not getattr(user, "is_authenticated", False) or not user.organization_id:
+                raise NotAuthenticated("Authentication required.")
+            if not user.is_org_owner():
+                raise PermissionDenied("You must be the organization owner to perform this action.")
+            project = get_object_or_404(
+                Project.objects.select_related("organization"),
+                id=project_pk,
+                organization_id=user.organization_id,
+                is_active=True,
+            )
+            environment = request.query_params.get("environment", "test")
+            actor_api_key = None
+
+        raw_body = request.data
+        if not isinstance(raw_body, dict):
+            try:
+                manifest_dict = parse_manifest_payload(request.body)
+            except Exception:
+                manifest_dict = parse_manifest_payload(raw_body)
+        else:
+            manifest_dict = raw_body
+
+        def _get_bool_param(name: str, default: bool = False) -> bool:
+            if name in request.query_params:
+                val = str(request.query_params[name]).strip().lower()
+                return val in ("1", "true", "yes", "on")
+            if isinstance(manifest_dict, dict) and name in manifest_dict:
+                return bool(manifest_dict.get(name))
+            return default
+
+        dry_run = _get_bool_param("dry_run", False)
+        prune = _get_bool_param("prune", False)
+        issue_client_key = _get_bool_param("issue_client_key", False)
+
+        # Enforce that schema:plan cannot execute non-dry-run syncs
+        if isinstance(api_key, APIKey):
+            if not dry_run and not api_key.has_scope("schema:sync"):
+                raise PermissionDenied(
+                    "The 'schema:plan' scope permits dry-run only. Use 'schema:sync' to apply changes."
+                )
+
+        manifest = parse_manifest_payload(manifest_dict)
+
+        result = SchemaSyncService.execute_sync(
+            project=project,
+            manifest=manifest,
+            dry_run=dry_run,
+            prune=prune,
+            issue_client_key=issue_client_key,
+            environment=environment,
+            actor_api_key=actor_api_key,
+            request=request,
+        )
+
+        return Response(result.to_dict(), status=status.HTTP_200_OK)

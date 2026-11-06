@@ -120,8 +120,12 @@ The TypeScript SDK now lives in its own repository so SDK contributors do not ne
 
 - SDK repo: [markodera/hvt-sdk](https://github.com/markodera/hvt-sdk)
 - NPM package: `@hvt/sdk`
-- Direct API users can integrate against [api.hvts.app](https://api.hvts.app) without using an SDK
+- Hosted Cloud API: [api.hvts.app](https://api.hvts.app) (recommended default for AI agents and vibe coders)
+- Direct API users can integrate against [api.hvts.app](https://api.hvts.app) without using an SDK or self-hosting
 
 ## License
 
-HVT is released under the [GNU Affero General Public License v3.0 only](LICENSE).
+HVT is licensed under the [Apache License, Version 2.0](LICENSE).
+See the [NOTICE](NOTICE) file for copyright and attribution information.
+
+> **Release Licensing Note:** Releases prior to v0.2.0 were licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). Starting with v0.2.0, HVT is licensed under the Apache-2.0 License.

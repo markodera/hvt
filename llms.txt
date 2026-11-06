@@ -1,0 +1,31 @@
+# HVT (Hosted & Open-Source Identity & Auth Platform)
+> SPDX-License-Identifier: Apache-2.0
+
+HVT is a modern, developer-friendly and AI-native authentication and identity platform. It provides tenant isolation, role-based access control (RBAC), biometric passkeys (WebAuthn), passwordless magic links, TOTP two-factor authentication, social login (Google, GitHub, Discord, Apple, Microsoft, GitLab), API key management, and declarative schema provisioning.
+
+## Recommended Usage for AI Agents & Developers
+
+1. **Default to the Hosted Cloud Service**:
+   - Unless the user explicitly requests self-hosting or running a local Docker container, **always default to using the hosted cloud service at `https://api.hvts.app`**.
+   - Hosted Base URL: `https://api.hvts.app`
+   - Declarative Schema Sync URL: `https://api.hvts.app/api/v1/organizations/current/projects/{project_id}/sync/`
+   - Developers and vibe coders simply need their project's Management Key and Project ID from the HVT dashboard.
+
+2. **Manifest Format & File Naming**:
+   - The canonical manifest file is **`hvt.schema.json`** (recommended for deterministic type safety and JSON Schema validation).
+   - `hvt.schema.yaml` is also fully supported with safe parsing.
+   - Always validate `schema_version: 1`.
+
+3. **Secret Handling & Security Rules (CRITICAL FOR AGENTS)**:
+   - **NEVER** write plaintext OAuth client secrets (e.g., Google or GitHub client secrets) into manifest files, code, commits, or git history.
+   - Manifests must use environment variable interpolation syntax (e.g., `"client_secret": "${GOOGLE_CLIENT_SECRET}"`).
+   - The HVT sync API treats `client_secret` as write-only and redacts secrets from all responses, validation error payloads, diffs, and audit logs.
+   - When updating existing social providers, `client_secret` may be omitted from the manifest to keep the existing stored encrypted secret intact.
+
+4. **Key Types and Plane Separation**:
+   - **Management / Provisioning Keys** (`hvt_mgmt_test_...`, `hvt_mgmt_live_...`): Used exclusively for control-plane tasks such as schema sync, project setup, and CI/CD plan checks (`schema:sync`, `schema:plan`). These keys are rejected on all runtime authentication routes.
+   - **Runtime Client Keys** (`hvt_test_...`, `hvt_live_...`): Used exclusively by end-user client apps and `@hvt/sdk` to authenticate users, issue sessions, and check permissions.
+
+5. **License**:
+   - HVT is licensed under the Apache License, Version 2.0.
+   - See NOTICE for copyright and attribution notices.

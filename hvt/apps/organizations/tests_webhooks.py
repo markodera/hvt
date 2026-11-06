@@ -43,6 +43,7 @@ def _create_org_and_owner(email="owner@example.com"):
     """Create an organization with an owner user."""
     user = User.objects.create_user(email=email, password="Str0ng!Pass")
     org = Organization.objects.create(name="Test Org", slug="test-org", owner=user)
+    org.ensure_default_project()
     user.organization = org
     user.role = "owner"
     user.save()

@@ -379,6 +379,9 @@ class APIKeyEndToEndTest(APITestCase):
             primary=True
         )
         self.org = Organization.objects.create(name="Test Org", owner=self.user)
+        self.project = Project.objects.create(
+            organization=self.org, name="Default Project", slug="default", is_default=True
+        )
         # Link user to organization
         self.user.organization = self.org
         self.user.role = User.Role.OWNER

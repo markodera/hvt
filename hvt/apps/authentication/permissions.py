@@ -31,14 +31,21 @@ def _resolve_api_key_scope_requirements(view, method: str):
 def _allow_api_key(request, view, permission_name):
     """Allow API key access only when the key has the required scopes."""
     api_key = request.auth
-    required_scopes = _resolve_api_key_scope_requirements(view, request.method)
-
-    if request.method not in permissions.SAFE_METHODS:
-        logger.warning(
-            f"[{permission_name}] API key denied for write request: {request.method}"
-        )
+    if not api_key:
         return False
 
+    # Default-deny for write methods unless view explicitly declares write scopes
+    if request.method not in permissions.SAFE_METHODS:
+        explicit_scopes = getattr(view, "api_key_scope_map", {}).get(request.method) or getattr(view, "api_key_write_scopes", None)
+        if not explicit_scopes:
+            logger.warning(
+                "[%s] API key denied for write request %s: view does not explicitly declare api_key_write_scopes",
+                permission_name,
+                request.method,
+            )
+            return False
+
+    required_scopes = _resolve_api_key_scope_requirements(view, request.method)
     if not api_key.has_any_scope(*required_scopes):
         logger.warning(
             "[%s] API key missing required scopes for %s: required=%s granted=%s",
