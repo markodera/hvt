@@ -130,7 +130,7 @@ HVT declares 17 models across its three internal domain applications.
 * **Indexes:** `[-created_at, event_type]`, `[organization, -created_at]`, `[actor_user, -created_at]`.
 
 ##### 15. `TOTPDevice` (`db_table = "auth_totp_devices"`) [VERIFIED `hvt/apps/authentication/models.py:262-283`]
-* **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (CharField 64, plaintext base32), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
+* **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (`EncryptedTextField`, MultiFernet encrypted at rest with `v1:` prefix), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
 
 ##### 16. `UserPasskeyCredential` (`db_table = "auth_passkey_credentials"`) [VERIFIED `hvt/apps/authentication/models.py:285-313`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="passkey_credentials")`), `name` (CharField 120, default="Passkey"), `credential_id` (CharField 512, unique=True, indexed), `public_key` (TextField, Base64URL COSE), `sign_count` (BigIntegerField, default=0), `transports` (JSONField, default=list), `aaguid` (CharField 64, blank=True), `backed_up` (BooleanField, default=False), `created_at`, `last_used_at`.
@@ -162,10 +162,10 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 43 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 45 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
 * **`hvt.apps.organizations` (25 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`).
-* **`hvt.apps.authentication` (12 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`).
+* **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
 
 ---
 

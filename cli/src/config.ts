@@ -109,8 +109,16 @@ export function resolveConfig(options: {
   const cwd = options.cwd || process.cwd();
   loadEnvFiles(cwd);
 
-  const apiUrl = (options.apiUrl || process.env.HVT_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
-  const projectId = options.projectId || process.env.HVT_PROJECT_ID;
+  const apiUrl = (
+    options.apiUrl ||
+    process.env.HVT_API_URL ||
+    process.env.NEXT_PUBLIC_HVT_HOST ||
+    DEFAULT_API_URL
+  ).replace(/\/+$/, "");
+  const projectId =
+    options.projectId ||
+    process.env.HVT_PROJECT_ID ||
+    process.env.NEXT_PUBLIC_HVT_PROJECT_ID;
   const managementKey = options.key || process.env.HVT_MANAGEMENT_KEY;
 
   if (!projectId) {

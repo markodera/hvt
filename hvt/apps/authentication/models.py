@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+from hvt.crypto import EncryptedTextField
 
 
 class AuditLog(models.Model):
@@ -223,6 +224,9 @@ class AuditLog(models.Model):
         if actor_api_key and project is None:
             project = getattr(actor_api_key, "project", None)
 
+        if actor_user and project is None:
+            project = getattr(actor_user, "project", None)
+
         if project is not None and organization is None:
             organization = getattr(project, "organization", None)
 
@@ -270,7 +274,7 @@ class TOTPDevice(models.Model):
         on_delete=models.CASCADE,
         related_name="totp_device",
     )
-    secret = models.CharField(max_length=64)
+    secret = EncryptedTextField(help_text="TOTP secret (encrypted at rest via MultiFernet).")
     is_confirmed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)

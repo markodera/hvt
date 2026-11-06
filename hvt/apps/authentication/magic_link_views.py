@@ -3,6 +3,7 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
@@ -122,19 +123,25 @@ class MagicLinkVerifyView(views.APIView):
             return Response({"error": "Token is required.", "code": "token_required"}, status=status.HTTP_400_BAD_REQUEST)
 
         token_hash = _hash_token(token)
-        record = MagicLinkToken.objects.filter(
-            token_hash=token_hash,
-            project__isnull=True,
-        ).select_related("user").first()
-
-        if not record or not record.is_valid():
-            return Response(
-                {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            record = (
+                MagicLinkToken.objects.select_for_update()
+                .filter(
+                    token_hash=token_hash,
+                    project__isnull=True,
+                )
+                .select_related("user")
+                .first()
             )
 
-        record.is_used = True
-        record.save(update_fields=["is_used"])
+            if not record or not record.is_valid():
+                return Response(
+                    {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            record.is_used = True
+            record.save(update_fields=["is_used"])
 
         user = record.user
         access_token, refresh_token = build_hvt_token_pair(user)
@@ -212,7 +219,9 @@ class RuntimeMagicLinkRequestView(views.APIView):
             event_type=AuditLog.EventType.MAGIC_LINK_REQUESTED,
             request=request,
             user=user,
+            project=project,
             event_data={"email": user.email, "project_id": str(project.id)},
+            success=True,
         )
 
         return Response(
@@ -244,26 +253,33 @@ class RuntimeMagicLinkVerifyView(views.APIView):
             return Response({"error": "Token is required.", "code": "token_required"}, status=status.HTTP_400_BAD_REQUEST)
 
         token_hash = _hash_token(token)
-        record = MagicLinkToken.objects.filter(
-            token_hash=token_hash,
-            project=project,
-        ).select_related("user").first()
-
-        if not record or not record.is_valid():
-            AuditLog.log(
-                event_type=AuditLog.EventType.MAGIC_LINK_FAILED,
-                request=request,
-                user=record.user if record else None,
-                success=False,
-                error_message="Invalid or expired magic link token",
-            )
-            return Response(
-                {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            record = (
+                MagicLinkToken.objects.select_for_update()
+                .filter(
+                    token_hash=token_hash,
+                    project=project,
+                )
+                .select_related("user")
+                .first()
             )
 
-        record.is_used = True
-        record.save(update_fields=["is_used"])
+            if not record or not record.is_valid():
+                AuditLog.log(
+                    event_type=AuditLog.EventType.MAGIC_LINK_FAILED,
+                    request=request,
+                    user=record.user if record else None,
+                    project=project,
+                    success=False,
+                    error_message="Invalid or expired magic link token",
+                )
+                return Response(
+                    {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            record.is_used = True
+            record.save(update_fields=["is_used"])
 
         user = record.user
         access_token, refresh_token = build_hvt_token_pair(user, project=project)
@@ -272,7 +288,9 @@ class RuntimeMagicLinkVerifyView(views.APIView):
             event_type=AuditLog.EventType.MAGIC_LINK_VERIFIED,
             request=request,
             user=user,
+            project=project,
             event_data={"email": user.email, "project_id": str(project.id)},
+            success=True,
         )
 
         return Response(

@@ -176,7 +176,7 @@ The following comprehensive table inventories the primary endpoint families acro
 #### 16. Onboarding Quickstart & AI Setup Prompt
 * **Status:** `WORKING` [VERIFIED `hvt.apps.organizations.tests_onboarding`].
 * **Mechanics:**
-  * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`) and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
+  * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`), counting both standard and passwordless/social/invite logins (`USER_LOGIN`, `MAGIC_LINK_VERIFIED`, `PASSKEY_LOGIN`, `SOCIAL_LOGIN`, `RUNTIME_USER_INVITE_ACCEPTED`), and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
   * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity).
   * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.

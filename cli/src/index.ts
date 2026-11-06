@@ -18,6 +18,7 @@ program
   .option("--api-url <url>", "HVT API base URL (defaults to https://api.hvts.app or HVT_API_URL)")
   .option("-k, --key <key>", "HVT Management Key (defaults to HVT_MANAGEMENT_KEY)")
   .option("-p, --project <id>", "HVT Project ID (defaults to HVT_PROJECT_ID)")
+  .option("--project-id <id>", "Alias for --project (defaults to HVT_PROJECT_ID)")
   .option("-s, --schema <path>", "Path to schema file (defaults to hvt.schema.json or hvt.schema.yaml)")
   .option("--verbose", "Show detailed error stack traces")
   .option("--json", "Output results as JSON");
@@ -48,7 +49,7 @@ schemaGroup
       const globalOpts = program.opts();
       await planCommand({
         apiUrl: globalOpts.apiUrl,
-        projectId: globalOpts.project,
+        projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         schema: globalOpts.schema,
         json: globalOpts.json,
@@ -69,7 +70,7 @@ schemaGroup
       const globalOpts = program.opts();
       await syncCommand({
         apiUrl: globalOpts.apiUrl,
-        projectId: globalOpts.project,
+        projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         schema: globalOpts.schema,
         prune: cmdOpts.prune,
@@ -90,7 +91,7 @@ program
       const globalOpts = program.opts();
       await planCommand({
         apiUrl: globalOpts.apiUrl,
-        projectId: globalOpts.project,
+        projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         schema: globalOpts.schema,
         json: globalOpts.json,
@@ -110,7 +111,7 @@ program
       const globalOpts = program.opts();
       await syncCommand({
         apiUrl: globalOpts.apiUrl,
-        projectId: globalOpts.project,
+        projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         schema: globalOpts.schema,
         prune: cmdOpts.prune,
@@ -132,7 +133,7 @@ program
       const globalOpts = program.opts();
       await whoamiCommand({
         apiUrl: globalOpts.apiUrl,
-        projectId: globalOpts.project,
+        projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         json: globalOpts.json,
       });

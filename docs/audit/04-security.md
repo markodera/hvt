@@ -69,7 +69,7 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
 *   **Magic Link Tokens:** 32-byte cryptographically secure random token generated via `secrets.token_urlsafe(32)`. Stored exclusively as a SHA-256 hash in `MagicLinkToken.token_hash`. Configured with a 15-minute expiration (`MAGIC_LINK_EXPIRE_MINUTES = 15`) and single-use invalidation setting `used_at = timezone.now()` [VERIFIED `hvt/apps/authentication/models.py:55-80`].
 *   **Password Reset Tokens:** Employs Django's standard `PasswordResetTokenGenerator` which derives an HMAC over the user's primary key, password hash salt, and last login timestamp. Single-use is naturally enforced because resetting the password alters the underlying salt. Default timeout is 3 days [VERIFIED `django/contrib/auth/tokens.py`].
 *   **Invitation Tokens:** Raw 32-byte UUID hex strings are stored **unhashed** in `OrganizationInvitation.token` and `ProjectInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:145-155`]. Tokens expire after 72 hours.
-*   **TOTP Secret Storage:** `TOTPDevice.secret` stores a raw base32 ASCII string directly in the database (`CharField(max_length=64)`) **without encryption** [VERIFIED `hvt/apps/authentication/models.py:12-30`].
+*   **TOTP Secret Storage:** `TOTPDevice.secret` is encrypted at rest using `EncryptedTextField` with MultiFernet (prefixed with `v1:`) and automatically decrypted upon retrieval [VERIFIED `hvt/apps/authentication/models.py:274`, `tests/test_crypto.py`].
 *   **Backup Codes:** **Completely absent**. No model, database table, or view logic exists for generating or redeeming single-use TOTP recovery codes. If an end-user loses their authenticator device, they are locked out permanently unless an operator manually modifies the database [VERIFIED `hvt/apps/authentication/` inspection].
 
 ### 6. Password Hashers & Policies
@@ -119,8 +119,8 @@ if existing_user:
 ```
 **Risk:** If an attacker creates an account on a social provider that does not enforce strict email verification (or where the attacker creates a custom GitLab/Discord profile matching the victim's email), logging in with that provider grants instantaneous, full takeover of the victim's HVT account.
 
-### 2. Plaintext Database Storage of Sensitive Secrets
-While session tokens and magic links are appropriately hashed, **TOTP secrets** (`TOTPDevice.secret`) and **invitation tokens** (`ProjectInvitation.token`) are stored in plain ASCII text. A database snapshot leak immediately exposes the two-factor secrets of all enrolled users.
+### 2. Plaintext Database Storage of Invitation Tokens
+While session tokens and magic links are hashed and **TOTP secrets** (`TOTPDevice.secret`) are encrypted at rest with MultiFernet, **invitation tokens** (`ProjectInvitation.token`) are stored in plain ASCII text. A database snapshot leak exposes invitation links before expiration.
 
 ### 3. Missing PKCE and OAuth State Validation on REST Endpoints
 The social login REST endpoints (`/api/v1/auth/social/google/`, etc.) accept raw OAuth authorization codes or access tokens directly from the frontend request body. They do not implement or verify PKCE (`code_verifier`) or transient OAuth `state` parameters at the API level, delegating entire authorization trust to the client application.

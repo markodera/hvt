@@ -148,6 +148,10 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 * **Single Domain Customer Apps (`app.customer.com`):** **YES.** If the customer configures `frontend_url = "https://app.customer.com"` in their HVT project settings, HVT sets `rp_id = "app.customer.com"` and accepts `expected_origin = "https://app.customer.com"`. Biometric passkeys created by the browser on `app.customer.com` will validate successfully.
 * **Multi-Domain Customer Apps (`app.customer.com` + `admin.customer.com`):** **NO.** In `_resolve_expected_origin`, HVT checks `project.frontend_url` but **does not check `project.allowed_origins`** [VERIFIED `hvt/apps/authentication/passkey_views.py:78-80`]. Requests originating from secondary domains in `allowed_origins` are rejected during origin validation. Furthermore, WebAuthn specifications require `rp_id` to be a registrable suffix of the current page origin; HVT cannot dynamically negotiate different `rp_id` scopes across unrelated domains in a single project.
 
+5. **Passwordless Magic Links: Token Consumption Atomicity [VERIFIED `hvt/apps/authentication/magic_link_views.py:125-140, 250-275`]:**
+   * Tokens are 32-byte cryptographically random URL-safe strings hashed via SHA-256 before storage in `MagicLinkToken`.
+   * Verification and consumption in `MagicLinkVerifyView` (control plane) and `RuntimeMagicLinkVerifyView` (runtime plane) are executed within `transaction.atomic()` using `MagicLinkToken.objects.select_for_update()`, guaranteeing atomic single-use redemption and preventing concurrent double-spend race conditions.
+
 ---
 
 ## WHAT WE DON'T KNOW
