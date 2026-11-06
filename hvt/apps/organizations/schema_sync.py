@@ -7,7 +7,8 @@ from urllib.parse import urlparse
 import yaml
 from allauth.socialaccount.models import SocialAccount
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 
 from hvt.apps.organizations.models import (
@@ -467,7 +468,7 @@ class SchemaSyncService:
                                 slug=f"{role_obj.slug}:{perm_slug}",
                             )
                         )
-                        link_removals.append({"role": role_obj.slug, "permission": perm_slug})
+                        link_removals.append({"role": role_obj.slug, "role_slug": role_obj.slug, "permission": perm_slug, "permission_slug": perm_slug})
                         summary["unlinked"] += 1
 
             if prune:
@@ -571,6 +572,7 @@ class SchemaSyncService:
             client_key = None
             client_key_prefix = None
 
+            now = timezone.now()
             active_runtime_key = (
                 APIKey.objects.filter(
                     project=locked_project,
@@ -578,6 +580,7 @@ class SchemaSyncService:
                     key_type=APIKey.KeyType.RUNTIME,
                     is_active=True,
                 )
+                .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
                 .order_by("-created_at")
                 .first()
             )

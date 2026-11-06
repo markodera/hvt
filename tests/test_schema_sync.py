@@ -585,3 +585,33 @@ class SchemaSyncConcurrencyAndSecurityTests(TransactionTestCase):
         # Assert provider has is_active=False
         provider = SocialProviderConfig.objects.get(project=self.project, provider="google")
         self.assertFalse(provider.is_active)
+
+    def test_expired_runtime_key_triggers_minting_of_new_client_key(self):
+        """Verify that an expired runtime key is treated as unavailable, triggering sync to mint a fresh key."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from hvt.apps.organizations.models import APIKey
+
+        # Create an expired runtime key (still marked is_active=True)
+        exp_prefix, exp_raw, exp_hash = APIKey.generate_key("test", key_type=APIKey.KeyType.RUNTIME)
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Old Expired Client Key",
+            prefix=exp_prefix,
+            hashed_key=exp_hash,
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.RUNTIME,
+            is_active=True,
+            expires_at=timezone.now() - timedelta(days=1),
+            scopes=["auth:runtime"],
+        )
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+        res = client.post(self.sync_url, {"schema_version": 1}, format="json")
+        self.assertEqual(res.status_code, 200)
+
+        # Must mint a new client key because the existing one is expired
+        self.assertIsNotNone(res.data.get("client_key"), "Must mint fresh client key when existing key is expired")
+        self.assertTrue(res.data["client_key"].startswith("hvt_test_"))
