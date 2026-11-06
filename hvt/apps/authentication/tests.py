@@ -903,13 +903,14 @@ class ControlPlaneRegistrationFlowTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         created_user = User.objects.get(email="control-plane@example.com")
-        self.assertIsNone(created_user.organization_id)
+        self.assertIsNotNone(created_user.organization_id)
+        self.assertIsNotNone(created_user.organization.get_default_project())
         self.assertIsNone(created_user.project_id)
         self.assertTrue(
             AuditLog.objects.filter(
                 event_type=AuditLog.EventType.USER_REGISTER,
                 actor_user=created_user,
-                organization__isnull=True,
+                organization=created_user.organization,
             ).exists()
         )
         mock_send_mail.assert_called()

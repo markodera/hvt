@@ -68,6 +68,8 @@ The following comprehensive table inventories the primary endpoint families acro
 | `GET, POST` | `/api/v1/organizations/` | Control | JWT / Superuser | `IsAdminUser` (GET), `IsPlatformUser` (POST) | None | Default | `hvt.apps.organizations.tests` |
 | `GET, PUT, PATCH` | `/api/v1/organizations/current/` | Control | JWT/API Key | `IsOrgMemberOrAPIKey` (GET), `IsOrganizationOwner` (PUT) | `organization:read/write` | Default | `hvt.apps.organizations.tests` |
 | `GET, POST` | `/api/v1/organizations/current/projects/` | Control | JWT | `IsCurrentOrganizationOwner/Admin` | None | Default | `hvt.apps.organizations.tests` |
+| `GET` | `/api/v1/organizations/current/projects/<id>/onboarding/` | Control | JWT / Mgmt Key | `IsOrgMemberOrAPIKey` | None | Default | `hvt.apps.organizations.tests_onboarding` |
+| `POST` | `/api/v1/organizations/current/projects/<id>/setup-prompt/` | Control | JWT / Mgmt Key | `IsOrgOwnerOrAPIKey` | None | Default | `hvt.apps.organizations.tests_onboarding` |
 | `POST` | `/api/v1/organizations/current/projects/<id>/sync/` | Control | Mgmt Key / JWT | `IsOrgOwnerOrAPIKey` | `schema:plan` (dry), `schema:sync` (apply) | Default | `tests/test_schema_sync.py` |
 | `GET, POST` | `/api/v1/organizations/current/projects/<id>/permissions/` | Control | Mgmt Key / JWT | `IsOrgOwnerOrAPIKey` | `permissions:read/write` | Default | `hvt.apps.organizations.tests` |
 | `GET, POST` | `/api/v1/organizations/current/projects/<id>/roles/` | Control | Mgmt Key / JWT | `IsOrgOwnerOrAPIKey` | `roles:read/write` | Default | `hvt.apps.organizations.tests` |
@@ -87,11 +89,11 @@ The following comprehensive table inventories the primary endpoint families acro
 ### 2. Feature-by-Feature Status & Mechanics
 
 #### 1. User Registration (`register`)
-* **Status:** `WORKING` (with transactional email caveat).
+* **Status:** `WORKING` (with atomic auto-provisioning and rollback protection).
 * **Mechanics:**
-  * Control Plane: Client POSTs `{email, password1, password2}` to `/api/v1/auth/register/`. User created with `project=NULL`. An email verification confirmation key is generated via `django-allauth` and dispatched via Resend.
+  * Control Plane: Client POSTs `{email, password1, password2}` to `/api/v1/auth/register/`. User created with `project=NULL`. Under `transaction.atomic()`, new control-plane users with 0 organizations automatically receive an auto-provisioned organization (`<Name>'s Workspace` or `<email>'s Workspace`) with role `OWNER`, and an initial default test project (`slug="default"`, `is_default=True`). An email verification confirmation key is generated via `django-allauth` and dispatched via Resend. If email delivery fails, the entire transaction rolls back cleanly, leaving zero orphaned User, Organization, or Project rows.
   * Runtime Plane: Client POSTs `{email, password1, password2, role_slug?}` with header `X-API-Key: hvt_test_...` to `/api/v1/auth/runtime/register/`. User created bound to the key's `project` and `organization`. Assigned default signup role or requested self-assignable role.
-* **Storage:** Rows in `users`, `account_emailaddress`, `account_emailconfirmation`, and `user_project_roles`.
+* **Storage:** Rows in `users`, `account_emailaddress`, `account_emailconfirmation`, `organizations`, `projects`, and `user_project_roles`.
 
 #### 2. User Authentication (`login`)
 * **Status:** `WORKING`.
@@ -170,6 +172,15 @@ The following comprehensive table inventories the primary endpoint families acro
   * `hvt schema sync`: Sends live apply request, supports `--prune` with interactive confirmation, and auto-saves minted client key to `.env.local`.
   * `hvt whoami`: Inspects active management key and target project.
 * **Storage:** Operates locally on disk, mutating `hvt.schema.json` and `.env.local`.
+
+#### 16. Onboarding Quickstart & AI Setup Prompt
+* **Status:** `WORKING` [VERIFIED `hvt.apps.organizations.tests_onboarding`].
+* **Mechanics:**
+  * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`) and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
+  * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity).
+  * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
+  * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
+* **Storage:** Temporary rows in `api_keys` (`expires_at = now + 15m`).
 
 ---
 

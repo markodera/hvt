@@ -28,6 +28,16 @@ urlpatterns = [
         name="project_schema_sync",
     ),
     path(
+        "current/projects/<uuid:project_pk>/onboarding/",
+        views.ProjectOnboardingStatusView.as_view(),
+        name="project_onboarding_status",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/setup-prompt/",
+        views.ProjectSetupPromptView.as_view(),
+        name="project_setup_prompt",
+    ),
+    path(
         "current/projects/<uuid:project_pk>/permissions/",
         views.ProjectPermissionListCreateView.as_view(),
         name="project_permission_list_create",
