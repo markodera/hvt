@@ -85,11 +85,18 @@ class ProjectSerializer(serializers.ModelSerializer):
 
     def get_has_active_live_keys(self, obj) -> bool:
         from hvt.apps.organizations.models import APIKey
-        return APIKey.objects.filter(
-            project=obj,
-            environment=APIKey.Environment.LIVE,
-            is_active=True,
-        ).exists()
+        from django.utils import timezone
+        from django.db import models
+        now = timezone.now()
+        return (
+            APIKey.objects.filter(
+                project=obj,
+                environment=APIKey.Environment.LIVE,
+                is_active=True,
+            )
+            .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+            .exists()
+        )
 
     def get_can_use_setup_prompt(self, obj) -> bool:
         return not self.get_has_active_live_keys(obj)

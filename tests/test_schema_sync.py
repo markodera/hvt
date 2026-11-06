@@ -615,3 +615,37 @@ class SchemaSyncConcurrencyAndSecurityTests(TransactionTestCase):
         # Must mint a new client key because the existing one is expired
         self.assertIsNotNone(res.data.get("client_key"), "Must mint fresh client key when existing key is expired")
         self.assertTrue(res.data["client_key"].startswith("hvt_test_"))
+
+    def test_expired_live_key_does_not_block_test_sync_or_disable_setup_prompt(self):
+        """Verify that an expired live key does not trigger Option C blocking or disable setup prompts."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from hvt.apps.organizations.models import APIKey
+        from hvt.api.v1.serializers.organizations import ProjectSerializer
+
+        # Create an expired live key (is_active=True, but expired 2 days ago)
+        live_prefix, live_raw, live_hash = APIKey.generate_key("live", key_type=APIKey.KeyType.RUNTIME)
+        APIKey.objects.create(
+            organization=self.org,
+            project=self.project,
+            name="Expired Live Key",
+            prefix=live_prefix,
+            hashed_key=live_hash,
+            environment=APIKey.Environment.LIVE,
+            key_type=APIKey.KeyType.RUNTIME,
+            is_active=True,
+            expires_at=timezone.now() - timedelta(days=2),
+            scopes=["auth:runtime"],
+        )
+
+        # Check ProjectSerializer: has_active_live_keys should be False, can_use_setup_prompt True
+        serializer = ProjectSerializer(self.project)
+        self.assertFalse(serializer.data["has_active_live_keys"])
+        self.assertTrue(serializer.data["can_use_setup_prompt"])
+        self.assertIsNone(serializer.data["setup_prompt_notice"])
+
+        # Test sync with test management key must succeed (not blocked by expired live key)
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+        res = client.post(self.sync_url, {"schema_version": 1}, format="json")
+        self.assertEqual(res.status_code, 200)
