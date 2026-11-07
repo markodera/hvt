@@ -56,6 +56,21 @@ class ProjectSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True,
     )
+    passkey_rp_id = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+    )
+
+    def validate_passkey_rp_id(self, value):
+        if not value:
+            return ""
+        val = value.strip().lower()
+        if "://" in val:
+            from urllib.parse import urlparse
+            parsed = urlparse(val)
+            val = parsed.hostname or val
+        return val.lstrip(".")
 
     def validate_frontend_url(self, value):
         return (value or "").strip().rstrip("/")
@@ -121,6 +136,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "allow_signup",
             "frontend_url",
             "allowed_origins",
+            "passkey_rp_id",
             "has_active_live_keys",
             "can_use_setup_prompt",
             "setup_prompt_notice",

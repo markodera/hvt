@@ -24,10 +24,10 @@
 | **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
 | **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 128 | 128 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
 | **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 71 | 71 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
+| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 98 | 98 Pass / 0 Fail | Part of suite | [RAN `manage.py test tests` -> OK] |
 | **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 12 | 12 Pass / 0 Fail | 983 ms | [RAN `npm test` in `cli/` -> 12 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **364** | **364 Pass / 0 Fail** | **~44 min (Backend) + 1s (CLI)** | |
+| **TOTAL** | | **391** | **391 Pass / 0 Fail** | **~44 min (Backend) + 1s (CLI)** | |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -47,7 +47,7 @@ When the full suite of 352 backend tests is executed, it requires **2,641 second
 ### 4. Untested Functional Areas
 
 1.  **Asynchronous Webhook Retries:** Webhook delivery logic in `hvt/apps/organizations/webhooks.py` uses synchronous `requests.post()`. No test coverage exists for socket timeouts, network drops, or retry queue persistence under production load.
-2.  **Multi-Origin Passkey Verification:** Passkey tests verify single-domain origins (`localhost:8000`). No tests evaluate multi-tenant customer origins or non-standard port derivation.
+2.  **Multi-Origin Passkey Verification (RESOLVED in Step 5):** Added comprehensive test coverage in `tests/test_passkey_origins.py` (13 tests) verifying RP ID resolution and expected origin validation across multi-tenant customer domains, preview environments, localhost origins, CORS preflight options, and WebAuthn assertion verification [VERIFIED `tests/test_passkey_origins.py`].
 3.  **Token Blacklist Pruning:** While `TokenBlacklist` records revoked JWTs, no management command or test exists for purging expired tokens from the database.
 4.  **Database Migration Reversibility:** None of the 43 migrations have automated rollback tests verifying backward compatibility.
 
