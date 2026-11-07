@@ -1,16 +1,16 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `f0afb52dcc7b280ceb1f269532705a266eeb61f7`  
-> **Last Synchronized:** `2026-11-07 14:44:54 UTC`  
+> **Latest Commit:** `6903cc2d0397417ce6ed1f9ecdb7b8363e6e64b5`  
+> **Last Synchronized:** `2026-11-07 14:47:08 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 19,117 words (161,445 characters)  
+> **Total Volume:** 19,151 words (161,731 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
 | 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 2,958 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 02 | 01 Architecture And Data | 2,992 words | [01-architecture-and-data.md](#01-architecture-and-data) |
 | 03 | 02 Features And Endpoints | 2,806 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
@@ -19,7 +19,7 @@
 | 08 | 07 Roadmap Readiness | 1,267 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,418 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **19,117 words** | |
+| | **TOTAL** | **19,151 words** | |
 
 ---
 
@@ -335,6 +335,7 @@ The following environment variables are recognized across `hvt/settings.py` and 
 | `ADMIN_URL` | Django Settings | Customizable URL path prefix for Django Admin (default: `admin/`) |
 | `DOCS_URL` | Email Templates | Target link for documentation references |
 | `API_KEY_MAX_PER_PROJECT` | Django Settings | Maximum allowable API keys per project (default: 25) |
+| `HVT_TASKS_ALWAYS_EAGER` | Django Settings / Tasks | Forces synchronous immediate execution of outbox tasks (default: `false` in prod, `true` in tests) |
 | `PORT` | `entrypoint.sh` | TCP port for Gunicorn binding (default: 8000) |
 | `WEB_CONCURRENCY` | `entrypoint.sh` | Number of Gunicorn worker processes (default: 3) |
 | `GUNICORN_TIMEOUT` | `entrypoint.sh` | Gunicorn request timeout in seconds (default: 120) |
@@ -374,7 +375,7 @@ The following environment variables are recognized across `hvt/settings.py` and 
 ## WHAT WE DIDN'T ANTICIPATE
 
 1. **Docker Compose Missing Encryption Keys:** `docker-compose.yml` explicitly sets `DEBUG=0` for the `web` container, but omits `HVT_ENCRYPTION_KEYS`. In non-debug mode, Django raises `ImproperlyConfigured` at startup if `HVT_ENCRYPTION_KEYS` is not provided. Running `docker compose up` without manually editing the file causes container crashloops [VERIFIED `hvt/crypto.py:48-50`].
-2. **Zero Async Background Workers (No Celery):** Documentation frequently mentions asynchronous email delivery and webhooks. However, Celery is completely absent; background tasks run inside detached Python daemon threads (`threading.Thread`) which are destroyed if the Gunicorn worker process recycles or restarts [VERIFIED `hvt/apps/authentication/email.py:265-266`].
+2. **Zero Async Background Workers (RESOLVED in Step 6):** Initial implementation relied on ad-hoc detached Python threads (`threading.Thread`) for webhooks and emails. Step 6 implemented a resilient transactional database Outbox task engine (`OutboxTask` table) with `select_for_update(skip_locked=True)` worker concurrency, automated exponential backoff retries, stale lock reclamation, and management commands `process_outbox` and `run_worker` [VERIFIED `hvt/apps/organizations/tasks.py:193-249`].
 3. **Absence of User Workspace Join Table:** While the system allows users to belong to an organization and assigned to projects, there is no many-to-many model allowing a single runtime user to belong to multiple sub-workspaces or teams within a single project [VERIFIED `hvt/apps/users/models.py:49-63`].
 
 

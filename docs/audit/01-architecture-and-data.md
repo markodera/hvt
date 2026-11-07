@@ -222,6 +222,7 @@ The following environment variables are recognized across `hvt/settings.py` and 
 | `ADMIN_URL` | Django Settings | Customizable URL path prefix for Django Admin (default: `admin/`) |
 | `DOCS_URL` | Email Templates | Target link for documentation references |
 | `API_KEY_MAX_PER_PROJECT` | Django Settings | Maximum allowable API keys per project (default: 25) |
+| `HVT_TASKS_ALWAYS_EAGER` | Django Settings / Tasks | Forces synchronous immediate execution of outbox tasks (default: `false` in prod, `true` in tests) |
 | `PORT` | `entrypoint.sh` | TCP port for Gunicorn binding (default: 8000) |
 | `WEB_CONCURRENCY` | `entrypoint.sh` | Number of Gunicorn worker processes (default: 3) |
 | `GUNICORN_TIMEOUT` | `entrypoint.sh` | Gunicorn request timeout in seconds (default: 120) |
@@ -261,5 +262,5 @@ The following environment variables are recognized across `hvt/settings.py` and 
 ## WHAT WE DIDN'T ANTICIPATE
 
 1. **Docker Compose Missing Encryption Keys:** `docker-compose.yml` explicitly sets `DEBUG=0` for the `web` container, but omits `HVT_ENCRYPTION_KEYS`. In non-debug mode, Django raises `ImproperlyConfigured` at startup if `HVT_ENCRYPTION_KEYS` is not provided. Running `docker compose up` without manually editing the file causes container crashloops [VERIFIED `hvt/crypto.py:48-50`].
-2. **Zero Async Background Workers (No Celery):** Documentation frequently mentions asynchronous email delivery and webhooks. However, Celery is completely absent; background tasks run inside detached Python daemon threads (`threading.Thread`) which are destroyed if the Gunicorn worker process recycles or restarts [VERIFIED `hvt/apps/authentication/email.py:265-266`].
+2. **Zero Async Background Workers (RESOLVED in Step 6):** Initial implementation relied on ad-hoc detached Python threads (`threading.Thread`) for webhooks and emails. Step 6 implemented a resilient transactional database Outbox task engine (`OutboxTask` table) with `select_for_update(skip_locked=True)` worker concurrency, automated exponential backoff retries, stale lock reclamation, and management commands `process_outbox` and `run_worker` [VERIFIED `hvt/apps/organizations/tasks.py:193-249`].
 3. **Absence of User Workspace Join Table:** While the system allows users to belong to an organization and assigned to projects, there is no many-to-many model allowing a single runtime user to belong to multiple sub-workspaces or teams within a single project [VERIFIED `hvt/apps/users/models.py:49-63`].
