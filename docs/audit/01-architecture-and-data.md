@@ -162,9 +162,9 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 45 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 46 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
-* **`hvt.apps.organizations` (25 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`).
+* **`hvt.apps.organizations` (26 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`).
 * **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
 
 ---

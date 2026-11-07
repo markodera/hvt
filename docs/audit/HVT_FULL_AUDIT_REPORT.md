@@ -1,16 +1,16 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `dd8e06e77c243b4c8ab01f2c1058c40392fbdefb`  
-> **Last Synchronized:** `2026-11-07 12:20:38 UTC`  
+> **Latest Commit:** `3d5f87997e3c8f5df42a232b021212e8d705ed30`  
+> **Last Synchronized:** `2026-11-07 12:27:34 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 18,744 words (156,550 characters)  
+> **Total Volume:** 18,751 words (156,611 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
 | 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 2,770 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 02 | 01 Architecture And Data | 2,777 words | [01-architecture-and-data.md](#01-architecture-and-data) |
 | 03 | 02 Features And Endpoints | 2,657 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
@@ -19,7 +19,7 @@
 | 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,392 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **18,744 words** | |
+| | **TOTAL** | **18,751 words** | |
 
 ---
 
@@ -275,9 +275,9 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 45 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 46 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
-* **`hvt.apps.organizations` (25 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`).
+* **`hvt.apps.organizations` (26 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`).
 * **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
 
 ---
