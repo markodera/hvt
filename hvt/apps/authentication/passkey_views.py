@@ -40,19 +40,39 @@ def _resolve_rp_id(request, project=None) -> str:
     if custom_rp_id:
         return custom_rp_id
 
-    if project and project.frontend_url:
-        parsed_project = urlparse(project.frontend_url)
-        if parsed_project.hostname:
-            return parsed_project.hostname
+    from hvt.apps.organizations.runtime_origins import (
+        get_project_runtime_allowed_origins,
+        origin_is_local_development,
+    )
 
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
     if origin:
         parsed = urlparse(origin)
         hostname = (parsed.hostname or "").lower()
-        if hostname in ("testserver", "localhost", "127.0.0.1"):
-            return "localhost"
         if hostname:
-            return hostname
+            if project:
+                proj_origins = get_project_runtime_allowed_origins(project)
+                is_local = origin_is_local_development(origin)
+                matches_proj = any(urlparse(po).hostname == hostname for po in proj_origins)
+                if matches_proj or (is_local and (settings.DEBUG or getattr(settings, "TESTING", False))):
+                    return "localhost" if is_local else hostname
+            else:
+                if hostname in ("testserver", "localhost", "127.0.0.1"):
+                    return "localhost"
+                return hostname
+
+    if project and project.frontend_url:
+        parsed_project = urlparse(project.frontend_url)
+        if parsed_project.hostname:
+            h = parsed_project.hostname.lower()
+            return "localhost" if h in ("testserver", "localhost", "127.0.0.1") else h
+
+    if project and getattr(project, "allowed_origins", None):
+        for o in project.allowed_origins:
+            parsed_o = urlparse(o)
+            if parsed_o.hostname:
+                h = parsed_o.hostname.lower()
+                return "localhost" if h in ("testserver", "localhost", "127.0.0.1") else h
 
     try:
         host = request.get_host().split(":")[0].lower()
@@ -65,6 +85,8 @@ def _resolve_rp_id(request, project=None) -> str:
 
 def _resolve_expected_origin(request, project=None) -> str | list[str]:
     """Resolve and validate expected browser Origin for WebAuthn validation."""
+    from hvt.apps.organizations.runtime_origins import get_project_runtime_allowed_origins
+
     allowed_origins = set()
     frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
     if frontend_url:
@@ -75,10 +97,11 @@ def _resolve_expected_origin(request, project=None) -> str | list[str]:
         if co:
             allowed_origins.add(co.rstrip("/"))
 
-    if project and project.frontend_url:
-        allowed_origins.add(project.frontend_url.rstrip("/"))
+    if project:
+        for po in get_project_runtime_allowed_origins(project):
+            allowed_origins.add(po.rstrip("/"))
 
-    if settings.DEBUG:
+    if settings.DEBUG or getattr(settings, "TESTING", False):
         allowed_origins.update([
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -86,14 +109,20 @@ def _resolve_expected_origin(request, project=None) -> str | list[str]:
             "http://127.0.0.1:5174",
             "http://localhost:3000",
             "http://127.0.0.1:3000",
+            "http://testserver",
+            "https://testserver",
         ])
 
     origin = (request.headers.get("origin") or "").rstrip("/")
     if origin and origin in allowed_origins:
         return origin
 
-    if project and project.frontend_url:
-        return project.frontend_url.rstrip("/")
+    if project:
+        proj_origins = get_project_runtime_allowed_origins(project)
+        if proj_origins:
+            return [po.rstrip("/") for po in proj_origins]
+        if project.frontend_url:
+            return project.frontend_url.rstrip("/")
 
     if frontend_url:
         return frontend_url
