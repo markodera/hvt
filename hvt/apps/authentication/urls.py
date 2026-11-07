@@ -6,9 +6,12 @@ from . import views
 from . import totp_views
 from . import passkey_views
 from . import magic_link_views
+from . import jwks_views
 
 
 urlpatterns = [
+    path(".well-known/jwks.json", jwks_views.JWKSView.as_view(), name="auth_jwks"),
+    path(".well-known/openid-configuration", jwks_views.OpenIDConfigurationView.as_view(), name="auth_openid_configuration"),
     # MFA / Two-Factor Authentication (TOTP)
     path("mfa/totp/status/", totp_views.TOTPStatusView.as_view(), name="totp_status"),
     path("mfa/totp/setup/", totp_views.TOTPSetupView.as_view(), name="totp_setup"),

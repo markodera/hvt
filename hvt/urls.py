@@ -23,10 +23,13 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
     SpectacularRedocView,
 )
+from hvt.apps.authentication.jwks_views import JWKSView, OpenIDConfigurationView
 from hvt.health import healthz, readyz
 
 
 urlpatterns = [
+    path(".well-known/jwks.json", JWKSView.as_view(), name="jwks"),
+    path(".well-known/openid-configuration", OpenIDConfigurationView.as_view(), name="openid_configuration"),
     path("healthz/", healthz, name="healthz"),
     path("readyz/", readyz, name="readyz"),
     path("api/v1/", include("hvt.api.v1.urls")),

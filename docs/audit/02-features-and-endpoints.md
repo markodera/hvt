@@ -26,6 +26,10 @@ The following comprehensive table inventories the primary endpoint families acro
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/healthz/` | Ops | None | `AllowAny` | None | None | `hvt.apps.authentication.test_health` |
 | `GET` | `/readyz/` | Ops | None | `AllowAny` | None | None | `hvt.apps.authentication.test_health` |
+| `GET` | `/.well-known/jwks.json` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/.well-known/openid-configuration` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/api/v1/auth/.well-known/jwks.json` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/api/v1/auth/.well-known/openid-configuration` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
 | `GET` | `/api/schema/` | Ops | None | `AllowAny` | None | None | Django checks |
 | `GET` | `/api/docs/` | Ops | None | `AllowAny` | None | None | Django checks |
 | `POST` | `/api/v1/auth/register/` | Control | Session/JWT | `AllowAny` | None | `auth_register_ip`, `auth_register_email` | `test_plane_separation_and_auth` |

@@ -99,6 +99,12 @@ HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
 
 ---
 
+
+### 11. Asymmetric Token Cryptography & Cross-Project Isolation [VERIFIED `hvt/apps/authentication/jwt_backend.py:23-150`, `hvt/apps/authentication/tokens.py:192-218`]
+* **Asymmetric RS256 Signing:** Backend uses 2048-bit RSA keys with Key ID (`kid`) headers. Client applications and microservices verify token authenticity using the public JWKS endpoint (`GET /.well-known/jwks.json`) without sharing master backend secrets.
+* **Cross-Project Isolation:** In multi-tenant environments, tokens issued for Project A are rejected when presented against endpoints belonging to Project B.
+* **Production Key Check:** System check `hvt.E002` prevents production startup without a valid `HVT_JWT_PRIVATE_KEY` PEM.
+
 ## WHAT WE DON'T KNOW (could not verify, and why)
 
 1.  **Vulnerability Exploitation in Upstream Dependencies:** While `pip-audit` flagged 95 vulnerabilities in libraries like `requests`, `urllib3`, and `pyjwt`, we could not verify whether HVT's specific call paths invoke the vulnerable subroutines without creating targeted penetration test suites [UNKNOWN].
