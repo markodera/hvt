@@ -22,15 +22,17 @@ def _load_pem_string(val: Optional[str]) -> Optional[str]:
     if not val:
         return None
     val = val.strip()
+    if "\\n" in val:
+        val = val.replace("\\n", "\n")
     if "-----BEGIN" in val:
         return val
     # If it is a path to an existing file
     if os.path.isfile(val):
         with open(val, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    # It might be a base64 encoded PEM or multi-line escaped
-    if "\\n" in val:
-        return val.replace("\\n", "\n")
+            content = f.read().strip()
+            if "\\n" in content:
+                content = content.replace("\\n", "\n")
+            return content
     return val
 
 
@@ -133,13 +135,19 @@ def get_jwt_key_id() -> str:
 
 def get_jwt_issuer() -> str:
     """Returns the canonical token issuer (iss claim)."""
-    explicit = getattr(settings, "HVT_JWT_ISSUER", None) or os.getenv("HVT_JWT_ISSUER")
+    explicit = (
+        getattr(settings, "HVT_JWT_ISSUER", None)
+        or os.getenv("HVT_JWT_ISSUER")
+        or getattr(settings, "HVT_API_URL", None)
+        or os.getenv("HVT_API_URL")
+        or getattr(settings, "BACKEND_URL", None)
+        or os.getenv("BACKEND_URL")
+    )
     if explicit:
         return str(explicit).rstrip("/")
 
-    # Fallback to frontend or backend url
-    host = getattr(settings, "FRONTEND_URL", "https://api.hvts.app")
-    return str(host).rstrip("/")
+    # Canonical default issuer
+    return "https://api.hvts.app"
 
 
 def get_jwks() -> Dict[str, List[Dict[str, Any]]]:

@@ -123,12 +123,17 @@ class HVTAsymmetricTokenBackend(TokenBackend):
                         break
 
             try:
+                expected_issuer = self.issuer or get_jwt_issuer()
+                decode_options = {"verify_aud": False}
+                if not expected_issuer:
+                    decode_options["verify_iss"] = False
                 return jwt.decode(
                     token,
                     verifying_key,
                     algorithms=["RS256"],
+                    issuer=expected_issuer,
+                    options=decode_options,
                     leeway=self.leeway,
-                    options={"verify_aud": False},  # Audience validated per-route
                 )
             except Exception as exc:
                 raise TokenBackendError(f"Token is invalid or expired: {exc}") from exc

@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+import os
+from django.conf import settings
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
@@ -35,8 +37,10 @@ class OpenIDConfigurationView(views.APIView):
 
     @extend_schema(summary="OpenID Connect Discovery", tags=["Tokens & JWKS"])
     def get(self, request):
-        issuer = get_jwt_issuer()
         base_host = request.build_absolute_uri("/").rstrip("/")
+        issuer = get_jwt_issuer()
+        if not getattr(settings, "HVT_JWT_ISSUER", None) and not os.getenv("HVT_JWT_ISSUER"):
+            issuer = base_host
         jwks_uri = f"{base_host}/.well-known/jwks.json"
 
         config = {

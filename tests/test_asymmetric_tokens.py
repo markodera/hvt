@@ -20,6 +20,7 @@ from hvt.apps.authentication.jwt_keys import (
     get_jwt_key_id,
     get_jwt_issuer,
     get_jwks,
+    _load_pem_string,
     check_jwt_signing_keys,
 )
 from hvt.apps.authentication.jwt_backend import HVTAsymmetricTokenBackend
@@ -79,6 +80,18 @@ class AsymmetricJWTKeyTests(TestCase):
             self.assertIn("hvt-rot-test", kids)
 
 
+    def test_unescape_pem_newlines(self):
+        escaped_pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----"
+        loaded = _load_pem_string(escaped_pem)
+        self.assertNotIn("\\n", loaded)
+        self.assertIn("\n", loaded)
+        self.assertTrue(loaded.startswith("-----BEGIN PUBLIC KEY-----\n"))
+
+    def test_issuer_configuration(self):
+        with override_settings(HVT_JWT_ISSUER="https://custom.auth.org"):
+            self.assertEqual(get_jwt_issuer(), "https://custom.auth.org")
+
+
 class AsymmetricTokenBackendTests(TestCase):
     """Test token signing, header stamps, claim stamping, and algorithm validation."""
 
@@ -124,6 +137,19 @@ class AsymmetricTokenBackendTests(TestCase):
         decoded = self.backend.decode(legacy_token)
         self.assertEqual(decoded["user_id"], 123)
         self.assertEqual(decoded["role"], "admin")
+
+
+    def test_rejects_token_with_wrong_issuer(self):
+        payload = {"user_id": 99, "role": "member", "iss": "https://attacker.example.com"}
+        # Sign with valid key but wrong issuer
+        token = jwt.encode(
+            payload,
+            self.backend.prepared_signing_key,
+            algorithm="RS256",
+            headers={"kid": self.backend.key_id, "typ": "JWT"},
+        )
+        with self.assertRaises(TokenBackendError):
+            self.backend.decode(token)
 
 
 class JWKSEndpointsTests(TestCase):
