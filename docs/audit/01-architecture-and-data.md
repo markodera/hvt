@@ -176,7 +176,12 @@ The following environment variables are recognized across `hvt/settings.py` and 
 | Environment Variable | Source / Scope | Purpose |
 | :--- | :--- | :--- |
 | `DEBUG` | Django Settings | Enables debug mode and relaxed local CORS/CSRF defaults |
-| `SECRET_KEY` | Django Settings | Symmetric cryptographic master secret for JWTs and sessions |
+| `SECRET_KEY` | Django Settings | Symmetric cryptographic master secret for sessions and legacy token fallback |
+| `HVT_JWT_PRIVATE_KEY` | Authentication App | RSA 2048-bit private key PEM (or path) for asymmetric RS256 JWT signing |
+| `HVT_JWT_PUBLIC_KEY` | Authentication App | RSA 2048-bit public key PEM (optional; auto-derived from private key) |
+| `HVT_JWT_KEY_ID` | Authentication App | Explicit Key ID (kid) stamped into token headers (default: sha256 fingerprint) |
+| `HVT_JWT_ISSUER` | Authentication App | Canonical JWT issuer URL (iss claim; default: FRONTEND_URL or api.hvts.app) |
+| `HVT_JWT_ROTATION_PUBLIC_KEYS` | Authentication App | List of previous RSA public keys for zero-downtime key rotation in JWKS |
 | `HVT_ENCRYPTION_KEYS` | Django Crypto | Comma-separated Fernet keys for encrypting secrets at rest |
 | `ALLOWED_HOSTS` | Django Settings | Permitted HTTP Host headers |
 | `FRONTEND_URL` | Django Settings | Base URL for the Control Plane dashboard SPA |

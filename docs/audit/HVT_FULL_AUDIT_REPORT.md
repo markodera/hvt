@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `179c40a62f743582b068e8f19daad09ca9e9c87c`  
-> **Last Synchronized:** `2026-11-06 21:03:31 UTC`  
+> **Latest Commit:** `dd57db4ef2eeb0aeab19f4a137a3484c2a04a19b`  
+> **Last Synchronized:** `2026-11-07 11:07:15 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 16,818 words (138,522 characters)  
+> **Total Volume:** 17,183 words (141,966 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
 | 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 2,678 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,581 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
-| 04 | 03 Tokens Sessions Passkeys | 1,268 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
-| 05 | 04 Security | 1,677 words | [04-security.md](#04-security) |
+| 02 | 01 Architecture And Data | 2,770 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 2,657 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 1,385 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,219 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,392 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **16,818 words** | |
+| | **TOTAL** | **17,183 words** | |
 
 ---
 
@@ -289,7 +289,12 @@ The following environment variables are recognized across `hvt/settings.py` and 
 | Environment Variable | Source / Scope | Purpose |
 | :--- | :--- | :--- |
 | `DEBUG` | Django Settings | Enables debug mode and relaxed local CORS/CSRF defaults |
-| `SECRET_KEY` | Django Settings | Symmetric cryptographic master secret for JWTs and sessions |
+| `SECRET_KEY` | Django Settings | Symmetric cryptographic master secret for sessions and legacy token fallback |
+| `HVT_JWT_PRIVATE_KEY` | Authentication App | RSA 2048-bit private key PEM (or path) for asymmetric RS256 JWT signing |
+| `HVT_JWT_PUBLIC_KEY` | Authentication App | RSA 2048-bit public key PEM (optional; auto-derived from private key) |
+| `HVT_JWT_KEY_ID` | Authentication App | Explicit Key ID (kid) stamped into token headers (default: sha256 fingerprint) |
+| `HVT_JWT_ISSUER` | Authentication App | Canonical JWT issuer URL (iss claim; default: FRONTEND_URL or api.hvts.app) |
+| `HVT_JWT_ROTATION_PUBLIC_KEYS` | Authentication App | List of previous RSA public keys for zero-downtime key rotation in JWKS |
 | `HVT_ENCRYPTION_KEYS` | Django Crypto | Comma-separated Fernet keys for encrypting secrets at rest |
 | `ALLOWED_HOSTS` | Django Settings | Permitted HTTP Host headers |
 | `FRONTEND_URL` | Django Settings | Base URL for the Control Plane dashboard SPA |
@@ -399,6 +404,10 @@ The following comprehensive table inventories the primary endpoint families acro
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/healthz/` | Ops | None | `AllowAny` | None | None | `hvt.apps.authentication.test_health` |
 | `GET` | `/readyz/` | Ops | None | `AllowAny` | None | None | `hvt.apps.authentication.test_health` |
+| `GET` | `/.well-known/jwks.json` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/.well-known/openid-configuration` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/api/v1/auth/.well-known/jwks.json` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
+| `GET` | `/api/v1/auth/.well-known/openid-configuration` | Ops / Public | None | `AllowAny` | None | None | `tests.test_asymmetric_tokens` |
 | `GET` | `/api/schema/` | Ops | None | `AllowAny` | None | None | Django checks |
 | `GET` | `/api/docs/` | Ops | None | `AllowAny` | None | None | Django checks |
 | `POST` | `/api/v1/auth/register/` | Control | Session/JWT | `AllowAny` | None | `auth_register_ip`, `auth_register_email` | `test_plane_separation_and_auth` |
@@ -640,10 +649,13 @@ When a user logs in successfully via `/api/v1/auth/login/` or `/api/v1/auth/runt
 
 ### 2. Token Cryptography, Key Storage & Claims Structure
 
-* **Token Format:** Signed JSON Web Token (JWT) managed by `django-rest-framework-simplejwt` [VERIFIED `hvt/settings.py:121, 431-441`].
-* **Signing Algorithm:** Symmetric `HS256` (HMAC with SHA-256) [VERIFIED decoded JWT header below].
-* **Key Storage:** The HMAC signature is computed directly using Django's `settings.SECRET_KEY` [VERIFIED `hvt/settings.py:58-62`].
-* **Public-Key (JWKS) Endpoint:** **DOES NOT EXIST.** Because `HS256` is a symmetric algorithm where verification requires the private signing key, there is no public key to publish. No `/.well-known/jwks.json` route exists in the URLconf [VERIFIED `hvt/urls.py:29-45`].
+* **Token Format:** Signed JSON Web Token (JWT) managed by `django-rest-framework-simplejwt` with `HVTAsymmetricTokenBackend` [VERIFIED `hvt/apps/authentication/jwt_backend.py:23-150`].
+* **Signing Algorithm:** Asymmetric `RS256` (RSA Signature with SHA-256, 2048-bit key) with Key ID (`kid`) header [VERIFIED `hvt/apps/authentication/jwt_keys.py:36-60`, `tests/test_asymmetric_tokens.py:40-70`].
+* **Key Storage:** RSA private key loaded from `HVT_JWT_PRIVATE_KEY` (PEM string or file path). In development/testing, an in-memory 2048-bit RSA key pair is automatically generated and cached [VERIFIED `hvt/apps/authentication/jwt_keys.py:62-108`]. Production deployments without a configured private key fail system check `hvt.E002` [VERIFIED `hvt/apps/authentication/jwt_keys.py:175-203`].
+* **Public-Key (JWKS) Endpoint:** **SHIPPED.** RFC 7517 compliant JSON Web Key Set published at `GET /.well-known/jwks.json` and `GET /api/v1/auth/.well-known/jwks.json` with CORS (`*`) and `Cache-Control: public, max-age=3600, must-revalidate` [VERIFIED `hvt/apps/authentication/jwks_views.py:9-25`, `tests/test_asymmetric_tokens.py:130-165`].
+* **OIDC Discovery:** Published at `GET /.well-known/openid-configuration` exposing `issuer`, `jwks_uri`, and supported algorithms [VERIFIED `hvt/apps/authentication/jwks_views.py:27-53`].
+* **Offline Verification:** Offline token verification helper provided via `hvt.jwt_verify.verify_hvt_token` for microservices without roundtrips to HVT [VERIFIED `hvt/jwt_verify.py:18-87`].
+* **Legacy Compatibility Fallback:** Tokens signed with legacy `HS256` using `settings.SECRET_KEY` remain accepted and verified seamlessly during upgrades [VERIFIED `hvt/apps/authentication/jwt_backend.py:137-149`].
 * **Lifetimes:**
   * Access Token: `15 minutes` (`timedelta(minutes=15)`) [VERIFIED `hvt/settings.py:435`].
   * Refresh Token: `7 days` (`timedelta(days=7)`) [VERIFIED `hvt/settings.py:436`].
@@ -683,9 +695,15 @@ The following header and claims were decoded from a live login token issued duri
 }
 ```
 
-#### Issuer (`iss`) & Audience (`aud`) Analysis
-* **Status:** **UNBOUND.** Neither `iss` nor `aud` is stamped in `_stamp_org_claims` [VERIFIED `hvt/apps/authentication/tokens.py:19-37`].
-* **Consequence:** Tokens are not cryptographically bound to a specific issuer URL or target audience. While HVT stamps custom `project_id` and `org_id` claims, any microservice verifying the token with `SECRET_KEY` cannot use standard OIDC/RFC-7519 validation rules to reject tokens intended for other applications.
+#### Issuer (`iss`), Audience (`aud`), & Cross-Project Isolation Analysis
+* **Status:** **BOUND & ISOLATED [VERIFIED `hvt/apps/authentication/tokens.py:20-38, 192-218`].**
+* **Stamping:**
+  * `iss`: Canonical issuer URL from `HVT_JWT_ISSUER` or `FRONTEND_URL` (e.g. `https://api.hvts.app`).
+  * `sub`: Subject set to the string UUID of the user (`str(user.id)`).
+  * `aud`: Bound to `str(project.id)` for project-scoped runtime tokens, or `"hvt-control"` for control plane tokens.
+  * `jti`: Unique UUID preventing replay attacks.
+  * `iat`: Exact integer epoch timestamp of issuance.
+* **Cross-Project Isolation:** When a token is presented alongside a runtime API key (`hvt_test_*` or `hvt_live_*`), `_OrgClaimVerificationMixin` validates that `token["project_id"] == str(api_key.project_id)`. Mismatched tenant tokens are rejected with HTTP 401 `InvalidToken` ("Token was not issued for this project.") [VERIFIED `tests/test_asymmetric_tokens.py:200-240`].
 
 ---
 
@@ -740,8 +758,8 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 
 ## WHAT WE DIDN'T ANTICIPATE
 
-1. **Complete Lack of JWKS / Asymmetric Cryptography:** We did not anticipate that an authentication platform designed for multi-tenant microservices would rely exclusively on symmetric `HS256` signing, requiring customer backends to either make blocking HTTP roundtrips to HVT or share the root `SECRET_KEY`.
-2. **Missing `iss` and `aud` Claims:** Despite the schema claiming OIDC compatibility, neither the access token nor the refresh token includes standard `iss` or `aud` claims, preventing standard token validation middleware in Go, Node.js, or Java from validating tokens off-the-shelf.
+1. **Asymmetric Signing & JWKS (RESOLVED in Step 4):** Replaced legacy symmetric `HS256` signing with asymmetric `RS256` signing, public JWKS endpoint (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), Key ID stamping, and offline verification helpers [VERIFIED `hvt/apps/authentication/jwt_backend.py:23-150`].
+2. **Standard OIDC Claims & Cross-Project Isolation (RESOLVED in Step 4):** Tokens now stamp standard `iss`, `aud`, `sub`, `jti`, and `iat` claims, and enforce tenant project matching to eliminate cross-project token replay [VERIFIED `hvt/apps/authentication/tokens.py:20-38, 192-218`].
 3. **Multi-Domain Passkey Origin Blindspot:** While `Project` includes an `allowed_origins` field specifically for CORS on multiple customer domains, the WebAuthn passkey origin resolver completely ignores it, creating an unexpected failure for multi-domain applications.
 
 
@@ -849,6 +867,12 @@ HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
 *   **Django Admin Exposure:** `/admin/` URL is enabled in root routing [VERIFIED `hvt/urls.py:25`]. While gated behind `is_staff` and `is_superuser`, exposing the standard admin path to the public internet presents an unnecessary brute-force and credential-stuffing target.
 
 ---
+
+
+### 11. Asymmetric Token Cryptography & Cross-Project Isolation [VERIFIED `hvt/apps/authentication/jwt_backend.py:23-150`, `hvt/apps/authentication/tokens.py:192-218`]
+* **Asymmetric RS256 Signing:** Backend uses 2048-bit RSA keys with Key ID (`kid`) headers. Client applications and microservices verify token authenticity using the public JWKS endpoint (`GET /.well-known/jwks.json`) without sharing master backend secrets.
+* **Cross-Project Isolation:** In multi-tenant environments, tokens issued for Project A are rejected when presented against endpoints belonging to Project B.
+* **Production Key Check:** System check `hvt.E002` prevents production startup without a valid `HVT_JWT_PRIVATE_KEY` PEM.
 
 ## WHAT WE DON'T KNOW (could not verify, and why)
 

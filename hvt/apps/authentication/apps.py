@@ -10,6 +10,10 @@ class AuthenticationConfig(AppConfig):
         import hvt.apps.authentication.schema  # noqa: F401
         # Connect login signal for webhook triggers
         import hvt.apps.authentication.signals  # noqa: F401
+        import hvt.apps.authentication.jwt_keys  # noqa: F401
+        from rest_framework_simplejwt import state
+        from hvt.apps.authentication.jwt_backend import HVTAsymmetricTokenBackend
+        state.token_backend = HVTAsymmetricTokenBackend()
         self._patch_allauth_unique_email_check()
         self._patch_allauth_email_verification_rate_limit()
 

@@ -437,6 +437,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
+    "ALGORITHM": "RS256",
     "TOKEN_OBTAIN_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenObtainPairSerializer",
     "TOKEN_REFRESH_SERIALIZER": "hvt.apps.authentication.tokens.HVTTokenRefreshSerializer",
 }

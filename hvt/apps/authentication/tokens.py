@@ -22,9 +22,13 @@ def _stamp_org_claims(token, user, project=None) -> None:
         get_user_project_permission_slugs,
         get_user_project_role_slugs,
     )
+    from hvt.apps.authentication.jwt_keys import get_jwt_issuer
 
     org = getattr(user, "organization", None)
 
+    token["sub"] = str(user.id)
+    token["iss"] = get_jwt_issuer()
+    token["aud"] = str(project.id) if project else "hvt-control"
     token["org_id"] = str(org.id) if org else None
     token["org_slug"] = org.slug if org else ""
     token["project_id"] = str(project.id) if project else None
@@ -188,7 +192,29 @@ class _OrgClaimVerificationMixin:
     def authenticate(self, request):
         if self._is_public_auth_path(request):
             return None
-        return super().authenticate(request)
+        auth_result = super().authenticate(request)
+        if auth_result is None:
+            return None
+        user, validated_token = auth_result
+
+        # Cross-project isolation: verify token matches requested project if runtime API key is present
+        api_key = getattr(request, "_auth", None)
+        if api_key is None and request:
+            raw_key = request.META.get("HTTP_X_API_KEY", "")
+            if raw_key:
+                try:
+                    from hvt.apps.authentication.backends import APIKeyAuthentication
+                    _, api_key = APIKeyAuthentication().validate_key(raw_key)
+                except Exception:
+                    pass
+
+        from hvt.apps.organizations.models import APIKey
+        if isinstance(api_key, APIKey) and api_key.project_id:
+            token_proj = validated_token.get("project_id")
+            if token_proj and str(token_proj) != str(api_key.project_id):
+                raise InvalidToken("Token was not issued for this project.")
+
+        return user, validated_token
 
     def get_user(self, validated_token):
         from hvt.apps.organizations.models import Project
