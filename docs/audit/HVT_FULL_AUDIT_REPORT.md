@@ -1,9 +1,9 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `6903cc2d0397417ce6ed1f9ecdb7b8363e6e64b5`  
-> **Last Synchronized:** `2026-11-07 14:47:08 UTC`  
+> **Latest Commit:** `b0392369784ce16c2173e0fc3a28543018524111`  
+> **Last Synchronized:** `2026-11-07 14:51:12 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 19,151 words (161,731 characters)  
+> **Total Volume:** 19,194 words (162,112 characters)  
 
 ## Table of Contents
 
@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
 | 02 | 01 Architecture And Data | 2,992 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,806 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 03 | 02 Features And Endpoints | 2,849 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
@@ -19,7 +19,7 @@
 | 08 | 07 Roadmap Readiness | 1,267 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,418 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **19,151 words** | |
+| | **TOTAL** | **19,194 words** | |
 
 ---
 
@@ -471,6 +471,8 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/runtime/invitations/accept/` | Runtime | Runtime API Key | `AllowAny` | `auth:runtime` | Default | `tests_runtime_invitations` |
 | `GET, POST` | `/api/v1/organizations/current/webhooks/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `webhooks:read/write` | Default | `hvt.apps.organizations.tests_webhooks` |
 | `GET` | `/api/v1/organizations/current/webhooks/<id>/deliveries/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `webhooks:read` | Default | `hvt.apps.organizations.tests_webhooks` |
+| `GET, PUT, PATCH, DELETE` | `/api/v1/organizations/current/projects/<id>/email-config/` | Control | JWT / Mgmt Key | `IsOrgOwnerOrAPIKey` | None | Default | `tests/test_byo_email_providers.py` |
+| `POST` | `/api/v1/organizations/current/projects/<id>/email-config/test/` | Control | JWT / Mgmt Key | `IsOrgOwnerOrAPIKey` | None | Default | `tests/test_byo_email_providers.py` |
 | `GET` | `/api/v1/organizations/current/audit-logs/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `audit_logs:read` | Default | `tests/test_audit_logging.py` |
 
 ---
@@ -571,6 +573,19 @@ The following comprehensive table inventories the primary endpoint families acro
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
 * **Storage:** Temporary rows in `api_keys` (`expires_at = now + 15m`).
 
+#### 17. Bring-Your-Own (BYO) Email & Background Task Engine (Step 6)
+
+* **Management Endpoints:**
+  * `GET /api/v1/organizations/current/projects/<id>/email-config/`: Retrieve per-project email provider configuration with masked credential statuses (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`) [VERIFIED `hvt/apps/organizations/views.py:2672-2708`].
+  * `PATCH /api/v1/organizations/current/projects/<id>/email-config/`: Update project provider (`smtp`, `resend`, `postmark`, `ses`), custom sender identity (`from_email`, `from_name`), and encrypted credentials [VERIFIED `hvt/apps/organizations/views.py:2710-2725`].
+  * `POST /api/v1/organizations/current/projects/<id>/email-config/test/`: Send a test email to verify provider connectivity [VERIFIED `hvt/apps/organizations/views.py:2728-2775`].
+* **Transactional Outbox Engine (`hvt.apps.organizations.tasks`):**
+  * `enqueue_task(task_type, payload, project, organization, run_after_seconds, max_attempts)`: Enqueues tasks atomically with database records.
+  * `process_outbox_tasks(max_tasks, worker_id)`: Concurrency-safe job claiming via `select_for_update(skip_locked=True)` with automatic stale lock reclamation.
+  * `python manage.py run_worker`: Production CLI worker runner supporting `--once`, `--poll-interval`, `--batch-size`, and graceful SIGINT/SIGTERM shutdown [VERIFIED `hvt/apps/organizations/management/commands/run_worker.py`].
+* **Asynchronous Webhook Dispatching:**
+  * `trigger_webhook_event()`: Spawns transactional outbox tasks, constructs delivery envelope with cryptographic HMAC-SHA256 signature (`X-HVT-Signature`), executes requests with 10s timeout, schedules exponential backoff retries, and auto-disables endpoints after 10 consecutive failures [VERIFIED `hvt/apps/organizations/webhooks.py`].
+
 ---
 
 ## WHAT WE DON'T KNOW
@@ -585,20 +600,6 @@ The following comprehensive table inventories the primary endpoint families acro
 1. **Complete Absence of TOTP Backup Codes:** The documentation states full MFA support, but there are zero models, fields, or endpoints for backup codes. A lost authenticator results in irreversible lockout.
 2. **Missing SDK Code in Repository:** The `sdk/` directory has no code, only a 12-line markdown stub pointing to an external repo.
 3. **Inconsistent Token Hashing Across Features:** Magic link tokens are cryptographically hashed using SHA-256, but both organization invitations and runtime invitations store their raw tokens in plaintext in the database.
-
-
-### 4. Bring-Your-Own (BYO) Email & Background Task Engine (Step 6)
-
-* **Management Endpoints:**
-  * `GET /api/v1/organizations/current/projects/<id>/email-config/`: Retrieve per-project email provider configuration with masked credential statuses (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`) [VERIFIED `hvt/apps/organizations/views.py:2672-2708`].
-  * `PATCH /api/v1/organizations/current/projects/<id>/email-config/`: Update project provider (`smtp`, `resend`, `postmark`, `ses`), custom sender identity (`from_email`, `from_name`), and encrypted credentials [VERIFIED `hvt/apps/organizations/views.py:2710-2725`].
-  * `POST /api/v1/organizations/current/projects/<id>/email-config/test/`: Send a test email to verify provider connectivity [VERIFIED `hvt/apps/organizations/views.py:2728-2775`].
-* **Transactional Outbox Engine (`hvt.apps.organizations.tasks`):**
-  * `enqueue_task(task_type, payload, project, organization, run_after_seconds, max_attempts)`: Enqueues tasks atomically with database records.
-  * `process_outbox_tasks(max_tasks, worker_id)`: Concurrency-safe job claiming via `select_for_update(skip_locked=True)` with automatic stale lock reclamation.
-  * `python manage.py run_worker`: Production CLI worker runner supporting `--once`, `--poll-interval`, `--batch-size`, and graceful SIGINT/SIGTERM shutdown [VERIFIED `hvt/apps/organizations/management/commands/run_worker.py`].
-* **Asynchronous Webhook Dispatching:**
-  * `trigger_webhook_event()`: Spawns transactional outbox tasks, constructs delivery envelope with cryptographic HMAC-SHA256 signature (`X-HVT-Signature`), executes requests with 10s timeout, schedules exponential backoff retries, and auto-disables endpoints after 10 consecutive failures [VERIFIED `hvt/apps/organizations/webhooks.py`].
 
 
 ---
