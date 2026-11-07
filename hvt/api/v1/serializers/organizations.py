@@ -16,6 +16,7 @@ from hvt.apps.organizations.models import (
     WebhookDelivery,
     OrganizationInvitation,
     RuntimeInvitation,
+    ProjectEmailConfig,
 )
 from hvt.apps.organizations.runtime_origins import normalize_runtime_origin, normalize_runtime_origins
 from hvt.apps.organizations.runtime_roles import (
@@ -967,3 +968,53 @@ class RuntimeInvitationAcceptSerializer(serializers.Serializer):
                 serializers.as_serializer_error(exc)
             ) from exc
         return attrs
+
+
+class ProjectEmailConfigSerializer(serializers.ModelSerializer):
+    has_smtp_password = serializers.SerializerMethodField()
+    has_api_key = serializers.SerializerMethodField()
+    has_aws_secret_access_key = serializers.SerializerMethodField()
+
+    smtp_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    aws_secret_access_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = ProjectEmailConfig
+        fields = [
+            "id",
+            "project",
+            "provider",
+            "from_email",
+            "from_name",
+            "is_active",
+            "smtp_host",
+            "smtp_port",
+            "smtp_username",
+            "smtp_password",
+            "has_smtp_password",
+            "smtp_use_tls",
+            "smtp_use_ssl",
+            "api_key",
+            "has_api_key",
+            "aws_region",
+            "aws_access_key_id",
+            "aws_secret_access_key",
+            "has_aws_secret_access_key",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "project", "created_at", "updated_at"]
+
+    def get_has_smtp_password(self, obj) -> bool:
+        return bool(obj.smtp_password)
+
+    def get_has_api_key(self, obj) -> bool:
+        return bool(obj.api_key)
+
+    def get_has_aws_secret_access_key(self, obj) -> bool:
+        return bool(obj.aws_secret_access_key)
+
+
+class ProjectEmailConfigTestSerializer(serializers.Serializer):
+    to_email = serializers.EmailField(required=True)

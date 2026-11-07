@@ -38,6 +38,16 @@ urlpatterns = [
         name="project_setup_prompt",
     ),
     path(
+        "current/projects/<uuid:project_pk>/email-config/",
+        views.ProjectEmailConfigView.as_view(),
+        name="project_email_config",
+    ),
+    path(
+        "current/projects/<uuid:project_pk>/email-config/test/",
+        views.ProjectEmailConfigTestView.as_view(),
+        name="project_email_config_test",
+    ),
+    path(
         "current/projects/<uuid:project_pk>/permissions/",
         views.ProjectPermissionListCreateView.as_view(),
         name="project_permission_list_create",

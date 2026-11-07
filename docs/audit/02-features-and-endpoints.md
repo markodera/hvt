@@ -200,3 +200,17 @@ The following comprehensive table inventories the primary endpoint families acro
 1. **Complete Absence of TOTP Backup Codes:** The documentation states full MFA support, but there are zero models, fields, or endpoints for backup codes. A lost authenticator results in irreversible lockout.
 2. **Missing SDK Code in Repository:** The `sdk/` directory has no code, only a 12-line markdown stub pointing to an external repo.
 3. **Inconsistent Token Hashing Across Features:** Magic link tokens are cryptographically hashed using SHA-256, but both organization invitations and runtime invitations store their raw tokens in plaintext in the database.
+
+
+### 4. Bring-Your-Own (BYO) Email & Background Task Engine (Step 6)
+
+* **Management Endpoints:**
+  * `GET /api/v1/organizations/current/projects/<id>/email-config/`: Retrieve per-project email provider configuration with masked credential statuses (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`) [VERIFIED `hvt/apps/organizations/views.py:2672-2708`].
+  * `PATCH /api/v1/organizations/current/projects/<id>/email-config/`: Update project provider (`smtp`, `resend`, `postmark`, `ses`), custom sender identity (`from_email`, `from_name`), and encrypted credentials [VERIFIED `hvt/apps/organizations/views.py:2710-2725`].
+  * `POST /api/v1/organizations/current/projects/<id>/email-config/test/`: Send a test email to verify provider connectivity [VERIFIED `hvt/apps/organizations/views.py:2728-2775`].
+* **Transactional Outbox Engine (`hvt.apps.organizations.tasks`):**
+  * `enqueue_task(task_type, payload, project, organization, run_after_seconds, max_attempts)`: Enqueues tasks atomically with database records.
+  * `process_outbox_tasks(max_tasks, worker_id)`: Concurrency-safe job claiming via `select_for_update(skip_locked=True)` with automatic stale lock reclamation.
+  * `python manage.py run_worker`: Production CLI worker runner supporting `--once`, `--poll-interval`, `--batch-size`, and graceful SIGINT/SIGTERM shutdown [VERIFIED `hvt/apps/organizations/management/commands/run_worker.py`].
+* **Asynchronous Webhook Dispatching:**
+  * `trigger_webhook_event()`: Spawns transactional outbox tasks, constructs delivery envelope with cryptographic HMAC-SHA256 signature (`X-HVT-Signature`), executes requests with 10s timeout, schedules exponential backoff retries, and auto-disables endpoints after 10 consecutive failures [VERIFIED `hvt/apps/organizations/webhooks.py`].

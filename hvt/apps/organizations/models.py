@@ -2,6 +2,7 @@ from hvt.crypto import EncryptedTextField
 import uuid
 import secrets
 import hashlib
+import json
 from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -873,6 +874,7 @@ class Webhook(models.Model):
         USER_UPDATED = "user.updated", "User Updated"
         USER_DELETED = "user.deleted", "User Deleted"
         USER_LOGIN = "user.login", "User Login"
+        SECURITY_ALERT = "security.alert", "Security Alert"
         USER_ROLE_CHANGED = "user.role.changed", "User Role Changed"
         API_KEY_CREATED = "api_key.created", "API Key Created"
         API_KEY_EXPIRED = "api_key.expired", "API Key Expired"
@@ -992,3 +994,182 @@ class WebhookDelivery(models.Model):
 
     def __str__(self):
         return f"{self.event_type} to {self.webhook.url} - {self.status}"
+
+
+
+class OutboxTask(models.Model):
+    """
+    Transactional outbox and background task queue.
+    Guarantees at-least-once execution with automatic retries and exponential backoff.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    class TaskType(models.TextChoices):
+        WEBHOOK_DELIVERY = "webhook.delivery", "Webhook Delivery"
+        EMAIL_DISPATCH = "email.dispatch", "Email Dispatch"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task_type = models.CharField(max_length=64, choices=TaskType.choices, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    attempt_count = models.IntegerField(default=0)
+    max_attempts = models.IntegerField(default=5)
+    next_run_at = models.DateTimeField(default=timezone.now, db_index=True)
+    last_error = models.TextField(blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.CharField(max_length=128, blank=True)
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="outbox_tasks",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="outbox_tasks",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "outbox_tasks"
+        ordering = ["next_run_at", "created_at"]
+        indexes = [
+            models.Index(fields=["status", "next_run_at"]),
+            models.Index(fields=["task_type", "status"]),
+            models.Index(fields=["project", "status"]),
+        ]
+
+    def __str__(self):
+        return f"OutboxTask({self.task_type}, status={self.status}, attempt={self.attempt_count})"
+
+
+class ProjectEmailConfig(models.Model):
+    """
+    Per-project Bring-Your-Own (BYO) Email provider configuration.
+    Stores SMTP credentials and third-party email API keys encrypted at rest.
+    """
+
+    class Provider(models.TextChoices):
+        SYSTEM_DEFAULT = "system_default", "System Default"
+        SMTP = "smtp", "Custom SMTP"
+        RESEND = "resend", "Resend API"
+        POSTMARK = "postmark", "Postmark API"
+        SES = "ses", "Amazon SES"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.OneToOneField(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="email_config",
+    )
+    provider = models.CharField(
+        max_length=32,
+        choices=Provider.choices,
+        default=Provider.SYSTEM_DEFAULT,
+    )
+    from_email = models.EmailField(
+        blank=True,
+        help_text="Sender email address (e.g. auth@customer.com)",
+    )
+    from_name = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Sender display name (e.g. Acme Auth)",
+    )
+    is_active = models.BooleanField(default=True)
+
+    # SMTP Settings (passwords encrypted)
+    smtp_host = models.CharField(max_length=255, blank=True)
+    smtp_port = models.IntegerField(default=587, blank=True, null=True)
+    smtp_username = models.CharField(max_length=255, blank=True)
+    smtp_password = EncryptedTextField(
+        blank=True,
+        help_text="SMTP password (encrypted at rest via MultiFernet).",
+    )
+    smtp_use_tls = models.BooleanField(default=True)
+    smtp_use_ssl = models.BooleanField(default=False)
+
+    # API-based providers (keys encrypted)
+    api_key = EncryptedTextField(
+        blank=True,
+        help_text="Provider API Key (Resend, Postmark, etc., encrypted at rest).",
+    )
+
+    # AWS SES specific
+    aws_region = models.CharField(max_length=64, blank=True)
+    aws_access_key_id = models.CharField(max_length=128, blank=True)
+    aws_secret_access_key = EncryptedTextField(
+        blank=True,
+        help_text="AWS Secret Key (encrypted at rest via MultiFernet).",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "project_email_configs"
+
+    def get_credentials(self) -> dict:
+        """Return decrypted credentials dictionary for the configured provider."""
+        if self.provider == self.Provider.RESEND:
+            return {"api_key": self.api_key}
+        elif self.provider == self.Provider.SMTP:
+            return {
+                "host": self.smtp_host,
+                "port": self.smtp_port or 587,
+                "username": self.smtp_username,
+                "password": self.smtp_password,
+                "use_tls": self.smtp_use_tls,
+                "use_ssl": self.smtp_use_ssl,
+            }
+        elif self.provider == self.Provider.POSTMARK:
+            return {"server_token": self.api_key}
+        elif self.provider == self.Provider.SES:
+            return {
+                "aws_access_key_id": self.aws_access_key_id,
+                "aws_secret_access_key": self.aws_secret_access_key,
+                "aws_region": self.aws_region or "us-east-1",
+            }
+        return {}
+
+    def __str__(self):
+        return f"{self.project.slug} - {self.provider} ({self.from_email or 'no sender'})"
+
+    def get_credentials(self) -> dict:
+        if self.provider == self.Provider.SMTP:
+            return {
+                "host": self.smtp_host,
+                "port": self.smtp_port,
+                "username": self.smtp_username,
+                "password": self.smtp_password,
+                "use_tls": self.smtp_use_tls,
+                "use_ssl": self.smtp_use_ssl,
+            }
+        elif self.provider == self.Provider.RESEND:
+            return {"api_key": self.api_key}
+        elif self.provider == self.Provider.POSTMARK:
+            return {"server_token": self.api_key}
+        elif self.provider == self.Provider.SES:
+            return {
+                "aws_region": self.aws_region,
+                "aws_access_key_id": self.aws_access_key_id,
+                "aws_secret_access_key": self.aws_secret_access_key,
+            }
+        return {}

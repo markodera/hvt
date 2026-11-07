@@ -28,7 +28,7 @@
   * Local Development default: SQLite 3 (`db.sqlite3`, 748 KB) [VERIFIED `hvt/settings.py:191`]
   * Production / CI target: PostgreSQL 16 (`psycopg2-binary` `2.9.11`, `dj-database-url` `3.1.2`) [VERIFIED `docker-compose.yml:3`, `ci.yml:28`]
 * **Task Queues & Caching:**
-  * Celery is **not installed or configured** in the project [VERIFIED `pip list`, `requirements.txt`]. Asynchronous email execution relies on ad-hoc background Python threads via `threading.Thread(target=_worker, daemon=True)` [VERIFIED `hvt/apps/authentication/email.py:250-266`].
+  * **Transactional Outbox Task Engine:** HVT deploys an ACID-compliant transactional outbox backed by `OutboxTask` table with concurrency-safe `select_for_update(skip_locked=True)`, automatic exponential backoff retries, stale lock reclamation, and the `python manage.py run_worker` management runner [VERIFIED `hvt/apps/organizations/tasks.py`, `hvt/apps/organizations/models.py:997-1049`]. Both webhooks and transactional emails are committed transactionally with database mutations and dispatched asynchronously without blocking web threads.
   * Redis: `redis` `8.1.0` and `django-redis` `6.0.0` configured for caching (`USE_REDIS_CACHE=1`) [VERIFIED `hvt/settings.py:320-333`].
 * **Directory Tree Structure:**
   * `hvt/`: Django root application containing `settings.py`, `urls.py`, `wsgi.py`, `crypto.py`, `health.py`, `exceptions.py`.
@@ -45,7 +45,7 @@
 
 ### 2. Complete Model Inventory & Schema Definitions
 
-HVT declares 17 models across its three internal domain applications.
+HVT declares 19 models across its three internal domain applications.
 
 #### App: `hvt.apps.users`
 
@@ -121,23 +121,29 @@ HVT declares 17 models across its three internal domain applications.
 * **Fields:** `id` (UUID PK), `webhook` (`ForeignKey(Webhook, on_delete=CASCADE)`), `event_type` (CharField 50), `payload` (JSONField), `request_headers` (JSONField), `request_body` (TextField), `status` (CharField 20, choices=["pending", "success", "failed", "retrying"]), `response_status_code` (int, nullable), `response_headers` (JSONField), `response_body` (TextField), `error_message` (TextField), `attempt_count` (int, default=0), `max_attempts` (int, default=3), `next_retry_at` (DateTimeField, nullable), `created_at`, `delivered_at`.
 * **Indexes:** `[webhook, -created_at]`, `[status, next_retry_at]`.
 
+##### 14. `ProjectEmailConfig` (`db_table = "project_email_configs"`) [VERIFIED `hvt/apps/organizations/models.py:985-1045`]
+* **Fields:** `id` (UUID PK), `project` (`OneToOneField(Project, on_delete=CASCADE, related_name="email_config")`), `provider` (CharField 32, choices=["system_default", "smtp", "resend", "postmark", "ses"], default="system_default"), `from_name` (CharField 120, blank=True), `from_email` (EmailField, blank=True), `reply_to` (EmailField, blank=True), `smtp_host` (CharField 255, blank=True), `smtp_port` (IntegerField, default=587), `smtp_username` (CharField 255, blank=True), `smtp_password` (`EncryptedTextField`, MultiFernet encrypted), `smtp_use_tls` (BooleanField, default=True), `smtp_use_ssl` (BooleanField, default=False), `api_key` (`EncryptedTextField`, MultiFernet encrypted, for Resend/Postmark), `aws_region` (CharField 64, blank=True), `aws_access_key_id` (CharField 128, blank=True), `aws_secret_access_key` (`EncryptedTextField`, MultiFernet encrypted), `created_at`, `updated_at`.
+
+##### 15. `OutboxTask` (`db_table = "outbox_tasks"`) [VERIFIED `hvt/apps/organizations/models.py:1048-1110`]
+* **Fields:** `id` (UUID PK), `task_type` (CharField 64, choices=["webhook.delivery", "email.dispatch"]), `payload` (JSONField, default=dict), `status` (CharField 20, choices=["pending", "processing", "completed", "failed"], default="pending"), `attempt_count` (IntegerField, default=0), `max_attempts` (IntegerField, default=5), `next_run_at` (DateTimeField, default=timezone.now), `locked_at` (DateTimeField, nullable), `locked_by` (CharField 128, blank=True), `last_error` (TextField, blank=True), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True, blank=True)`), `organization` (`ForeignKey(Organization, on_delete=CASCADE, null=True, blank=True)`), `created_at`, `completed_at` (DateTimeField, nullable).
+* **Indexes:** `[status, next_run_at]`, `[task_type, status]`, `[project, status]`.
+
 ---
 
 #### App: `hvt.apps.authentication`
 
-##### 14. `AuditLog` (`db_table = "audit_logs"`) [VERIFIED `hvt/apps/authentication/models.py:7-178`]
+##### 16. `AuditLog` (`db_table = "audit_logs"`) [VERIFIED `hvt/apps/authentication/models.py:7-178`]
 * **Fields:** `id` (UUID PK), `event_type` (CharField 50, indexed), `event_data` (JSONField), `actor_user` (`ForeignKey("users.User", on_delete=SET_NULL, null=True)`), `actor_api_key` (`ForeignKey("organizations.APIKey", on_delete=SET_NULL, null=True)`), `target_content_type` (`ForeignKey(ContentType, on_delete=SET_NULL, null=True)`), `target_object_id` (UUIDField, nullable), `target_object` (GenericForeignKey), `organization` (`ForeignKey(Organization, on_delete=CASCADE, null=True)`), `project` (`ForeignKey(Project, on_delete=SET_NULL, null=True)`), `ip_address` (GenericIPAddressField, nullable), `user_agent` (TextField), `success` (BooleanField, default=True), `error_message` (TextField), `created_at` (DateTimeField, auto_now_add=True, indexed).
 * **Indexes:** `[-created_at, event_type]`, `[organization, -created_at]`, `[actor_user, -created_at]`.
 
-##### 15. `TOTPDevice` (`db_table = "auth_totp_devices"`) [VERIFIED `hvt/apps/authentication/models.py:262-283`]
+##### 17. `TOTPDevice` (`db_table = "auth_totp_devices"`) [VERIFIED `hvt/apps/authentication/models.py:262-283`]
 * **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (`EncryptedTextField`, MultiFernet encrypted at rest with `v1:` prefix), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
 
-##### 16. `UserPasskeyCredential` (`db_table = "auth_passkey_credentials"`) [VERIFIED `hvt/apps/authentication/models.py:285-313`]
+##### 18. `UserPasskeyCredential` (`db_table = "auth_passkey_credentials"`) [VERIFIED `hvt/apps/authentication/models.py:285-313`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="passkey_credentials")`), `name` (CharField 120, default="Passkey"), `credential_id` (CharField 512, unique=True, indexed), `public_key` (TextField, Base64URL COSE), `sign_count` (BigIntegerField, default=0), `transports` (JSONField, default=list), `aaguid` (CharField 64, blank=True), `backed_up` (BooleanField, default=False), `created_at`, `last_used_at`.
 
-##### 17. `MagicLinkToken` (`db_table = "auth_magic_link_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:315-348`]
+##### 19. `MagicLinkToken` (`db_table = "auth_magic_link_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:315-348`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE)`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True)`), `token_hash` (CharField 64, SHA-256 hash, indexed), `expires_at`, `is_used` (BooleanField, default=False), `created_at`.
-
 ---
 
 ### 3. Multi-Tenancy Isolation & Queryset Scoping Analysis
@@ -162,9 +168,9 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 46 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 47 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
-* **`hvt.apps.organizations` (26 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`).
+* **`hvt.apps.organizations` (27 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`), project email config and transactional outbox task queue (`0027`).
 * **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
 
 ---

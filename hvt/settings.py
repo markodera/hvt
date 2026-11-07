@@ -287,6 +287,9 @@ if "test" in sys.argv or any("test" in arg for arg in sys.argv):
     PASSWORD_HASHERS = [
         "django.contrib.auth.hashers.MD5PasswordHasher",
     ]
+    TASKS_ALWAYS_EAGER = True
+else:
+    TASKS_ALWAYS_EAGER = os.getenv("HVT_TASKS_ALWAYS_EAGER", "false").lower() in ("true", "1")
 
 
 
