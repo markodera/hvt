@@ -2506,9 +2506,18 @@ class ProjectOnboardingStatusView(APIView):
             ).exists()
         )
 
+        LOGIN_EVENT_TYPES = [
+            AuditLog.EventType.USER_LOGIN,
+            AuditLog.EventType.MAGIC_LINK_VERIFIED,
+            AuditLog.EventType.PASSKEY_LOGIN,
+            AuditLog.EventType.SOCIAL_LOGIN,
+            AuditLog.EventType.RUNTIME_USER_INVITE_ACCEPTED,
+        ]
+
         first_login = AuditLog.objects.filter(
-            project=project,
-            event_type=AuditLog.EventType.USER_LOGIN,
+            Q(project=project) | Q(event_data__project_id=str(project.id)),
+            event_type__in=LOGIN_EVENT_TYPES,
+            success=True,
         ).exists()
 
         all_completed = bool(schema_synced and first_signup and first_login)
@@ -2630,13 +2639,15 @@ class ProjectSetupPromptView(APIView):
             f"   npm install @hvt/sdk\n"
             f"   npm install -D @hvt/cli\n\n"
             f"2. Configure environment variables in `.env.local`:\n"
+            f"   HVT_API_URL=\"{backend_host}\"\n"
+            f"   HVT_PROJECT_ID=\"{project.id}\"\n"
+            f"   HVT_MANAGEMENT_KEY=\"{full_key}\"\n"
             f"   NEXT_PUBLIC_HVT_HOST=\"{backend_host}\"\n"
-            f"   NEXT_PUBLIC_HVT_PROJECT_ID=\"{project.id}\"\n"
-            f"   HVT_MANAGEMENT_KEY=\"{full_key}\"\n\n"
+            f"   NEXT_PUBLIC_HVT_PROJECT_ID=\"{project.id}\"\n\n"
             f"3. Preview authentication schema:\n"
-            f"   npx @hvt/cli schema plan --project-id {project.id}\n\n"
+            f"   npx @hvt/cli schema plan --project {project.id}\n\n"
             f"4. Apply declarative schema to initialize auth methods, roles, and mint runtime client key:\n"
-            f"   npx @hvt/cli schema sync --project-id {project.id}\n\n"
+            f"   npx @hvt/cli schema sync --project {project.id}\n\n"
             f"5. Save the returned client key as `NEXT_PUBLIC_HVT_CLIENT_KEY` in `.env.local`.\n"
             f"   Initialize `@hvt/sdk` in your client/server code. Never commit management keys.\n\n"
             f"Specification: {docs_url}/llms.txt\n"

@@ -652,11 +652,13 @@ class RuntimePasskeyAuthVerifyView(views.APIView):
                 event_type=AuditLog.EventType.PASSKEY_LOGIN,
                 request=request,
                 user=user,
+                project=project,
                 event_data={
                     "credential_id": str(cred_record.id),
                     "name": cred_record.name,
                     "project_id": str(project.id) if project else None,
                 },
+                success=True,
             )
 
             return Response(

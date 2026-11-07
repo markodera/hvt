@@ -18,6 +18,7 @@ from hvt.apps.organizations.models import (
     UserProjectRole,
     ManagedBy,
 )
+from hvt.apps.authentication.models import TOTPDevice
 from hvt.apps.users.models import User
 
 
@@ -143,4 +144,65 @@ class ManagedByAndProtectedRoleTests(TestCase):
         # Model field must transparently decrypt back to original plaintext
         social.refresh_from_db()
         self.assertEqual(social.client_secret, "unencrypted-pre-release-plaintext-secret")
+
+    def test_totp_device_secret_encryption_and_backfill(self):
+        import importlib
+        from django.db import connection
+        from django.apps import apps
+        mig = importlib.import_module("hvt.apps.authentication.migrations.0014_backfill_encrypted_totp_secrets")
+        encrypt_existing_totp_secrets = mig.encrypt_existing_totp_secrets
+
+        device = TOTPDevice.objects.create(
+            user=self.user,
+            secret="JBSWY3DPEHPK3PXP",
+            is_confirmed=True,
+        )
+        table = TOTPDevice._meta.db_table
+        pk_val = device.id.hex if hasattr(device.id, "hex") else str(device.id)
+
+        # 1. Newly created device must store encrypted secret in DB
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT secret FROM {table} WHERE id = %s", [pk_val])
+            raw_db_val = cursor.fetchone()[0]
+        self.assertTrue(raw_db_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
+        # Model field must decrypt transparently
+        device.refresh_from_db()
+        self.assertEqual(device.secret, "JBSWY3DPEHPK3PXP")
+
+        # 2. Simulate legacy unencrypted secret in DB
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {table} SET secret = %s WHERE id = %s",
+                ["LEGACYPLAINTEXTSEED123", pk_val],
+            )
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT secret FROM {table} WHERE id = %s", [pk_val])
+            raw_val = cursor.fetchone()[0]
+        self.assertEqual(raw_val, "LEGACYPLAINTEXTSEED123")
+        self.assertFalse(raw_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
+        # Run migration 0014
+        encrypt_existing_totp_secrets(apps, None)
+
+        # Column must now be encrypted with v1:
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT secret FROM {table} WHERE id = %s", [pk_val])
+            enc_val = cursor.fetchone()[0]
+        self.assertTrue(enc_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
+        # Transparently read via ORM
+        device.refresh_from_db()
+        self.assertEqual(device.secret, "LEGACYPLAINTEXTSEED123")
+
+        # 3. Test migration rollback (decrypt_existing_totp_secrets)
+        decrypt_existing_totp_secrets = mig.decrypt_existing_totp_secrets
+        decrypt_existing_totp_secrets(apps, None)
+
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT secret FROM {table} WHERE id = %s", [pk_val])
+            dec_db_val = cursor.fetchone()[0]
+        self.assertEqual(dec_db_val, "LEGACYPLAINTEXTSEED123")
+        self.assertFalse(dec_db_val.startswith(ENCRYPTION_VERSION_PREFIX))
+
 

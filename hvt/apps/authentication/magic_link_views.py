@@ -3,7 +3,10 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.core import signing
+from django.db import transaction
 from django.utils import timezone
+import pyotp
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiResponse
@@ -13,7 +16,7 @@ from hvt.apps.authentication.identity import (
     get_control_plane_users_by_email,
     get_runtime_user_for_api_key,
 )
-from hvt.apps.authentication.models import AuditLog, MagicLinkToken
+from hvt.apps.authentication.models import AuditLog, MagicLinkToken, TOTPDevice
 from hvt.apps.authentication.tokens import build_hvt_token_pair
 from hvt.apps.authentication.views import (
     CONTROL_PLANE_LOGIN_THROTTLES,
@@ -122,21 +125,67 @@ class MagicLinkVerifyView(views.APIView):
             return Response({"error": "Token is required.", "code": "token_required"}, status=status.HTTP_400_BAD_REQUEST)
 
         token_hash = _hash_token(token)
-        record = MagicLinkToken.objects.filter(
-            token_hash=token_hash,
-            project__isnull=True,
-        ).select_related("user").first()
-
-        if not record or not record.is_valid():
-            return Response(
-                {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            record = (
+                MagicLinkToken.objects.select_for_update()
+                .filter(
+                    token_hash=token_hash,
+                    project__isnull=True,
+                )
+                .select_related("user")
+                .first()
             )
 
-        record.is_used = True
-        record.save(update_fields=["is_used"])
+            if not record or not record.is_valid():
+                return Response(
+                    {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            record.is_used = True
+            record.save(update_fields=["is_used"])
 
         user = record.user
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    success=False,
+                    error_message="Invalid 2FA code during magic link verification",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                event_data={"email": user.email, "method": "totp"},
+            )
+
         access_token, refresh_token = build_hvt_token_pair(user)
 
         AuditLog.log(
@@ -212,7 +261,9 @@ class RuntimeMagicLinkRequestView(views.APIView):
             event_type=AuditLog.EventType.MAGIC_LINK_REQUESTED,
             request=request,
             user=user,
+            project=project,
             event_data={"email": user.email, "project_id": str(project.id)},
+            success=True,
         )
 
         return Response(
@@ -244,35 +295,86 @@ class RuntimeMagicLinkVerifyView(views.APIView):
             return Response({"error": "Token is required.", "code": "token_required"}, status=status.HTTP_400_BAD_REQUEST)
 
         token_hash = _hash_token(token)
-        record = MagicLinkToken.objects.filter(
-            token_hash=token_hash,
-            project=project,
-        ).select_related("user").first()
-
-        if not record or not record.is_valid():
-            AuditLog.log(
-                event_type=AuditLog.EventType.MAGIC_LINK_FAILED,
-                request=request,
-                user=record.user if record else None,
-                success=False,
-                error_message="Invalid or expired magic link token",
-            )
-            return Response(
-                {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            record = (
+                MagicLinkToken.objects.select_for_update()
+                .filter(
+                    token_hash=token_hash,
+                    project=project,
+                )
+                .select_related("user")
+                .first()
             )
 
-        record.is_used = True
-        record.save(update_fields=["is_used"])
+            if not record or not record.is_valid():
+                AuditLog.log(
+                    event_type=AuditLog.EventType.MAGIC_LINK_FAILED,
+                    request=request,
+                    user=record.user if record else None,
+                    project=project,
+                    success=False,
+                    error_message="Invalid or expired magic link token",
+                )
+                return Response(
+                    {"error": "Sign-in link is invalid, expired, or has already been used.", "code": "invalid_token"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            record.is_used = True
+            record.save(update_fields=["is_used"])
 
         user = record.user
+        device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+        if device and device.secret:
+            code = str(request.data.get("code") or request.data.get("mfa_code") or "").strip().replace(" ", "")
+            if not code:
+                mfa_token = signing.dumps(
+                    {"user_id": str(user.id), "project_id": str(project.id), "purpose": "mfa_login"},
+                    salt="hvt_mfa_login_salt",
+                )
+                return Response(
+                    {
+                        "mfa_required": True,
+                        "mfa_token": mfa_token,
+                        "detail": "Two-factor authentication code required.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            totp = pyotp.TOTP(device.secret)
+            if not totp.verify(code, valid_window=1):
+                AuditLog.log(
+                    event_type=AuditLog.EventType.LOGIN_FAILED,
+                    request=request,
+                    user=user,
+                    project=project,
+                    success=False,
+                    error_message="Invalid 2FA code during runtime magic link verification",
+                )
+                return Response(
+                    {"error": "Invalid or expired two-factor authentication code.", "code": "invalid_code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device.last_verified_at = timezone.now()
+            device.save(update_fields=["last_verified_at"])
+            AuditLog.log(
+                event_type=AuditLog.EventType.MFA_VERIFIED,
+                request=request,
+                user=user,
+                project=project,
+                event_data={"email": user.email, "method": "totp", "project_id": str(project.id)},
+            )
+
         access_token, refresh_token = build_hvt_token_pair(user, project=project)
 
         AuditLog.log(
             event_type=AuditLog.EventType.MAGIC_LINK_VERIFIED,
             request=request,
             user=user,
+            project=project,
             event_data={"email": user.email, "project_id": str(project.id)},
+            success=True,
         )
 
         return Response(

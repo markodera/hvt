@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `11c40b03e70ec2a92077eb7aa9cf424028038622`  
-> **Last Synchronized:** `2026-11-06 14:08:50 UTC`  
+> **Latest Commit:** `179c40a62f743582b068e8f19daad09ca9e9c87c`  
+> **Last Synchronized:** `2026-11-06 21:03:31 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 16,707 words (137,353 characters)  
+> **Total Volume:** 16,818 words (138,522 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
-| 01 | 00 Summary | 1,804 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 2,662 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,570 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
-| 04 | 03 Tokens Sessions Passkeys | 1,215 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
-| 05 | 04 Security | 1,672 words | [04-security.md](#04-security) |
+| 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
+| 02 | 01 Architecture And Data | 2,678 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 2,581 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 1,268 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 05 | 04 Security | 1,677 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,219 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
-| 10 | 09 Fe2Proposal Audit | 1,383 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **16,707 words** | |
+| 10 | 09 Fe2Proposal Audit | 1,392 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
+| | **TOTAL** | **16,818 words** | |
 
 ---
 
@@ -60,7 +60,7 @@ This report reflects code-verified reality extracted from direct source inspecti
 | **2** | **Full SSRF Vector via Custom Webhook Deliveries**<br>The webhook creation endpoint accepts arbitrary URLs with zero IP/hostname blocklisting (e.g., internal subnets, loopback `127.0.0.1`, AWS metadata `169.254.169.254`). Outbound dispatch synchronously calls `requests.post(webhook.url, ...)` and stores the response status, response headers, and the first 5,000 characters of the response body in `WebhookDelivery`, which is returned via the REST API to the org owner. | Critical Security Vulnerability | [VERIFIED hvt/apps/organizations/webhooks.py:85-94], [VERIFIED hvt/api/v1/serializers/organizations.py:580-610] |
 | **3** | **Symmetric HS256 Token Bottleneck & No JWKS**<br>All JWTs are signed with symmetric `HS256` using Django's single root `SECRET_KEY`. No public-key endpoint (`/.well-known/jwks.json`) exists. Downstream customer backend services cannot verify tokens locally without possessing HVT's master secret, forcing all microservices to call HVT over the network. | Architectural Blocker | [VERIFIED hvt/settings.py:434-441], [VERIFIED hvt/apps/authentication/tokens.py:19-37] |
 | **4** | **Social OAuth Auto-Linking Account Takeover (ATO) Risk**<br>When a social OAuth callback arrives, `pre_social_login` queries users by email and automatically attaches the social identity to an existing account. If the provider did not verify the email (or if the email attribute falls back to unverified profile data), an attacker registering that email on an external OAuth provider can hijack an existing victim account. | High Security Risk | [VERIFIED hvt/apps/authentication/adapters.py:260-267, 312-340] |
-| **5** | **Plaintext TOTP Secrets & Missing Backup Codes**<br>TOTP secrets are stored in plaintext in the database (`auth_totp_devices.secret` as `VARCHAR(64)`), completely unencrypted and unhashed. Furthermore, backup recovery codes are completely unimplemented across the codebase; a user who loses their phone is permanently locked out. | Security & Usability Defect | [VERIFIED hvt/apps/authentication/models.py:273], [VERIFIED hvt/apps/authentication/totp_views.py:42-46] |
+| **5** | **Missing TOTP Backup Codes (Secrets Encrypted via MultiFernet)**<br>While TOTP secrets are now securely encrypted at rest via MultiFernet (`TOTPDevice.secret` as `EncryptedTextField` with `v1:` version prefix and migration `0014`), backup recovery codes remain completely unimplemented across the codebase. A user who loses their 2FA device has no self-serve recovery option and is permanently locked out without operator intervention. | Usability & Security Risk | [VERIFIED hvt/apps/authentication/models.py:274], [VERIFIED hvt/apps/authentication/totp_views.py:42-46], [VERIFIED tests/test_crypto.py:148-208] |
 | **6** | **Two-Plane Separation Is Strictly Enforced in Code**<br>Runtime endpoints (`/api/v1/auth/runtime/*`) strictly reject management keys (`hvt_mgmt_*`) with HTTP 403 and automatically append a `security.violation` record to `AuditLog`. Conversely, runtime client keys (`hvt_test_*`) cannot access management or schema provisioning routes. | Architecture Strength | [VERIFIED tests/test_plane_separation_and_auth.py:25-90], [RAN live test -> HTTP 403 + AuditLog recorded] |
 | **7** | **Option C Concurrency Lock & Live Project Safety Verified**<br>Test management keys are cryptographically prevented from synchronizing or mutating any project that has active live keys, avoiding development-stage pollution of production authorization states. | Architecture Strength | [VERIFIED hvt/apps/organizations/schema_sync.py:346-385], [VERIFIED tests/test_schema_sync.py:346-363] |
 | **8** | **Registration User Creation vs. Email Send Atomic Decoupling (RESOLVED)**<br>Previously, `HVTRegisterView` created the `User` before email dispatch, leaving unverified zombie users on provider failure. The view is now wrapped in `transaction.atomic()`, ensuring atomic rollback of User, Organization, and Project if email delivery fails. | Resolved UX Defect | [VERIFIED hvt/apps/authentication/views.py:829-840], [VERIFIED hvt.apps.organizations.tests_onboarding] |
@@ -243,7 +243,7 @@ HVT declares 17 models across its three internal domain applications.
 * **Indexes:** `[-created_at, event_type]`, `[organization, -created_at]`, `[actor_user, -created_at]`.
 
 ##### 15. `TOTPDevice` (`db_table = "auth_totp_devices"`) [VERIFIED `hvt/apps/authentication/models.py:262-283`]
-* **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (CharField 64, plaintext base32), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
+* **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (`EncryptedTextField`, MultiFernet encrypted at rest with `v1:` prefix), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
 
 ##### 16. `UserPasskeyCredential` (`db_table = "auth_passkey_credentials"`) [VERIFIED `hvt/apps/authentication/models.py:285-313`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="passkey_credentials")`), `name` (CharField 120, default="Passkey"), `credential_id` (CharField 512, unique=True, indexed), `public_key` (TextField, Base64URL COSE), `sign_count` (BigIntegerField, default=0), `transports` (JSONField, default=list), `aaguid` (CharField 64, blank=True), `backed_up` (BooleanField, default=False), `created_at`, `last_used_at`.
@@ -275,10 +275,10 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 43 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 45 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
 * **`hvt.apps.organizations` (25 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`).
-* **`hvt.apps.authentication` (12 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`).
+* **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
 
 ---
 
@@ -549,7 +549,7 @@ The following comprehensive table inventories the primary endpoint families acro
 #### 16. Onboarding Quickstart & AI Setup Prompt
 * **Status:** `WORKING` [VERIFIED `hvt.apps.organizations.tests_onboarding`].
 * **Mechanics:**
-  * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`) and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
+  * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`), counting both standard and passwordless/social/invite logins (`USER_LOGIN`, `MAGIC_LINK_VERIFIED`, `PASSKEY_LOGIN`, `SOCIAL_LOGIN`, `RUNTIME_USER_INVITE_ACCEPTED`), and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
   * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity).
   * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
@@ -725,6 +725,10 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 * **Single Domain Customer Apps (`app.customer.com`):** **YES.** If the customer configures `frontend_url = "https://app.customer.com"` in their HVT project settings, HVT sets `rp_id = "app.customer.com"` and accepts `expected_origin = "https://app.customer.com"`. Biometric passkeys created by the browser on `app.customer.com` will validate successfully.
 * **Multi-Domain Customer Apps (`app.customer.com` + `admin.customer.com`):** **NO.** In `_resolve_expected_origin`, HVT checks `project.frontend_url` but **does not check `project.allowed_origins`** [VERIFIED `hvt/apps/authentication/passkey_views.py:78-80`]. Requests originating from secondary domains in `allowed_origins` are rejected during origin validation. Furthermore, WebAuthn specifications require `rp_id` to be a registrable suffix of the current page origin; HVT cannot dynamically negotiate different `rp_id` scopes across unrelated domains in a single project.
 
+5. **Passwordless Magic Links: Token Consumption Atomicity [VERIFIED `hvt/apps/authentication/magic_link_views.py:125-140, 250-275`]:**
+   * Tokens are 32-byte cryptographically random URL-safe strings hashed via SHA-256 before storage in `MagicLinkToken`.
+   * Verification and consumption in `MagicLinkVerifyView` (control plane) and `RuntimeMagicLinkVerifyView` (runtime plane) are executed within `transaction.atomic()` using `MagicLinkToken.objects.select_for_update()`, guaranteeing atomic single-use redemption and preventing concurrent double-spend race conditions.
+
 ---
 
 ## WHAT WE DON'T KNOW
@@ -816,7 +820,7 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
 *   **Magic Link Tokens:** 32-byte cryptographically secure random token generated via `secrets.token_urlsafe(32)`. Stored exclusively as a SHA-256 hash in `MagicLinkToken.token_hash`. Configured with a 15-minute expiration (`MAGIC_LINK_EXPIRE_MINUTES = 15`) and single-use invalidation setting `used_at = timezone.now()` [VERIFIED `hvt/apps/authentication/models.py:55-80`].
 *   **Password Reset Tokens:** Employs Django's standard `PasswordResetTokenGenerator` which derives an HMAC over the user's primary key, password hash salt, and last login timestamp. Single-use is naturally enforced because resetting the password alters the underlying salt. Default timeout is 3 days [VERIFIED `django/contrib/auth/tokens.py`].
 *   **Invitation Tokens:** Raw 32-byte UUID hex strings are stored **unhashed** in `OrganizationInvitation.token` and `ProjectInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:145-155`]. Tokens expire after 72 hours.
-*   **TOTP Secret Storage:** `TOTPDevice.secret` stores a raw base32 ASCII string directly in the database (`CharField(max_length=64)`) **without encryption** [VERIFIED `hvt/apps/authentication/models.py:12-30`].
+*   **TOTP Secret Storage:** `TOTPDevice.secret` is encrypted at rest using `EncryptedTextField` with MultiFernet (prefixed with `v1:`) and automatically decrypted upon retrieval [VERIFIED `hvt/apps/authentication/models.py:274`, `tests/test_crypto.py`].
 *   **Backup Codes:** **Completely absent**. No model, database table, or view logic exists for generating or redeeming single-use TOTP recovery codes. If an end-user loses their authenticator device, they are locked out permanently unless an operator manually modifies the database [VERIFIED `hvt/apps/authentication/` inspection].
 
 ### 6. Password Hashers & Policies
@@ -866,8 +870,8 @@ if existing_user:
 ```
 **Risk:** If an attacker creates an account on a social provider that does not enforce strict email verification (or where the attacker creates a custom GitLab/Discord profile matching the victim's email), logging in with that provider grants instantaneous, full takeover of the victim's HVT account.
 
-### 2. Plaintext Database Storage of Sensitive Secrets
-While session tokens and magic links are appropriately hashed, **TOTP secrets** (`TOTPDevice.secret`) and **invitation tokens** (`ProjectInvitation.token`) are stored in plain ASCII text. A database snapshot leak immediately exposes the two-factor secrets of all enrolled users.
+### 2. Plaintext Database Storage of Invitation Tokens
+While session tokens and magic links are hashed and **TOTP secrets** (`TOTPDevice.secret`) are encrypted at rest with MultiFernet, **invitation tokens** (`ProjectInvitation.token`) are stored in plain ASCII text. A database snapshot leak exposes invitation links before expiration.
 
 ### 3. Missing PKCE and OAuth State Validation on REST Endpoints
 The social login REST endpoints (`/api/v1/auth/social/google/`, etc.) accept raw OAuth authorization codes or access tokens directly from the frontend request body. They do not implement or verify PKCE (`code_verifier`) or transient OAuth `state` parameters at the API level, delegating entire authorization trust to the client application.
@@ -1388,7 +1392,7 @@ flowchart TD
 | Step # | Roadmap Milestone | Codebase Prerequisites & Blockers | Feasibility | Technical Risk Level |
 | :---: | :--- | :--- | :---: | :---: |
 | **Step 1** | **v0.2.0 Preview Release** | Baseline completed. | **100% Shipped** | None |
-| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), encrypt TOTP secrets, add backup codes model, and inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`. (`HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
+| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), add backup codes model, and inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`. (TOTP secret encryption at rest via MultiFernet is **SHIPPED** [VERIFIED `models.py:274`, `tests/test_crypto.py`]; `HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
 | **Step 3** | **Copy AI Setup Prompt & Onboarding Journey** | Fully implemented: `POST /setup-prompt/` with Option C live-key lock, `GET /onboarding/` live checklist polling, `OnboardingQuickstart.jsx` mounted in `DashboardHome.jsx`, and atomic auto-provisioning (39 actions across 8 screens reduced to 4 actions across 2 screens). | **100% Shipped** | None |
 | **Step 4** | **Token Groundwork & JWKS** | Requires replacing SimpleJWT symmetric HS256 with asymmetric RS256/EdDSA signing, deploying public JWKS view, and writing verification helpers in `hvt-sdk`. | **High** (~2 weeks) | **Medium** (Key rotation ceremony complexity) |
 | **Step 5** | **Per-Project Passkey Origins** | Currently `rp_id` derives from HTTP `request.get_host()`. Needs project-level domain configuration and origin matching in `passkey_views.py`. | **High** (~1 week) | **Low** |

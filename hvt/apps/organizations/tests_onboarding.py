@@ -119,6 +119,63 @@ class OnboardingFlowBackendTest(TestCase):
         self.assertTrue(res.data["first_login"])
         self.assertTrue(res.data["all_completed"])
 
+    def test_passwordless_and_social_logins_complete_first_login_onboarding(self):
+        """Verify MAGIC_LINK_VERIFIED, PASSKEY_LOGIN, SOCIAL_LOGIN, and RUNTIME_USER_INVITE_ACCEPTED mark first_login=True."""
+        owner = User.objects.create_user(
+            email="founder@example.com",
+            password="StrongPass123!",
+            role=User.Role.OWNER,
+        )
+        org = Organization.objects.create(name="Gamma Labs", slug="gamma-labs", owner=owner)
+        owner.organization = org
+        owner.save(update_fields=["organization"])
+        project = org.ensure_default_project()
+
+        ProjectRole.objects.create(
+            project=project,
+            name="Member",
+            slug="member",
+            is_default_signup=True,
+        )
+        runtime_user = User.objects.create_user(
+            email="runtime@gamma.com",
+            password="StrongPass123!",
+            organization=org,
+            project=project,
+            role=User.Role.MEMBER,
+        )
+
+        self.client.force_authenticate(user=owner)
+        url = f"/api/v1/organizations/current/projects/{project.id}/onboarding/"
+
+        # Initially false
+        res = self.client.get(url)
+        self.assertFalse(res.data["first_login"])
+
+        # Test each passwordless/runtime event type
+        passwordless_events = [
+            AuditLog.EventType.MAGIC_LINK_VERIFIED,
+            AuditLog.EventType.PASSKEY_LOGIN,
+            AuditLog.EventType.SOCIAL_LOGIN,
+            AuditLog.EventType.RUNTIME_USER_INVITE_ACCEPTED,
+        ]
+
+        for evt in passwordless_events:
+            log_entry = AuditLog.log(
+                event_type=evt,
+                user=runtime_user,
+                project=project,
+                event_data={"email": runtime_user.email, "project_id": str(project.id)},
+                success=True,
+            )
+            res = self.client.get(url)
+            self.assertTrue(
+                res.data["first_login"],
+                f"Expected first_login to be True after event {evt}"
+            )
+            self.assertTrue(res.data["all_completed"])
+            log_entry.delete()
+
     def test_setup_prompt_generation_and_option_c_lock(self):
         """POST setup-prompt mints temporary 15-minute test management key and enforces Option C."""
         owner = User.objects.create_user(
@@ -141,6 +198,9 @@ class OnboardingFlowBackendTest(TestCase):
         self.assertIn("••••••••••••••••", res.data["masked_key"])
         self.assertEqual(res.data["expires_in_seconds"], 900)
         self.assertIn("HVT_MANAGEMENT_KEY", res.data["prompt"])
+        self.assertIn("HVT_API_URL", res.data["prompt"])
+        self.assertIn("HVT_PROJECT_ID", res.data["prompt"])
+        self.assertIn("--project ", res.data["prompt"])
         self.assertIn(str(project.id), res.data["prompt"])
 
         # Verify key exists in DB with 15-minute expiry and provisioning scopes

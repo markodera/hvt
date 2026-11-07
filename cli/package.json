@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Official CLI for HVT — Declarative schema provisioning, plan previews, and auth synchronization.",
   "bin": {
-    "hvt": "./bin/hvt.js"
+    "hvt": "bin/hvt.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -4,7 +4,7 @@ import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { parseManifestContent, writeClientKeyToEnvLocal } from "./config.js";
+import { parseManifestContent, writeClientKeyToEnvLocal, resolveConfig } from "./config.js";
 import { buildStarterSchema, SUPPORTED_PROVIDERS } from "./commands/init.js";
 
 describe("CLI Config & Manifest Parser", () => {
@@ -103,6 +103,39 @@ roles:
       assert.strictEqual(warningLogged, true);
     } finally {
       console.warn = origWarn;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves config with NEXT_PUBLIC_ fallbacks for project and host", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hvt-cli-test-resolve-"));
+    const prevHost = process.env.NEXT_PUBLIC_HVT_HOST;
+    const prevProj = process.env.NEXT_PUBLIC_HVT_PROJECT_ID;
+    const prevKey = process.env.HVT_MANAGEMENT_KEY;
+
+    try {
+      process.env.NEXT_PUBLIC_HVT_HOST = "https://custom.hvts.app";
+      process.env.NEXT_PUBLIC_HVT_PROJECT_ID = "proj-uuid-1234";
+      process.env.HVT_MANAGEMENT_KEY = "hvt_mgmt_test_validkey123";
+
+      const starterSchemaPath = path.join(tmpDir, "hvt.schema.json");
+      fs.writeFileSync(
+        starterSchemaPath,
+        JSON.stringify({ schema_version: 1 }),
+        "utf-8"
+      );
+
+      const cfg = resolveConfig({ cwd: tmpDir });
+      assert.strictEqual(cfg.apiUrl, "https://custom.hvts.app");
+      assert.strictEqual(cfg.projectId, "proj-uuid-1234");
+      assert.strictEqual(cfg.managementKey, "hvt_mgmt_test_validkey123");
+    } finally {
+      if (prevHost) process.env.NEXT_PUBLIC_HVT_HOST = prevHost;
+      else delete process.env.NEXT_PUBLIC_HVT_HOST;
+      if (prevProj) process.env.NEXT_PUBLIC_HVT_PROJECT_ID = prevProj;
+      else delete process.env.NEXT_PUBLIC_HVT_PROJECT_ID;
+      if (prevKey) process.env.HVT_MANAGEMENT_KEY = prevKey;
+      else delete process.env.HVT_MANAGEMENT_KEY;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

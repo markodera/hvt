@@ -649,3 +649,41 @@ class SchemaSyncConcurrencyAndSecurityTests(TransactionTestCase):
         client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
         res = client.post(self.sync_url, {"schema_version": 1}, format="json")
         self.assertEqual(res.status_code, 200)
+
+    def test_prune_social_provider_blocked_by_legacy_user_social_account(self):
+        """Pruning a provider is blocked if a legacy organization user (project_id=None) has a linked SocialAccount."""
+        from allauth.socialaccount.models import SocialAccount
+        from hvt.apps.organizations.models import ManagedBy, SocialProviderConfig
+        from hvt.apps.users.models import User
+
+        # Create manifest-managed provider config
+        SocialProviderConfig.objects.create(
+            project=self.project,
+            provider="github",
+            client_id="github-test-client",
+            managed_by=ManagedBy.MANIFEST,
+        )
+
+        # Create legacy user (project_id=None, role=member) with linked social account
+        legacy_user = User.objects.create_user(
+            email="legacy_oauth@example.com",
+            password="LegacyPassword123!",
+            organization=self.org,
+            project=None,
+            role="member",
+        )
+        sa = SocialAccount.objects.create(user=legacy_user, provider="github", uid="gh-legacy-999")
+
+        client = APIClient()
+        client.credentials(HTTP_X_API_KEY=self.mgmt_raw)
+
+        # Attempt to prune (empty social_providers list with prune=true)
+        res = client.post(f"{self.sync_url}?prune=true", {"schema_version": 1, "social_providers": []}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Cannot prune social provider 'github'", str(res.data))
+
+        # Remove the linked social account; now prune should succeed
+        sa.delete()
+        res_ok = client.post(f"{self.sync_url}?prune=true", {"schema_version": 1, "social_providers": []}, format="json")
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertFalse(SocialProviderConfig.objects.filter(project=self.project, provider="github").exists())
