@@ -245,23 +245,45 @@ class ResendEmailBackend(BaseEmailBackend):
             return False
 
 
-def send_email_async(to_email: str, subject: str, html_content: str, text_content: Optional[str] = None):
-    """Dispatch an email asynchronously using the ResendEmailService."""
-    import threading
+def send_email_async(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    text_content: Optional[str] = None,
+    *,
+    project=None,
+    from_email: Optional[str] = None,
+    from_name: Optional[str] = None,
+):
+    """Dispatch an email asynchronously using the Outbox Task queue."""
+    try:
+        from hvt.apps.organizations.models import OutboxTask
+        from hvt.apps.organizations.tasks import enqueue_task
 
-    service = ResendEmailService()
-
-    def _worker():
-        try:
-            service.send(
-                to=to_email,
-                subject=subject,
-                html=html_content,
-                text=text_content,
-            )
-        except Exception:
-            logger.exception("Failed to send email to %s", to_email)
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
+        project_id = str(project.id) if project else None
+        return enqueue_task(
+            task_type=OutboxTask.TaskType.EMAIL_DISPATCH,
+            payload={
+                "to": to_email,
+                "subject": subject,
+                "html": html_content,
+                "text": text_content,
+                "project_id": project_id,
+                "from_email": from_email,
+                "from_name": from_name,
+            },
+            project=project,
+        )
+    except Exception as exc:
+        logger.warning("Failed to enqueue email dispatch in outbox, falling back to direct send: %s", exc)
+        from hvt.apps.authentication.email_providers import resolve_email_provider
+        provider = resolve_email_provider(project)
+        return provider.send(
+            to=to_email,
+            subject=subject,
+            html=html_content,
+            text=text_content,
+            from_email=from_email,
+            from_name=from_name,
+        )
 

@@ -86,6 +86,8 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/runtime/invitations/accept/` | Runtime | Runtime API Key | `AllowAny` | `auth:runtime` | Default | `tests_runtime_invitations` |
 | `GET, POST` | `/api/v1/organizations/current/webhooks/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `webhooks:read/write` | Default | `hvt.apps.organizations.tests_webhooks` |
 | `GET` | `/api/v1/organizations/current/webhooks/<id>/deliveries/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `webhooks:read` | Default | `hvt.apps.organizations.tests_webhooks` |
+| `GET, PUT, PATCH, DELETE` | `/api/v1/organizations/current/projects/<id>/email-config/` | Control | JWT / Mgmt Key | `IsOrgOwnerOrAPIKey` | None | Default | `tests/test_byo_email_providers.py` |
+| `POST` | `/api/v1/organizations/current/projects/<id>/email-config/test/` | Control | JWT / Mgmt Key | `IsOrgOwnerOrAPIKey` | None | Default | `tests/test_byo_email_providers.py` |
 | `GET` | `/api/v1/organizations/current/audit-logs/` | Control | JWT / API Key | `IsOrgOwnerOrAPIKey` | `audit_logs:read` | Default | `tests/test_audit_logging.py` |
 
 ---
@@ -185,6 +187,19 @@ The following comprehensive table inventories the primary endpoint families acro
   * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
 * **Storage:** Temporary rows in `api_keys` (`expires_at = now + 15m`).
+
+#### 17. Bring-Your-Own (BYO) Email & Background Task Engine (Step 6)
+
+* **Management Endpoints:**
+  * `GET /api/v1/organizations/current/projects/<id>/email-config/`: Retrieve per-project email provider configuration with masked credential statuses (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`) [VERIFIED `hvt/apps/organizations/views.py:2672-2708`].
+  * `PATCH /api/v1/organizations/current/projects/<id>/email-config/`: Update project provider (`smtp`, `resend`, `postmark`, `ses`), custom sender identity (`from_email`, `from_name`), and encrypted credentials [VERIFIED `hvt/apps/organizations/views.py:2710-2725`].
+  * `POST /api/v1/organizations/current/projects/<id>/email-config/test/`: Send a test email to verify provider connectivity [VERIFIED `hvt/apps/organizations/views.py:2728-2775`].
+* **Transactional Outbox Engine (`hvt.apps.organizations.tasks`):**
+  * `enqueue_task(task_type, payload, project, organization, run_after_seconds, max_attempts)`: Enqueues tasks atomically with database records.
+  * `process_outbox_tasks(max_tasks, worker_id)`: Concurrency-safe job claiming via `select_for_update(skip_locked=True)` with automatic stale lock reclamation.
+  * `python manage.py run_worker`: Production CLI worker runner supporting `--once`, `--poll-interval`, `--batch-size`, and graceful SIGINT/SIGTERM shutdown [VERIFIED `hvt/apps/organizations/management/commands/run_worker.py`].
+* **Asynchronous Webhook Dispatching:**
+  * `trigger_webhook_event()`: Spawns transactional outbox tasks, constructs delivery envelope with cryptographic HMAC-SHA256 signature (`X-HVT-Signature`), executes requests with 10s timeout, schedules exponential backoff retries, and auto-disables endpoints after 10 consecutive failures [VERIFIED `hvt/apps/organizations/webhooks.py`].
 
 ---
 

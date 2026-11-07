@@ -36,6 +36,9 @@ from hvt.apps.organizations.models import APIKey, UserProjectRole
 
 def _resolve_rp_id(request, project=None) -> str:
     """Resolve RP ID (hostname) for WebAuthn."""
+    if project and getattr(project, "passkey_rp_id", None):
+        return project.passkey_rp_id.strip().lower()
+
     custom_rp_id = getattr(settings, "WEBAUTHN_RP_ID", None)
     if custom_rp_id:
         return custom_rp_id

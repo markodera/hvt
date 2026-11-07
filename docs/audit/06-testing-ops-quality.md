@@ -21,13 +21,13 @@
 
 | Test Suite | Framework / Runner | Test Count | Pass / Fail / Skip | Duration | Evidence |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 128 | 128 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 71 | 71 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 12 | 12 Pass / 0 Fail | 983 ms | [RAN `npm test` in `cli/` -> 12 pass] |
+| **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.authentication` -> OK] |
+| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 150 | 150 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
+| **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.users` -> OK] |
+| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 128 | 128 Pass / 0 Fail | 16.5s | [RAN `manage.py test tests` -> OK] |
+| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **364** | **364 Pass / 0 Fail** | **~44 min (Backend) + 1s (CLI)** | |
+| **TOTAL** | | **445** | **445 Pass / 0 Fail** | **~67s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (431 tests) + `npm test` (14 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -46,8 +46,8 @@ When the full suite of 352 backend tests is executed, it requires **2,641 second
 
 ### 4. Untested Functional Areas
 
-1.  **Asynchronous Webhook Retries:** Webhook delivery logic in `hvt/apps/organizations/webhooks.py` uses synchronous `requests.post()`. No test coverage exists for socket timeouts, network drops, or retry queue persistence under production load.
-2.  **Multi-Origin Passkey Verification:** Passkey tests verify single-domain origins (`localhost:8000`). No tests evaluate multi-tenant customer origins or non-standard port derivation.
+1.  **Asynchronous Webhook Retries (RESOLVED in Step 6):** Transitioned to Transactional Outbox pattern with automated retries, exponential backoff, HMAC-SHA256 signatures, and delivery status tracking, verified by `tests/test_async_webhooks.py` (5 tests) and `tests/test_outbox_worker.py` (7 tests) [VERIFIED `tests/test_async_webhooks.py`].
+2.  **Multi-Origin Passkey Verification (RESOLVED in Step 5):** Added comprehensive test coverage in `tests/test_passkey_origins.py` (13 tests) verifying RP ID resolution and expected origin validation across multi-tenant customer domains, preview environments, localhost origins, CORS preflight options, and WebAuthn assertion verification [VERIFIED `tests/test_passkey_origins.py`].
 3.  **Token Blacklist Pruning:** While `TokenBlacklist` records revoked JWTs, no management command or test exists for purging expired tokens from the database.
 4.  **Database Migration Reversibility:** None of the 43 migrations have automated rollback tests verifying backward compatibility.
 
@@ -92,5 +92,5 @@ The GitHub Actions configuration `.github/workflows/ci.yml:80` runs `python mana
 ### 2. 44-Minute Test Run Latency
 Running the actual test suite requires 44 minutes on standard developer hardware. This severe execution penalty creates strong friction against local testing and encourages developers to bypass local test verification prior to pushing code.
 
-### 3. Synchronous Webhook Delivery Bottleneck
-Webhooks are dispatched synchronously inside the HTTP request cycle using `requests.post(timeout=10)`. If a customer endpoint is slow or unresponsive, the HVT API worker blocks for up to 10 seconds per webhook, allowing slow endpoints to exhaust the entire Gunicorn worker pool and cause a denial of service.
+### 3. Synchronous Webhook Delivery Bottleneck (RESOLVED in Step 6)
+Webhooks were previously dispatched synchronously inside the HTTP request cycle using `requests.post(timeout=10)`. In Step 6, this was resolved by deploying a zero-dependency Transactional Outbox engine (`OutboxTask`), asynchronous webhook dispatch with HMAC signatures and exponential backoff, pluggable Bring-Your-Own Email (`ProjectEmailConfig`), and the `python manage.py run_worker` daemon [VERIFIED `hvt/apps/organizations/tasks.py:30-244`, `hvt/apps/organizations/management/commands/run_worker.py:23-103`].

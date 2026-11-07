@@ -1,0 +1,481 @@
+{
+  "screenshots": [
+    {
+      "name": "01_landing.png",
+      "url": "http://localhost:5173/",
+      "scrollHeight": 5035,
+      "scrollWidth": 1440,
+      "domNodes": 472,
+      "title": "HVT | Multi-Tenant Identity & RBAC Engine for Platforms and Marketplaces",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 7848
+    },
+    {
+      "name": "02_login.png",
+      "url": "http://localhost:5173/login",
+      "scrollHeight": 933,
+      "scrollWidth": 1440,
+      "domNodes": 104,
+      "title": "Sign in | HVT - Identity & Access Management",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5250
+    },
+    {
+      "name": "03_signup.png",
+      "url": "http://localhost:5173/signup",
+      "scrollHeight": 1022,
+      "scrollWidth": 1440,
+      "domNodes": 157,
+      "title": "Sign up | HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 3332
+    },
+    {
+      "name": "04_forgot_password.png",
+      "url": "http://localhost:5173/forgot-password",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 59,
+      "title": "Reset password | HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4280
+    },
+    {
+      "name": "05_reset_password.png",
+      "url": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 58,
+      "title": "Set new password | HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5261
+    },
+    {
+      "name": "06_verify_email_notice.png",
+      "url": "http://localhost:5173/verify-email",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 60,
+      "title": "Verify email | HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 3499
+    },
+    {
+      "name": "07_invite_accept.png",
+      "url": "http://localhost:5173/invite?token=sample-invite-token",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 52,
+      "title": "HVT | Open-Source Auth for Projects, Roles, and Permissions",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 2584
+    },
+    {
+      "name": "08_dashboard_home.png",
+      "url": "http://localhost:5173/dashboard",
+      "scrollHeight": 1525,
+      "scrollWidth": 1440,
+      "domNodes": 435,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 6878
+    },
+    {
+      "name": "09_ai_setup_prompt_modal.png",
+      "url": "http://localhost:5173/dashboard",
+      "scrollHeight": 1525,
+      "scrollWidth": 1440,
+      "domNodes": 482,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 0
+    },
+    {
+      "name": "10_cli_setup_modal.png",
+      "url": "http://localhost:5173/dashboard",
+      "scrollHeight": 1525,
+      "scrollWidth": 1440,
+      "domNodes": 485,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 0
+    },
+    {
+      "name": "11_users_platform_tab.png",
+      "url": "http://localhost:5173/dashboard/users?tab=platform",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 238,
+      "title": "Users · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4996
+    },
+    {
+      "name": "12_users_project_tab.png",
+      "url": "http://localhost:5173/dashboard/users?tab=project",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 185,
+      "title": "Users · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4840
+    },
+    {
+      "name": "14_api_keys.png",
+      "url": "http://localhost:5173/dashboard/api-keys",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 382,
+      "title": "API Keys · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4136
+    },
+    {
+      "name": "15_api_keys_create_modal.png",
+      "url": "http://localhost:5173/dashboard/api-keys",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 461,
+      "title": "API Keys · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 3563
+    },
+    {
+      "name": "16_webhooks.png",
+      "url": "http://localhost:5173/dashboard/webhooks",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 249,
+      "title": "Webhooks · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4377
+    },
+    {
+      "name": "18_audit_logs.png",
+      "url": "http://localhost:5173/dashboard/audit-logs",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 392,
+      "title": "Audit Logs · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 3900
+    },
+    {
+      "name": "19_settings_account.png",
+      "url": "http://localhost:5173/dashboard/settings?tab=account",
+      "scrollHeight": 1201,
+      "scrollWidth": 1440,
+      "domNodes": 328,
+      "title": "Settings - HVT Control Plane",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5270
+    },
+    {
+      "name": "20_settings_projects_tab.png",
+      "url": "http://localhost:5173/dashboard/settings?tab=projects",
+      "scrollHeight": 15545,
+      "scrollWidth": 1440,
+      "domNodes": 3399,
+      "title": "Settings - HVT Control Plane",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5781
+    },
+    {
+      "name": "22_settings_organization.png",
+      "url": "http://localhost:5173/dashboard/settings?tab=organization",
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 235,
+      "title": "Settings - HVT Control Plane",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5082
+    },
+    {
+      "name": "23_create_project.png",
+      "url": "http://localhost:5173/dashboard",
+      "scrollHeight": 1525,
+      "scrollWidth": 1440,
+      "domNodes": 435,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4289
+    },
+    {
+      "name": "24_runtime_playground.png",
+      "url": "http://localhost:5173/runtime-playground",
+      "scrollHeight": 2489,
+      "scrollWidth": 1440,
+      "domNodes": 223,
+      "title": "Runtime playground | HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4100
+    },
+    {
+      "name": "25_runtime_commerce_demo.png",
+      "url": "http://localhost:5173/runtime-demo",
+      "scrollHeight": 1969,
+      "scrollWidth": 1440,
+      "domNodes": 287,
+      "title": "Live Permission Renderer · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4141
+    },
+    {
+      "name": "26_not_found_404.png",
+      "url": "http://localhost:5173/dashboard/route-does-not-exist",
+      "scrollHeight": 948,
+      "scrollWidth": 1440,
+      "domNodes": 56,
+      "title": "HVT | Open-Source Auth for Projects, Roles, and Permissions",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 9017
+    },
+    {
+      "name": "27_mobile_dashboard.png",
+      "url": "http://localhost:5173/dashboard",
+      "scrollHeight": 3390,
+      "scrollWidth": 375,
+      "domNodes": 435,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 6778
+    },
+    {
+      "name": "28_mobile_settings_projects.png",
+      "url": "http://localhost:5173/dashboard/settings?tab=projects",
+      "scrollHeight": 39629,
+      "scrollWidth": 375,
+      "domNodes": 3399,
+      "title": "Settings - HVT Control Plane",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5057
+    }
+  ],
+  "scaleMetrics": {
+    "dashboard": {
+      "scrollHeight": 1525,
+      "scrollWidth": 1440,
+      "domNodes": 435,
+      "title": "Dashboard · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 6878
+    },
+    "users_platform": {
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 238,
+      "title": "Users · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4996
+    },
+    "users_project": {
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 185,
+      "title": "Users · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4840
+    },
+    "api_keys": {
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 382,
+      "title": "API Keys · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4136
+    },
+    "webhooks": {
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 249,
+      "title": "Webhooks · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 4377
+    },
+    "audit_logs": {
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "domNodes": 392,
+      "title": "Audit Logs · HVT",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 3900
+    },
+    "settings_projects": {
+      "scrollHeight": 15545,
+      "scrollWidth": 1440,
+      "domNodes": 3399,
+      "title": "Settings - HVT Control Plane",
+      "hasHorizontalScroll": false,
+      "renderTimeMs": 5781
+    },
+    "permissions_scale": {
+      "bodyScrollHeight": 15545,
+      "domNodes": 3399,
+      "monoBadgesCount": 353,
+      "hasPaginationButtons": false,
+      "hasVirtualization": false
+    },
+    "mobile_viewport": {
+      "bodyScrollWidth": 375,
+      "windowWidth": 375,
+      "hasHorizontalScroll": false
+    }
+  },
+  "tokenStorage": {
+    "localStorageKeys": [
+      "hvt-theme"
+    ],
+    "localStorageDetails": {
+      "hvt-theme": "dark"
+    },
+    "sessionStorageKeys": [
+      "hvt.invitation.pending_token"
+    ],
+    "cookies": [
+      "csrftoken"
+    ]
+  },
+  "accessibility": {},
+  "errors": [
+    {
+      "page": "http://localhost:5173/",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/signup",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/signup",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/signup",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/signup",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/forgot-password",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/forgot-password",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/forgot-password",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/forgot-password",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/reset-password/sample-uid/sample-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/verify-email",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/verify-email",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/verify-email",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/verify-email",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/invite?token=sample-invite-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/invite?token=sample-invite-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/invite?token=sample-invite-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/invite?token=sample-invite-token",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/invite?token=sample-invite-token",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "page": "http://localhost:5173/login",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    }
+  ]
+}

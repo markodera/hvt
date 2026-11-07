@@ -25,6 +25,7 @@ from .models import (
     Webhook,
     WebhookDelivery,
     OrganizationInvitation,
+    ProjectEmailConfig,
 )
 from hvt.apps.authentication.backends import (
     APIKeyAuthentication,
@@ -2627,6 +2628,9 @@ class ProjectSetupPromptView(APIView):
 
         prompt_text = (
             f"You are setting up HVT Authentication for this project.\n\n"
+            f"CRITICAL DIRECTIVE:\n"
+            f"HVT is NOT an OpenID Connect (OIDC), NextAuth, or Auth.js provider.\n"
+            f"HVT is a direct REST authentication API. Do NOT guess endpoints or use OAuth redirect flows.\n\n"
             f"## Project Information\n"
             f"- Project ID: {project.id}\n"
             f"- Project Name: {project.name}\n"
@@ -2649,8 +2653,10 @@ class ProjectSetupPromptView(APIView):
             f"4. Apply declarative schema to initialize auth methods, roles, and mint runtime client key:\n"
             f"   npx @hvt/cli schema sync --project {project.id}\n\n"
             f"5. Save the returned client key as `NEXT_PUBLIC_HVT_CLIENT_KEY` in `.env.local`.\n"
-            f"   Initialize `@hvt/sdk` in your client/server code. Never commit management keys.\n\n"
-            f"Specification: {docs_url}/llms.txt\n"
+            f"   Initialize `@hvt/sdk` or send `X-API-Key: <key>` on `/api/v1/auth/runtime/*` requests.\n"
+            f"   Never put management keys (`hvt_mgmt_*`) in the browser or in NEXT_PUBLIC_ variables.\n\n"
+            f"Full Machine-Readable Spec: {docs_url}/llms-full.txt\n"
+            f"Live OpenAPI Schema: {backend_host}/api/schema/\n"
         )
 
         suffix = full_key[-4:]
@@ -2668,3 +2674,100 @@ class ProjectSetupPromptView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class ProjectEmailConfigView(APIView):
+    """
+    GET /api/v1/organizations/current/projects/<uuid:project_pk>/email-config/
+    PUT /api/v1/organizations/current/projects/<uuid:project_pk>/email-config/
+    PATCH /api/v1/organizations/current/projects/<uuid:project_pk>/email-config/
+
+    Manage per-project Bring-Your-Own Email configuration.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+    def _get_project(self, request, project_pk):
+        user = request.user
+        if not user.organization_id:
+            raise PermissionDenied("You must belong to an organization.")
+        return get_object_or_404(
+            Project,
+            id=project_pk,
+            organization_id=user.organization_id,
+            is_active=True,
+        )
+
+    def get(self, request, project_pk):
+        project = self._get_project(request, project_pk)
+        config, _ = ProjectEmailConfig.objects.get_or_create(project=project)
+        from hvt.api.v1.serializers.organizations import ProjectEmailConfigSerializer
+        serializer = ProjectEmailConfigSerializer(config)
+        return Response(serializer.data)
+
+    def put(self, request, project_pk):
+        return self.patch(request, project_pk)
+
+    def patch(self, request, project_pk):
+        project = self._get_project(request, project_pk)
+        if not request.user.can_manage_organization() and not request.user.is_org_admin():
+            raise PermissionDenied("Only organization owners and admins can configure project email.")
+
+        config, _ = ProjectEmailConfig.objects.get_or_create(project=project)
+        from hvt.api.v1.serializers.organizations import ProjectEmailConfigSerializer
+        serializer = ProjectEmailConfigSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class ProjectEmailConfigTestView(APIView):
+    """
+    POST /api/v1/organizations/current/projects/<uuid:project_pk>/email-config/test/
+    Send a test email using the project's configured email provider.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+
+    def post(self, request, project_pk):
+        user = request.user
+        if not user.organization_id:
+            raise PermissionDenied("You must belong to an organization.")
+        project = get_object_or_404(
+            Project,
+            id=project_pk,
+            organization_id=user.organization_id,
+            is_active=True,
+        )
+
+        from hvt.api.v1.serializers.organizations import ProjectEmailConfigTestSerializer
+        serializer = ProjectEmailConfigTestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        to_email = serializer.validated_data["to_email"]
+
+        from hvt.apps.authentication.email_providers import resolve_email_provider, EmailDeliveryError
+        provider = resolve_email_provider(project)
+
+        try:
+            result = provider.send(
+                to=to_email,
+                subject=f"[{project.name}] Test Email from HVT",
+                html=f"<p>This is a test email sent using the email provider configured for <strong>{project.name}</strong>.</p>",
+                text=f"This is a test email sent using the email provider configured for {project.name}.",
+            )
+            return Response(
+                {
+                    "status": "success",
+                    "message": f"Test email dispatched to {to_email}",
+                    "details": result,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except EmailDeliveryError as exc:
+            return Response(
+                {"status": "error", "detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {"status": "error", "detail": f"Unexpected error sending email: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

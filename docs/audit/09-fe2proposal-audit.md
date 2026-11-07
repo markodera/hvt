@@ -1,7 +1,7 @@
-# 09. Strategic Proposal & Roadmap Audit (`fe2proposal.md` v1.3)
+# 09. Strategic Proposal & Roadmap Audit (`fe2proposal.md` v1.4)
 
 **Commit Audited:** `fb89132a76f2f9d14902a7b6cfd292215c26b911`  
-**Date Audited:** `2026-11-06`  
+**Date Audited:** `2026-11-07`  
 **Auditor:** Automated Ground-Truth Technical Suite
 
 ---
@@ -17,7 +17,7 @@
 
 ## WHAT WE KNOW (verified)
 
-We conducted a technical verification of the updated Strategic Roadmap proposal ([`fe2proposal.md` v1.3](file:///c:/Users/odera/Documents/GitHub/hvt/fe2proposal.md)) against the executing codebase and the backlog ([`docs/BACKLOG.md`](file:///c:/Users/odera/Documents/GitHub/hvt/docs/BACKLOG.md)).
+We conducted a technical verification of the updated Strategic Roadmap proposal ([`fe2proposal.md` v1.4](file:///c:/Users/odera/Documents/GitHub/hvt/fe2proposal.md)) against the executing codebase and the backlog ([`docs/BACKLOG.md`](file:///c:/Users/odera/Documents/GitHub/hvt/docs/BACKLOG.md)).
 
 ### 1. Proposal Claim Verification Matrix
 
@@ -55,15 +55,15 @@ flowchart TD
 
 | Step # | Roadmap Milestone | Codebase Prerequisites & Blockers | Feasibility | Technical Risk Level |
 | :---: | :--- | :--- | :---: | :---: |
-| **Step 1** | **v0.2.0 Preview Release** | Baseline completed. | **100% Shipped** | None |
-| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), add backup codes model, and inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`. (TOTP secret encryption at rest via MultiFernet is **SHIPPED** [VERIFIED `models.py:274`, `tests/test_crypto.py`]; `HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
+| **Step 1** | **v0.2.0 Preview Release** | Baseline completed. Untagged preview; security-complete designation reserved for v0.2.1 hardening. | **Complete (Preview)** | None |
+| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), add backup codes model, inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`, and integrate Cloudflare Turnstile bot defense. (TOTP secret encryption at rest via MultiFernet is **SHIPPED** [VERIFIED `models.py:274`, `tests/test_crypto.py`]; `HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
 | **Step 3** | **Copy AI Setup Prompt & Onboarding Journey** | Fully implemented: `POST /setup-prompt/` with Option C live-key lock, `GET /onboarding/` live checklist polling, `OnboardingQuickstart.jsx` mounted in `DashboardHome.jsx`, and atomic auto-provisioning (39 actions across 8 screens reduced to 4 actions across 2 screens). | **100% Shipped** | None |
 | **Step 4** | **Token Groundwork & JWKS** | Requires replacing SimpleJWT symmetric HS256 with asymmetric RS256/EdDSA signing, deploying public JWKS view, and writing verification helpers in `hvt-sdk`. | **High** (~2 weeks) | **Medium** (Key rotation ceremony complexity) |
 | **Step 5** | **Per-Project Passkey Origins** | Currently `rp_id` derives from HTTP `request.get_host()`. Needs project-level domain configuration and origin matching in `passkey_views.py`. | **High** (~1 week) | **Low** |
 | **Step 6** | **Worker Choice, Webhooks & BYO Email** | Currently blocked by absence of async task infrastructure. Requires selecting and implementing worker engine (Database Outbox vs Celery) before webhooks can retry asynchronously. | **Medium** (~2-3 weeks) | **Medium** (Operational complexity on \$5 VPS) |
 | **Step 7** | **Session Revocation** | SimpleJWT blacklist exists. Requires stamping `sid` into tokens, writing Redis active session registry, and adding revocation endpoints. | **High** (~1-2 weeks) | **Low** |
-| **Step 8** | **Workspaces (B2B Multi-Tenancy)** | Fundamental data model addition: `Workspace` and `WorkspaceMembership` models, per-workspace roles, and queryset isolation guards to prevent tenant leaks. | **High** (~4-6 weeks) | **High** (Schema migration & queryset isolation) |
-| **Step 9** | **Enterprise Identity & Agent Tokens** | High complexity: SAML 2.0 service provider integration, SCIM 2.0 endpoints, and OAuth 2.1 RAR / Token Exchange (RFC 8693) for MCP agents. | **High** (~6-10 weeks) | **High** (External protocol compliance) |
+| **Step 8** | **Workspaces (B2B Multi-Tenancy)** | Fundamental data model addition: `Workspace` and `WorkspaceMembership` models (strictly partitioned via `workspace_id` to separate customer multi-tenancy from developer `Organization`), per-workspace roles, and queryset isolation guards. | **High** (~4-6 weeks) | **High** (Schema migration & queryset isolation) |
+| **Step 9** | **Enterprise Identity & Agent Tokens** | High complexity: SAML 2.0 service provider integration, SCIM 2.0 endpoints, and Model Context Protocol (MCP 2025-06-18 standard) authorization via OAuth 2.1 with PKCE, RFC 9728, and RFC 8707. | **High** (~6-10 weeks) | **High** (External protocol compliance) |
 
 ---
 

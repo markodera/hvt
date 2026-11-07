@@ -112,12 +112,15 @@ class ResendAccountAdapter(FrontendAccountAdapter):
             from_address = email_context.get("from_email") or "noreply@notify.hvts.app"
             from_header = f"{from_name} <{from_address}>"
 
-            self.email_service.send(
+            from hvt.apps.authentication.email_providers import resolve_email_provider
+            provider = resolve_email_provider(project)
+            provider.send(
                 to=email,
                 subject=subject,
                 html=html_body,
                 text=text_body,
                 from_email=from_header,
+                from_name=from_name,
             )
             logger.info(
                 "Account email queued via Resend",
