@@ -34,6 +34,28 @@ class PasskeyOriginResolutionUnitTests(TestCase):
             allowed_origins=["https://preview.customer.com", "https://staging.customer.com"],
         )
 
+    def test_rp_id_uses_explicit_project_passkey_rp_id(self):
+        self.project.passkey_rp_id = "customer.com"
+        self.project.save()
+
+        request = self.factory.post(
+            "/api/v1/auth/runtime/passkey/register/options/",
+            HTTP_ORIGIN="https://preview.customer.com",
+        )
+        rp_id = _resolve_rp_id(request, self.project)
+        self.assertEqual(rp_id, "customer.com")
+
+    def test_project_serializer_passkey_rp_id(self):
+        from hvt.api.v1.serializers.organizations import ProjectSerializer
+        serializer = ProjectSerializer(
+            instance=self.project,
+            data={"passkey_rp_id": "https://auth.custom-domain.com/"},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save()
+        self.assertEqual(updated.passkey_rp_id, "auth.custom-domain.com")
+
     def test_rp_id_resolves_from_frontend_url(self):
         request = self.factory.post("/api/v1/auth/runtime/passkey/register/options/")
         rp_id = _resolve_rp_id(request, self.project)
@@ -124,6 +146,19 @@ class RuntimePasskeyEndpointsOriginTests(TestCase):
             hashed_key=APIKey.hash_key("hvt_test_testpass_secret123"),
             scopes=["auth:runtime"],
         )
+
+    def test_register_options_uses_explicit_project_passkey_rp_id(self):
+        self.project.passkey_rp_id = "example.com"
+        self.project.save()
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/v1/auth/runtime/passkey/register/options/",
+            HTTP_X_API_KEY="hvt_test_testpass_secret123",
+            HTTP_ORIGIN="https://beta.saas.example.com",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["rp"]["id"], "example.com")
 
     def test_register_options_uses_project_frontend_url_as_rp_id(self):
         self.client.force_authenticate(user=self.user)

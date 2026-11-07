@@ -123,6 +123,15 @@ class Project(models.Model):
             "Use full origins like https://app.example.com or http://localhost:3000."
         ),
     )
+    passkey_rp_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional WebAuthn Relying Party ID for passkeys (e.g. example.com or app.example.com). "
+            "If omitted, dynamically resolved from request origin or frontend_url."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -147,6 +156,8 @@ class Project(models.Model):
     def save(self, *args, **kwargs):
         if isinstance(self.frontend_url, str):
             self.frontend_url = self.frontend_url.strip().rstrip("/")
+        if isinstance(self.passkey_rp_id, str):
+            self.passkey_rp_id = self.passkey_rp_id.strip().lower().lstrip(".")
         self.allowed_origins = normalize_runtime_origins(self.allowed_origins)
         return super().save(*args, **kwargs)
 

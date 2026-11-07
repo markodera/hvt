@@ -1,9 +1,9 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `f5e1b22a52e71ed0939ea1a70834476c874fdce5`  
-> **Last Synchronized:** `2026-11-07 12:05:24 UTC`  
+> **Latest Commit:** `dd8e06e77c243b4c8ab01f2c1058c40392fbdefb`  
+> **Last Synchronized:** `2026-11-07 12:20:38 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 18,723 words (156,350 characters)  
+> **Total Volume:** 18,744 words (156,550 characters)  
 
 ## Table of Contents
 
@@ -15,11 +15,11 @@
 | 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
-| 07 | 06 Testing Ops Quality | 1,219 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
+| 07 | 06 Testing Ops Quality | 1,240 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,278 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,392 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **18,723 words** | |
+| | **TOTAL** | **18,744 words** | |
 
 ---
 
@@ -1293,10 +1293,10 @@ Prior to the onboarding pass, taking a new developer from initial sign-up to the
 | **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
 | **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 128 | 128 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
 | **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
-| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 71 | 71 Pass / 0 Fail | Part of 44m suite | [RAN `manage.py test` -> OK] |
+| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 98 | 98 Pass / 0 Fail | Part of suite | [RAN `manage.py test tests` -> OK] |
 | **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 12 | 12 Pass / 0 Fail | 983 ms | [RAN `npm test` in `cli/` -> 12 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **364** | **364 Pass / 0 Fail** | **~44 min (Backend) + 1s (CLI)** | |
+| **TOTAL** | | **391** | **391 Pass / 0 Fail** | **~44 min (Backend) + 1s (CLI)** | |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -1316,7 +1316,7 @@ When the full suite of 352 backend tests is executed, it requires **2,641 second
 ### 4. Untested Functional Areas
 
 1.  **Asynchronous Webhook Retries:** Webhook delivery logic in `hvt/apps/organizations/webhooks.py` uses synchronous `requests.post()`. No test coverage exists for socket timeouts, network drops, or retry queue persistence under production load.
-2.  **Multi-Origin Passkey Verification:** Passkey tests verify single-domain origins (`localhost:8000`). No tests evaluate multi-tenant customer origins or non-standard port derivation.
+2.  **Multi-Origin Passkey Verification (RESOLVED in Step 5):** Added comprehensive test coverage in `tests/test_passkey_origins.py` (13 tests) verifying RP ID resolution and expected origin validation across multi-tenant customer domains, preview environments, localhost origins, CORS preflight options, and WebAuthn assertion verification [VERIFIED `tests/test_passkey_origins.py`].
 3.  **Token Blacklist Pruning:** While `TokenBlacklist` records revoked JWTs, no management command or test exists for purging expired tokens from the database.
 4.  **Database Migration Reversibility:** None of the 43 migrations have automated rollback tests verifying backward compatibility.
 
