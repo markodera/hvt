@@ -45,7 +45,7 @@
 
 ### 2. Complete Model Inventory & Schema Definitions
 
-HVT declares 19 models across its three internal domain applications.
+HVT declares 20 models across its three internal domain applications.
 
 #### App: `hvt.apps.users`
 

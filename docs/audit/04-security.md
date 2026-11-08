@@ -61,16 +61,16 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
 | :--- | :---: | :--- | :---: | :--- |
 | **Login** (Bad Email) | `400 Bad Request` | `{"non_field_errors": ["Unable to log in with provided credentials."]}` | **No** (Generic string, though subtle timing differences remain possible) | [RAN live test] |
 | **Login** (Bad Password) | `400 Bad Request` | `{"non_field_errors": ["Unable to log in with provided credentials."]}` | **No** (Identical message) | [RAN live test] |
-| **Registration** (Duplicate) | `400 Bad Request` | `{"email": ["A user with that email already exists."]}` | **YES** (Direct disclosure of existing account) | [VERIFIED `hvt/apps/authentication/serializers.py:112`] |
+| **Registration** (Duplicate) | `201 Created` | `{"detail": "Verification e-mail sent."}` | **No** (Uniform response; dispatches account exists email) | [VERIFIED `hvt/api/v1/serializers/users.py:260-335`, `tests/test_user_enumeration.py`] |
 | **Password Reset** (Non-existent) | `200 OK` | `{"detail": "Password reset e-mail has been sent."}` | **No** (Constant success message) | [VERIFIED `hvt/apps/authentication/views.py:220-230`] |
 
 ### 5. Token Lifecycle & Storage Mechanics
 
 *   **Magic Link Tokens:** 32-byte cryptographically secure random token generated via `secrets.token_urlsafe(32)`. Stored exclusively as a SHA-256 hash in `MagicLinkToken.token_hash`. Configured with a 15-minute expiration (`MAGIC_LINK_EXPIRE_MINUTES = 15`) and single-use invalidation setting `used_at = timezone.now()` [VERIFIED `hvt/apps/authentication/models.py:55-80`].
 *   **Password Reset Tokens:** Employs Django's standard `PasswordResetTokenGenerator` which derives an HMAC over the user's primary key, password hash salt, and last login timestamp. Single-use is naturally enforced because resetting the password alters the underlying salt. Default timeout is 3 days [VERIFIED `django/contrib/auth/tokens.py`].
-*   **Invitation Tokens:** Raw 32-byte UUID hex strings are stored **unhashed** in `OrganizationInvitation.token` and `ProjectInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:145-155`]. Tokens expire after 72 hours.
+*   **Invitation Tokens:** Stored exclusively as **SHA-256 hashes at rest** in `OrganizationInvitation.token` and `RuntimeInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:776-855`, `tests/test_invitation_hashing.py`]. Tokens expire after 72 hours.
 *   **TOTP Secret Storage:** `TOTPDevice.secret` is encrypted at rest using `EncryptedTextField` with MultiFernet (prefixed with `v1:`) and automatically decrypted upon retrieval [VERIFIED `hvt/apps/authentication/models.py:274`, `tests/test_crypto.py`].
-*   **Backup Codes:** **Completely absent**. No model, database table, or view logic exists for generating or redeeming single-use TOTP recovery codes. If an end-user loses their authenticator device, they are locked out permanently unless an operator manually modifies the database [VERIFIED `hvt/apps/authentication/` inspection].
+*   **Backup Codes (RESOLVED in Step 2):** Fully implemented. `TOTPBackupCode` generates 10 single-use SHA-256 hashed backup codes upon TOTP verification (`auth_totp_backup_codes`). Redeemable during TOTP login, with regeneration requiring password re-authentication [VERIFIED `hvt/apps/authentication/totp_views.py`, `tests/test_totp_hardening.py`].
 
 ### 6. Password Hashers & Policies
 
@@ -151,3 +151,10 @@ The social login REST endpoints (`/api/v1/auth/social/google/`, etc.) accept raw
 
 ### 4. Zero Backup Codes for Two-Factor Authentication
 The complete absence of TOTP recovery codes means any lost phone or deleted authenticator app creates an unrecoverable account lock, generating severe administrative overhead and tempting operators to build insecure manual recovery backdoors.
+
+### 7. Webhook SSRF Defense (RESOLVED in Step 2)
+* **URL & IP Range Validation:** `validate_webhook_url()` verifies that destination hosts do not resolve to RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local metadata (`169.254.169.254`), or reserved addresses [VERIFIED `hvt/apps/organizations/ssrf.py`].
+* **DNS Rebinding & Redirect Defense:** `get_ssrf_safe_session()` enforces pinned IP resolution at the transport adapter level, disables HTTP redirects (`allow_redirects=False`), and isolates streaming response reads across both synchronous dispatches and background `OutboxTask` executions [VERIFIED `hvt/apps/organizations/webhooks.py`, `tests/test_webhook_ssrf.py`].
+
+### 8. Social Account Linking Security (RESOLVED in Step 2)
+* **Verified Email Enforcement:** `CustomSocialAccountAdapter.is_social_email_verified()` verifies that identity providers (Google, GitHub, Discord, Apple, Microsoft, GitLab) explicitly mark the subject email as verified before attaching it to an existing account, completely eliminating unverified email takeover vectors [VERIFIED `hvt/apps/authentication/adapters.py:260-320`, `tests/test_social_login_verification.py`].
