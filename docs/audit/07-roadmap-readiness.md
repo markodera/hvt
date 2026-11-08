@@ -22,7 +22,9 @@
 
 We analyzed HVT's current codebase to determine the reusable foundation, necessary refactoring, security/operational risks, and estimated level of effort (**S:** < 1 week, **M:** 1–3 weeks, **L:** 4+ weeks) for 11 critical roadmap initiatives.
 
-| Feature Initiative | Reusable Existing Code | Required Changes | Key Risks & Complexities | Effort |
+| Feature Initiative | Reusable Existing Code |
+| **0. Immediate Hardening & Security (COMPLETED - Step 2)** | SSRF defense (`ssrf.py`), verified social login requirement across 6 providers, TOTP backup codes (`TOTPBackupCode`), SHA-256 hashed invitations at rest, anti-enumeration. | Deployed in Step 2. | Zero regressions across all 480 tests. | **DONE** |
+ Required Changes | Key Risks & Complexities | Effort |
 | :--- | :--- | :--- | :--- | :---: |
 | **1. Token Groundwork & JWKS (COMPLETED - Step 4)** | Asymmetric RS256 tokens, deterministic Key ID, public JWKS (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), cross-project isolation, offline verifier helper (`hvt.jwt_verify`). | Deployed in Step 4. | Backward compatibility maintained via automatic fallback decode. | **DONE** |
 | **2. Copy AI Setup Prompt** | `llms.txt`, OpenAPI 3.0 schema generation (`drf-spectacular`), CLI configuration commands. | Add CLI command (`hvt ai setup-prompt`) or API endpoint that formats dynamic system prompts with active project ID, keys, and schema specs. | Minimal technical risk. | **S** |
