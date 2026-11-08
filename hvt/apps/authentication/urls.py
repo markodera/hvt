@@ -18,6 +18,8 @@ urlpatterns = [
     path("mfa/totp/verify/", totp_views.TOTPVerifyView.as_view(), name="totp_verify"),
     path("mfa/totp/disable/", totp_views.TOTPDisableView.as_view(), name="totp_disable"),
     path("mfa/totp/login/", totp_views.TOTPLoginView.as_view(), name="totp_login"),
+    path("mfa/totp/backup-codes/regenerate/", totp_views.TOTPRegenerateBackupCodesView.as_view(), name="totp_backup_codes_regenerate"),
+    path("totp/backup-codes/regenerate/", totp_views.TOTPRegenerateBackupCodesView.as_view(), name="totp_backup_codes_regenerate_alias"),
 
     # Passkeys / WebAuthn (FIDO2 Biometrics) - Control Plane
     path("passkey/register/options/", passkey_views.PasskeyRegisterOptionsView.as_view(), name="passkey_register_options"),

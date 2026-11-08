@@ -82,12 +82,12 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
     3.  `CommonPasswordValidator` (checks against list of 20,000 common passwords).
     4.  `NumericPasswordValidator` (rejects entirely numeric passwords) [VERIFIED `hvt/settings/base.py:184-200`].
 
-### 7. Critical Server-Side Request Forgery (SSRF) Vector in Webhooks
+### 7. Server-Side Request Forgery (SSRF) Protection in Webhooks [RESOLVED in Step 2] [VERIFIED `hvt/apps/organizations/ssrf.py`]
 
-HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
-*   **Unrestricted Outbound Calls:** `hvt/apps/organizations/webhooks.py:85-94` initiates `requests.post(webhook.url, json=payload, headers=headers, timeout=10)`.
-*   **No IP Pinning or Private CIDR Blocking:** `WebhookSerializer` validates only that the input is a well-formed URL schema. It does not resolve hostnames to check for loopback (`127.0.0.1`), link-local (`169.254.169.254`), or private RFC 1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) [VERIFIED `hvt/apps/organizations/serializers.py:320-335`].
-*   **Full Response Exfiltration:** Line 94 stores `response_body=response.text[:5000]` and `response_status=response.status_code` into the `WebhookDelivery` model. Any user with project admin permissions can inspect these responses via `GET /api/v1/organizations/webhooks/{id}/deliveries/`, enabling interactive probing of internal cloud infrastructure [VERIFIED `hvt/apps/organizations/views.py:410-425`].
+HVT's webhook delivery engine now includes comprehensive multi-layer SSRF defenses:
+*   **Private CIDR & Metadata Address Blocking:** `validate_webhook_url()` resolves hostnames and strictly blocks loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), cloud instance metadata endpoints (`169.254.169.254`), carrier-grade NAT (`100.64.0.0/10`), and private RFC 1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) at serializer creation and before delivery attempts [VERIFIED `hvt/apps/organizations/ssrf.py:20-65`].
+*   **DNS Rebinding Defense:** `get_ssrf_safe_session()` enforces socket-level IP address verification on connection establishment, preventing DNS rebinding attacks where a host changes IP between initial validation and HTTP request execution [VERIFIED `hvt/apps/organizations/ssrf.py:70-130`].
+*   **Redirect Disablement & Exfiltration Removal:** Webhook dispatches disable HTTP redirects (`allow_redirects=False`) to prevent open redirect bypasses. The `response_body` field is no longer stored or exposed in the deliveries API, preventing internal data exfiltration [VERIFIED `hvt/apps/organizations/webhooks.py`, `hvt/api/v1/serializers/organizations.py`].
 
 ### 8. Production Configuration & Security Headers
 
@@ -104,6 +104,24 @@ HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
 * **Asymmetric RS256 Signing:** Backend uses 2048-bit RSA keys with Key ID (`kid`) headers. Client applications and microservices verify token authenticity using the public JWKS endpoint (`GET /.well-known/jwks.json`) without sharing master backend secrets.
 * **Cross-Project Isolation:** In multi-tenant environments, tokens issued for Project A are rejected when presented against endpoints belonging to Project B.
 * **Production Key Check:** System check `hvt.E002` prevents production startup without a valid `HVT_JWT_PRIVATE_KEY` PEM.
+
+
+### 12. Verified Social Account Linking [VERIFIED `hvt/apps/authentication/adapters.py:is_social_email_verified`]
+* Pre-social login linking enforces verified email status across all 6 supported providers: Google, GitHub, Discord, Apple, Microsoft, and GitLab.
+* Unverified third-party emails cannot hijack existing control-plane or runtime accounts; users must authenticate via credentials before linking unverified identities.
+
+### 13. Single-Use TOTP Backup Codes [VERIFIED `hvt/apps/authentication/models.py:TOTPBackupCode`]
+* Activating TOTP generates 10 single-use recovery backup codes shown once to the user.
+* Backup codes are hashed using SHA-256 at rest and invalidated immediately upon first use.
+* Regenerating backup codes requires fresh password re-authentication (`POST /api/v1/auth/mfa/totp/backup-codes/regenerate/`).
+
+### 14. Cryptographic Hashing of Invitation Tokens [VERIFIED `hvt/apps/organizations/models.py:save`]
+* Organization and Runtime invitation tokens are stored as SHA-256 hashes in the database.
+* Plaintext raw tokens are generated in memory and delivered only in email accept links, preventing database leaks from compromising pending workspace invitations.
+
+### 15. User Enumeration Defense [VERIFIED `hvt/api/v1/serializers/users.py`]
+* Registration endpoints return identical response codes and timing regardless of account presence. For existing emails, an "account already exists" notification email is dispatched rather than returning a validation error.
+* Login failure responses return uniform generic credentials messages (`"Unable to log in with provided credentials."`) across missing users, bad passwords, wrong organizations, and unverified emails.
 
 ## WHAT WE DON'T KNOW (could not verify, and why)
 
