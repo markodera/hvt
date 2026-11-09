@@ -186,7 +186,7 @@ class MagicLinkVerifyView(views.APIView):
                 event_data={"email": user.email, "method": "totp"},
             )
 
-        access_token, refresh_token = build_hvt_token_pair(user)
+        access_token, refresh_token = build_hvt_token_pair(user, request=request)
 
         AuditLog.log(
             event_type=AuditLog.EventType.MAGIC_LINK_VERIFIED,
@@ -366,7 +366,7 @@ class RuntimeMagicLinkVerifyView(views.APIView):
                 event_data={"email": user.email, "method": "totp", "project_id": str(project.id)},
             )
 
-        access_token, refresh_token = build_hvt_token_pair(user, project=project)
+        access_token, refresh_token = build_hvt_token_pair(user, project=project, request=request)
 
         AuditLog.log(
             event_type=AuditLog.EventType.MAGIC_LINK_VERIFIED,

@@ -1,3 +1,4 @@
+from django.utils import timezone
 import uuid
 from django.db import models
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -85,6 +86,13 @@ class AuditLog(models.Model):
         MFA_ENABLED = "mfa.enabled", "MFA Enabled"
         MFA_DISABLED = "mfa.disabled", "MFA Disabled"
         MFA_VERIFIED = "mfa.verified", "MFA Verified"
+        TOTP_BACKUP_CODE_USED = "totp.backup_code_used", "TOTP Backup Code Used"
+        TOTP_BACKUP_CODES_REGENERATED = "totp.backup_codes_regenerated", "TOTP Backup Codes Regenerated"
+
+        # Session events
+        SESSION_CREATED = "session.created", "Session Created"
+        SESSION_REVOKED = "session.revoked", "Session Revoked"
+        SESSION_REVOKED_ALL = "session.revoked_all", "All Sessions Revoked"
 
         # Passkey events
         PASSKEY_REGISTER_INITIATED = (
@@ -286,6 +294,30 @@ class TOTPDevice(models.Model):
         return f"TOTP for {self.user.email} (confirmed={self.is_confirmed})"
 
 
+class TOTPBackupCode(models.Model):
+    """
+    Single-use hashed backup codes for account recovery when TOTP device is unavailable.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        TOTPDevice,
+        on_delete=models.CASCADE,
+        related_name="backup_codes",
+    )
+    hashed_code = models.CharField(max_length=64, db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_totp_backup_codes"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "used" if self.used_at else "active"
+        return f"BackupCode ({status}) for {self.device.user.email}"
+
+
 class UserPasskeyCredential(models.Model):
     """
     FIDO2 / WebAuthn Passkey credential for biometric and hardware security key authentication.
@@ -350,3 +382,43 @@ class MagicLinkToken(models.Model):
         return not self.is_used and self.expires_at > timezone.now()
 
 
+
+
+class UserSession(models.Model):
+    """
+    Tracks an authenticated client session across devices.
+    The primary key `id` corresponds directly to the `sid` claim in JWT access and refresh tokens.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="sessions",
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    device_name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_active_at = models.DateTimeField(default=timezone.now, db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    revoked_reason = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        db_table = "auth_user_sessions"
+        ordering = ["-last_active_at"]
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+    def __str__(self):
+        status_str = "revoked" if self.revoked_at else "active"
+        return f"Session ({status_str}) for {self.user.email} on {self.device_name or 'Unknown Device'}"

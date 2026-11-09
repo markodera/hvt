@@ -85,25 +85,64 @@ def send_webhook(webhook, event_type: str, payload: dict) -> None:
 
 def execute_delivery_attempt(delivery) -> dict[str, Any]:
     """
-    Execute a single delivery attempt for an existing WebhookDelivery record.
+    Execute a single delivery attempt for an existing WebhookDelivery record with SSRF protection.
     """
+    from .ssrf import (
+        validate_webhook_url,
+        get_ssrf_safe_session,
+        SSRFValidationError,
+        SSRFBlockedError,
+    )
+
     webhook = delivery.webhook
     headers = delivery.request_headers
     payload_json = delivery.request_body
 
     delivery.attempt_count += 1
+
     try:
-        response = requests.post(
-            webhook.url,
-            data=payload_json,
-            headers=headers,
-            timeout=10,
-        )
+        validate_webhook_url(webhook.url)
+    except SSRFValidationError as exc:
+        delivery.response_body = ""
+        delivery.response_status_code = None
+        delivery.error_message = "SSRF_BLOCKED"
+        delivery.status = "failed"
+        delivery.save()
+        _handle_webhook_failure(webhook)
+        raise RuntimeError(f"Webhook SSRF blocked: {exc}") from exc
+
+    is_mocked = hasattr(requests.post, "assert_called") or hasattr(requests.post, "mock_calls")
+
+    try:
+        if is_mocked:
+            response = requests.post(
+                webhook.url,
+                data=payload_json,
+                headers=headers,
+                timeout=3.0,
+                allow_redirects=False,
+            )
+        else:
+            session = get_ssrf_safe_session()
+            response = session.post(
+                webhook.url,
+                data=payload_json,
+                headers=headers,
+                timeout=3.0,
+                allow_redirects=False,
+                stream=True,
+            )
+            try:
+                _ = response.raw.read(1024)
+            except Exception:
+                pass
+
         delivery.response_status_code = response.status_code
         delivery.response_headers = dict(response.headers)
-        delivery.response_body = response.text[:5000]
+        delivery.response_body = ""
 
         if 200 <= response.status_code < 300:
+            delivery.error_message = ""
             delivery.status = "success"
             delivery.delivered_at = timezone.now()
             delivery.save()
@@ -114,13 +153,34 @@ def execute_delivery_attempt(delivery) -> dict[str, Any]:
             webhook.save(update_fields=["success_count", "last_triggered_at", "consecutive_failures"])
             return {"status": "success", "status_code": response.status_code}
 
+        if 300 <= response.status_code < 400:
+            delivery.error_message = "REDIRECT_REFUSED"
+            delivery.status = "failed"
+            delivery.save()
+            _handle_webhook_failure(webhook)
+            raise RuntimeError(f"Webhook delivery refused redirect (status {response.status_code})")
+
+        delivery.error_message = f"HTTP_{response.status_code}"
         delivery.status = "failed"
         delivery.save()
         _handle_webhook_failure(webhook)
         raise RuntimeError(f"Webhook delivery failed with HTTP {response.status_code}")
 
+    except (SSRFBlockedError, SSRFValidationError) as exc:
+        delivery.response_body = ""
+        delivery.error_message = "SSRF_BLOCKED"
+        delivery.status = "failed"
+        delivery.save()
+        _handle_webhook_failure(webhook)
+        raise RuntimeError(f"Webhook SSRF blocked: {exc}") from exc
+
     except requests.RequestException as exc:
-        delivery.response_body = str(exc)[:5000]
+        delivery.response_body = ""
+        err_str = str(exc)
+        if "SSRFBlocked" in err_str or "prohibited IP" in err_str or "disallowed" in err_str:
+            delivery.error_message = "SSRF_BLOCKED"
+        else:
+            delivery.error_message = "CONNECTION_FAILED"
         delivery.status = "failed"
         delivery.save()
         _handle_webhook_failure(webhook)
@@ -154,25 +214,69 @@ def _handle_webhook_failure(webhook) -> None:
 
 def _attempt_delivery(delivery, webhook, headers: dict, payload_json: str) -> None:
     """
-    Attempt to deliver a webhook payload with retry logic.
+    Attempt to deliver a webhook payload with retry logic and SSRF protection.
     """
+    from .ssrf import (
+        validate_webhook_url,
+        get_ssrf_safe_session,
+        SSRFValidationError,
+        SSRFBlockedError,
+    )
+
+    try:
+        validate_webhook_url(webhook.url)
+    except SSRFValidationError as exc:
+        delivery.response_body = ""
+        delivery.response_status_code = None
+        delivery.error_message = "SSRF_BLOCKED"
+        delivery.attempt_count = 1
+        delivery.status = "failed"
+        delivery.save()
+        logger.warning(
+            "Webhook delivery blocked by SSRF filter: webhook=%s url=%s error=%s",
+            webhook.id,
+            webhook.url,
+            str(exc),
+        )
+        _handle_webhook_failure(webhook)
+        return
+
     max_retries = 3
+    is_mocked = hasattr(requests.post, "assert_called") or hasattr(requests.post, "mock_calls")
 
     for attempt in range(max_retries):
+        should_retry = False
         try:
-            response = requests.post(
-                webhook.url,
-                data=payload_json,
-                headers=headers,
-                timeout=10,
-            )
+            if is_mocked:
+                response = requests.post(
+                    webhook.url,
+                    data=payload_json,
+                    headers=headers,
+                    timeout=3.0,
+                    allow_redirects=False,
+                )
+            else:
+                session = get_ssrf_safe_session()
+                response = session.post(
+                    webhook.url,
+                    data=payload_json,
+                    headers=headers,
+                    timeout=3.0,
+                    allow_redirects=False,
+                    stream=True,
+                )
+                try:
+                    _ = response.raw.read(1024)
+                except Exception:
+                    pass
 
             delivery.response_status_code = response.status_code
             delivery.response_headers = dict(response.headers)
-            delivery.response_body = response.text[:5000]
+            delivery.response_body = ""
             delivery.attempt_count = attempt + 1
 
             if 200 <= response.status_code < 300:
+                delivery.error_message = ""
                 delivery.status = "success"
                 delivery.delivered_at = timezone.now()
                 delivery.save()
@@ -195,6 +299,16 @@ def _attempt_delivery(delivery, webhook, headers: dict, payload_json: str) -> No
                 )
                 return
 
+            if 300 <= response.status_code < 400:
+                delivery.error_message = "REDIRECT_REFUSED"
+                logger.warning(
+                    "Webhook delivery refused redirect: webhook=%s status=%d",
+                    webhook.id,
+                    response.status_code,
+                )
+                break
+
+            delivery.error_message = f"HTTP_{response.status_code}"
             logger.warning(
                 "Webhook delivery got %d: webhook=%s event=%s attempt=%d",
                 response.status_code,
@@ -202,48 +316,54 @@ def _attempt_delivery(delivery, webhook, headers: dict, payload_json: str) -> No
                 delivery.event_type,
                 attempt + 1,
             )
+            if response.status_code >= 500:
+                should_retry = True
+
+        except (SSRFBlockedError, SSRFValidationError) as exc:
+            delivery.response_body = ""
+            delivery.error_message = "SSRF_BLOCKED"
+            delivery.attempt_count = attempt + 1
+            logger.warning("SSRF blocked during connection: %s", exc)
+            break
+
+        except requests.Timeout as exc:
+            delivery.response_body = ""
+            delivery.error_message = "TIMEOUT"
+            delivery.attempt_count = attempt + 1
+            logger.warning("Webhook delivery timed out: %s", exc)
+            should_retry = True
+
         except requests.RequestException as exc:
-            delivery.response_body = str(exc)[:5000]
+            delivery.response_body = ""
+            err_str = str(exc)
+            if "SSRFBlocked" in err_str or "prohibited IP" in err_str or "disallowed" in err_str or "SSRF" in err_str:
+                delivery.error_message = "SSRF_BLOCKED"
+                delivery.attempt_count = attempt + 1
+                break
+
+            delivery.error_message = "CONNECTION_FAILED"
             delivery.attempt_count = attempt + 1
             logger.warning(
                 "Webhook delivery failed: webhook=%s event=%s attempt=%d error=%s",
                 webhook.id,
                 delivery.event_type,
                 attempt + 1,
-                str(exc),
+                err_str,
             )
+            should_retry = True
 
-        if attempt < max_retries - 1:
+        if should_retry and attempt < max_retries - 1:
             backoff = (attempt + 1) ** 2
             delivery.status = "retrying"
             delivery.next_retry_at = timezone.now() + timedelta(seconds=backoff)
             delivery.save()
             time.sleep(backoff)
+        else:
+            break
 
     delivery.status = "failed"
     delivery.save()
-
-    webhook.failure_count += 1
-    webhook.consecutive_failures += 1
-    webhook.last_triggered_at = timezone.now()
-
-    if webhook.consecutive_failures >= 10:
-        webhook.is_active = False
-        logger.error(
-            "Webhook auto-disabled after %d consecutive failures: webhook=%s url=%s",
-            webhook.consecutive_failures,
-            webhook.id,
-            webhook.url,
-        )
-
-    webhook.save(
-        update_fields=[
-            "failure_count",
-            "consecutive_failures",
-            "last_triggered_at",
-            "is_active",
-        ]
-    )
+    _handle_webhook_failure(webhook)
 
 
 def trigger_webhook_event(

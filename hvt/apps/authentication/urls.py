@@ -7,6 +7,7 @@ from . import totp_views
 from . import passkey_views
 from . import magic_link_views
 from . import jwks_views
+from . import session_views
 
 
 urlpatterns = [
@@ -18,6 +19,8 @@ urlpatterns = [
     path("mfa/totp/verify/", totp_views.TOTPVerifyView.as_view(), name="totp_verify"),
     path("mfa/totp/disable/", totp_views.TOTPDisableView.as_view(), name="totp_disable"),
     path("mfa/totp/login/", totp_views.TOTPLoginView.as_view(), name="totp_login"),
+    path("mfa/totp/backup-codes/regenerate/", totp_views.TOTPRegenerateBackupCodesView.as_view(), name="totp_backup_codes_regenerate"),
+    path("totp/backup-codes/regenerate/", totp_views.TOTPRegenerateBackupCodesView.as_view(), name="totp_backup_codes_regenerate_alias"),
 
     # Passkeys / WebAuthn (FIDO2 Biometrics) - Control Plane
     path("passkey/register/options/", passkey_views.PasskeyRegisterOptionsView.as_view(), name="passkey_register_options"),
@@ -40,6 +43,16 @@ urlpatterns = [
     # Passwordless Magic Links - Runtime Plane
     path("runtime/magic-link/request/", magic_link_views.RuntimeMagicLinkRequestView.as_view(), name="runtime_magic_link_request"),
     path("runtime/magic-link/verify/", magic_link_views.RuntimeMagicLinkVerifyView.as_view(), name="runtime_magic_link_verify"),
+
+    # Session & Device Management - Control Plane
+    path("sessions/", session_views.SessionListView.as_view(), name="session_list"),
+    path("sessions/<uuid:pk>/", session_views.SessionRevokeView.as_view(), name="session_revoke"),
+    path("sessions/revoke-all/", session_views.SessionRevokeAllView.as_view(), name="session_revoke_all"),
+
+    # Session & Device Management - Runtime Plane
+    path("runtime/sessions/", session_views.RuntimeSessionListView.as_view(), name="runtime_session_list"),
+    path("runtime/sessions/<uuid:pk>/", session_views.RuntimeSessionRevokeView.as_view(), name="runtime_session_revoke"),
+    path("runtime/sessions/revoke-all/", session_views.RuntimeSessionRevokeAllView.as_view(), name="runtime_session_revoke_all"),
 
     # dj-rest-auth endpoints (explicit to avoid schema collisions)
     path("runtime/register/", views.HVTRuntimeRegisterView.as_view(), name="runtime_register"),
@@ -105,8 +118,13 @@ urlpatterns = [
         name="runtime_gitlab_login",
     ),
     path("runtime/me/", views.RuntimeCurrentUserView.as_view(), name="runtime_current_user"),
+    path("runtime/user/", views.RuntimeCurrentUserView.as_view(), name="runtime_user_details"),
+    path("runtime/sessions/", session_views.RuntimeSessionListView.as_view(), name="runtime_session_list"),
+    path("runtime/sessions/<uuid:pk>/", session_views.RuntimeSessionRevokeView.as_view(), name="runtime_session_revoke"),
+    path("runtime/sessions/revoke-all/", session_views.RuntimeSessionRevokeAllView.as_view(), name="runtime_session_revoke_all"),
+    path("runtime/logout/", views.RuntimeLogoutView.as_view(), name="runtime_logout"),
     path("login/", views.HVTLoginView.as_view(), name="rest_login"),
-    path("logout/", LogoutView.as_view(), name="rest_logout"),
+    path("logout/", views.HVTLogoutView.as_view(), name="rest_logout"),
     path("user/", views.HVTUserDetailsView.as_view(), name="rest_user_details"),
     path("password/reset/", views.HVTPasswordResetView.as_view(), name="rest_password_reset"),
     path(

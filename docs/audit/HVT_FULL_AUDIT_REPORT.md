@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `4e670aef9330ba7cd880c64f9292dc1b0508fa46`  
-> **Last Synchronized:** `2026-11-07 14:55:52 UTC`  
+> **Latest Commit:** `0c82f777e74bc562a2e60edd38b6d03473b60ead`  
+> **Last Synchronized:** `2026-11-09 05:50:04 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 19,194 words (162,112 characters)  
+> **Total Volume:** 20,106 words (170,893 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
-| 01 | 00 Summary | 1,821 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 2,992 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,849 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
-| 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
-| 05 | 04 Security | 1,757 words | [04-security.md](#04-security) |
+| 01 | 00 Summary | 1,919 words | [00-summary.md](#00-summary) |
+| 02 | 01 Architecture And Data | 3,108 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 2,954 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 3,139 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
-| 07 | 06 Testing Ops Quality | 1,261 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
-| 08 | 07 Roadmap Readiness | 1,267 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
+| 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
+| 08 | 07 Roadmap Readiness | 1,311 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
-| 10 | 09 Fe2Proposal Audit | 1,418 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **19,194 words** | |
+| 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
+| | **TOTAL** | **20,106 words** | |
 
 ---
 
@@ -57,14 +57,14 @@ This report reflects code-verified reality extracted from direct source inspecti
 | Rank | Finding | Classification | Evidence Reference |
 | :--- | :--- | :--- | :--- |
 | **1** | **Zero Backend Tests Execute in CI**<br>GitHub Actions runs `python manage.py test` without specifying app targets or test directories. Because tests reside in `tests/` and app subdirectories rather than standard discoverable roots, Django reports `Ran 0 tests in 0.000s` and exits with code 0. CI has been reporting green without testing a single line of backend logic. | Critical Operational Flaw | [VERIFIED .github/workflows/ci.yml:80], [RAN .\venv\Scripts\python manage.py test -> 0 tests ran] |
-| **2** | **Full SSRF Vector via Custom Webhook Deliveries**<br>The webhook creation endpoint accepts arbitrary URLs with zero IP/hostname blocklisting (e.g., internal subnets, loopback `127.0.0.1`, AWS metadata `169.254.169.254`). Outbound dispatch synchronously calls `requests.post(webhook.url, ...)` and stores the response status, response headers, and the first 5,000 characters of the response body in `WebhookDelivery`, which is returned via the REST API to the org owner. | Critical Security Vulnerability | [VERIFIED hvt/apps/organizations/webhooks.py:85-94], [VERIFIED hvt/api/v1/serializers/organizations.py:580-610] |
+| **2** | **Full SSRF Vector via Custom Webhook Deliveries (RESOLVED in Step 2)**<br>Resolved in Step 2 via `validate_webhook_url()` and `get_ssrf_safe_session()` blocking private subnets, loopback, link-local metadata (169.254.169.254), and DNS rebinding across all webhook dispatches.<br>The webhook creation endpoint accepts arbitrary URLs with zero IP/hostname blocklisting (e.g., internal subnets, loopback `127.0.0.1`, AWS metadata `169.254.169.254`). Outbound dispatch synchronously calls `requests.post(webhook.url, ...)` and stores the response status, response headers, and the first 5,000 characters of the response body in `WebhookDelivery`, which is returned via the REST API to the org owner. | Critical Security Vulnerability | [VERIFIED hvt/apps/organizations/webhooks.py:85-94], [VERIFIED hvt/api/v1/serializers/organizations.py:580-610] |
 | **3** | **Symmetric HS256 Token Bottleneck & No JWKS**<br>All JWTs are signed with symmetric `HS256` using Django's single root `SECRET_KEY`. No public-key endpoint (`/.well-known/jwks.json`) exists. Downstream customer backend services cannot verify tokens locally without possessing HVT's master secret, forcing all microservices to call HVT over the network. | Architectural Blocker | [VERIFIED hvt/settings.py:434-441], [VERIFIED hvt/apps/authentication/tokens.py:19-37] |
-| **4** | **Social OAuth Auto-Linking Account Takeover (ATO) Risk**<br>When a social OAuth callback arrives, `pre_social_login` queries users by email and automatically attaches the social identity to an existing account. If the provider did not verify the email (or if the email attribute falls back to unverified profile data), an attacker registering that email on an external OAuth provider can hijack an existing victim account. | High Security Risk | [VERIFIED hvt/apps/authentication/adapters.py:260-267, 312-340] |
-| **5** | **Missing TOTP Backup Codes (Secrets Encrypted via MultiFernet)**<br>While TOTP secrets are now securely encrypted at rest via MultiFernet (`TOTPDevice.secret` as `EncryptedTextField` with `v1:` version prefix and migration `0014`), backup recovery codes remain completely unimplemented across the codebase. A user who loses their 2FA device has no self-serve recovery option and is permanently locked out without operator intervention. | Usability & Security Risk | [VERIFIED hvt/apps/authentication/models.py:274], [VERIFIED hvt/apps/authentication/totp_views.py:42-46], [VERIFIED tests/test_crypto.py:148-208] |
+| **4** | **Social OAuth Auto-Linking ATO Risk (RESOLVED in Step 2)**<br>Resolved in Step 2 via `CustomSocialAccountAdapter.is_social_email_verified()` enforcing verified email checks across all 6 OAuth providers before linking identities.<br>When a social OAuth callback arrives, `pre_social_login` queries users by email and automatically attaches the social identity to an existing account. If the provider did not verify the email (or if the email attribute falls back to unverified profile data), an attacker registering that email on an external OAuth provider can hijack an existing victim account. | High Security Risk | [VERIFIED hvt/apps/authentication/adapters.py:260-267, 312-340] |
+| **5** | **TOTP Backup Codes & Recovery (RESOLVED in Step 2)**<br>Resolved in Step 2 via `TOTPBackupCode` model, 10 single-use SHA-256 hashed recovery codes generated on MFA setup, redemption during login, and password-authenticated regeneration endpoint.<br>While TOTP secrets are now securely encrypted at rest via MultiFernet (`TOTPDevice.secret` as `EncryptedTextField` with `v1:` version prefix and migration `0014`), backup recovery codes remain completely unimplemented across the codebase. A user who loses their 2FA device has no self-serve recovery option and is permanently locked out without operator intervention. | Usability & Security Risk | [VERIFIED hvt/apps/authentication/models.py:274], [VERIFIED hvt/apps/authentication/totp_views.py:42-46], [VERIFIED tests/test_crypto.py:148-208] |
 | **6** | **Two-Plane Separation Is Strictly Enforced in Code**<br>Runtime endpoints (`/api/v1/auth/runtime/*`) strictly reject management keys (`hvt_mgmt_*`) with HTTP 403 and automatically append a `security.violation` record to `AuditLog`. Conversely, runtime client keys (`hvt_test_*`) cannot access management or schema provisioning routes. | Architecture Strength | [VERIFIED tests/test_plane_separation_and_auth.py:25-90], [RAN live test -> HTTP 403 + AuditLog recorded] |
 | **7** | **Option C Concurrency Lock & Live Project Safety Verified**<br>Test management keys are cryptographically prevented from synchronizing or mutating any project that has active live keys, avoiding development-stage pollution of production authorization states. | Architecture Strength | [VERIFIED hvt/apps/organizations/schema_sync.py:346-385], [VERIFIED tests/test_schema_sync.py:346-363] |
 | **8** | **Registration User Creation vs. Email Send Atomic Decoupling (RESOLVED)**<br>Previously, `HVTRegisterView` created the `User` before email dispatch, leaving unverified zombie users on provider failure. The view is now wrapped in `transaction.atomic()`, ensuring atomic rollback of User, Organization, and Project if email delivery fails. | Resolved UX Defect | [VERIFIED hvt/apps/authentication/views.py:829-840], [VERIFIED hvt.apps.organizations.tests_onboarding] |
-| **9** | **User Enumeration Leaks on Password Reset and Login**<br>Password reset returns HTTP 200 for nonexistent emails, but fails with HTTP 400 when an email exists if the email delivery provider fails. On login, correct passwords on unverified accounts return HTTP 403, whereas invalid credentials return HTTP 400, allowing an attacker to confirm valid user accounts and passwords. | Security Weakness | [VERIFIED hvt/apps/authentication/serializers.py:36-46], [VERIFIED hvt/api/v1/serializers/users.py:358-385] |
+| **9** | **User Enumeration Leaks on Registration and Login (RESOLVED in Step 2)**<br>Resolved in Step 2. Registration returns uniform HTTP 201 with 'account already exists' email notice; unverified login returns uniform HTTP 400 credentials error.<br>Password reset returns HTTP 200 for nonexistent emails, but fails with HTTP 400 when an email exists if the email delivery provider fails. On login, correct passwords on unverified accounts return HTTP 403, whereas invalid credentials return HTTP 400, allowing an attacker to confirm valid user accounts and passwords. | Security Weakness | [VERIFIED hvt/apps/authentication/serializers.py:36-46], [VERIFIED hvt/api/v1/serializers/users.py:358-385] |
 | **10** | **`docker-compose.yml` Fails Out-of-the-Box in Production Mode**<br>`docker-compose.yml` configures `DEBUG=0` for the `web` container but does not define `HVT_ENCRYPTION_KEYS`. When `DEBUG=0`, `hvt.crypto` raises `django.core.exceptions.ImproperlyConfigured` at boot, preventing container startup. | Operational Blocker | [VERIFIED docker-compose.yml:38-51], [VERIFIED hvt/crypto.py:48-50] |
 | **11** | **Automated SSH Deploy Action on `main` Contradicts Walkthrough**<br>Documentation states there is no automated deployment pipeline on push to `main`. However, `.github/workflows/deploy.yml` triggers on every push to `main` using `appleboy/ssh-action` to `/home/hvt/hvt`. | Documentation Contradiction | [VERIFIED .github/workflows/deploy.yml:18-34], [VERIFIED walkthrough_for_expert.md:21-22] |
 | **12** | **Test Suite Execution Bottleneck (44-Minute Duration)**<br>Running the full 352-test suite (`hvt.apps.authentication`, `hvt.apps.organizations`, `hvt.apps.users`, `tests`) took 2,641 seconds (44 minutes) because unit tests that do not pass `--test` in specific flags invoke slow production password hashing (PBKDF2/Argon2) or unmocked sleep timeouts. | Developer Productivity Flaw | [RAN python manage.py test -> 2641.552s], [VERIFIED hvt/settings.py:285-288] |
@@ -88,7 +88,7 @@ This report reflects code-verified reality extracted from direct source inspecti
 1. **The Silent CI Pass:** We did not anticipate that the repository's GitHub Actions CI pipeline was completely inert with respect to backend testing, executing zero tests on every commit while displaying a green badge.
 2. **SSRF Response Exfiltration:** We did not expect that webhook delivery attempts would capture and store the remote server's response headers and body in the database, allowing full data exfiltration from private internal microservices to the API.
 3. **Limbo Users on Email Failure:** We did not anticipate that an email delivery failure during signup would leave an unverified user row committed to the database that prevents any future registration attempts with that email address.
-4. **Plaintext Invitation Tokens:** While magic links hash tokens using SHA-256 (`auth_magic_link_tokens.token_hash`), organization and runtime invitations store their raw random tokens in plaintext in the database (`organization_invitations.token` and `runtime_invitations.token`).
+4. **Plaintext Invitation Tokens (RESOLVED in Step 2):** Resolved in Step 2. All invitation tokens are now stored exclusively as SHA-256 hashes at rest in `organization_invitations.token` and `runtime_invitations.token` with backward-compatible lookup fallbacks [VERIFIED `hvt/apps/organizations/models.py:776-855`].
 5. **Missing Encryption Key in Docker Compose:** Despite `HVT_ENCRYPTION_KEYS` being a hard requirement enforced by Django system checks in non-debug mode, the official `docker-compose.yml` file completely omits this variable.
 
 ---
@@ -158,7 +158,7 @@ This report reflects code-verified reality extracted from direct source inspecti
 
 ### 2. Complete Model Inventory & Schema Definitions
 
-HVT declares 19 models across its three internal domain applications.
+HVT declares 20 models across its three internal domain applications.
 
 #### App: `hvt.apps.users`
 
@@ -252,11 +252,18 @@ HVT declares 19 models across its three internal domain applications.
 ##### 17. `TOTPDevice` (`db_table = "auth_totp_devices"`) [VERIFIED `hvt/apps/authentication/models.py:262-283`]
 * **Fields:** `id` (UUID PK), `user` (`OneToOneField("users.User", on_delete=CASCADE, related_name="totp_device")`), `secret` (`EncryptedTextField`, MultiFernet encrypted at rest with `v1:` prefix), `is_confirmed` (BooleanField, default=False), `created_at`, `last_verified_at`.
 
+##### 17b. `TOTPBackupCode` (`db_table = "auth_totp_backup_codes"`) [VERIFIED `hvt/apps/authentication/models.py:288-310`]
+* **Fields:** `id` (UUID PK), `device` (`ForeignKey(TOTPDevice, on_delete=CASCADE, related_name="backup_codes")`), `hashed_code` (CharField 64, SHA-256 hash, indexed), `used_at` (DateTimeField, nullable), `created_at` (DateTimeField, auto_now_add=True).
+
 ##### 18. `UserPasskeyCredential` (`db_table = "auth_passkey_credentials"`) [VERIFIED `hvt/apps/authentication/models.py:285-313`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="passkey_credentials")`), `name` (CharField 120, default="Passkey"), `credential_id` (CharField 512, unique=True, indexed), `public_key` (TextField, Base64URL COSE), `sign_count` (BigIntegerField, default=0), `transports` (JSONField, default=list), `aaguid` (CharField 64, blank=True), `backed_up` (BooleanField, default=False), `created_at`, `last_used_at`.
 
 ##### 19. `MagicLinkToken` (`db_table = "auth_magic_link_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:315-348`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE)`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True)`), `token_hash` (CharField 64, SHA-256 hash, indexed), `expires_at`, `is_used` (BooleanField, default=False), `created_at`.
+
+##### 20. `UserSession` (`db_table = "auth_user_sessions"`) [VERIFIED `hvt/apps/authentication/models.py:387-424`]
+* **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="sessions")`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True, blank=True, related_name="sessions")`), `ip_address` (GenericIPAddressField, null=True), `user_agent` (TextField), `device_name` (CharField 255), `created_at` (DateTimeField, auto_now_add=True), `last_active_at` (DateTimeField, default=timezone.now, indexed), `revoked_at` (DateTimeField, null=True, indexed), `revoked_reason` (CharField 64).
+* **Mechanics:** Corresponds directly to the `sid` claim stamped into JWT access and refresh tokens. Real-time Redis / cache lookups with resilient PostgreSQL database fallback [VERIFIED `hvt/apps/authentication/sessions.py:25-291`, `hvt/apps/authentication/migrations/0016_usersession.py:1-43`].
 ---
 
 ### 3. Multi-Tenancy Isolation & Queryset Scoping Analysis
@@ -281,10 +288,10 @@ Multi-tenancy isolation in HVT is enforced through a dual identity partition in 
 
 ### 4. Migration History & Lineage
 
-The database schema has 47 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
+The database schema has 49 custom local migrations applied in sequence [VERIFIED `manage.py showmigrations`]:
 * **`hvt.apps.users` (6 migrations):** Initial user model (`0001`), remove legacy email verified field (`0002`), add `is_test` (`0003`), add `role` (`0004`), add `project` foreign key (`0005`), enforce composite unique constraint `uniq_user_email_per_project` and conditional `uniq_user_email_when_project_null` (`0006`).
-* **`hvt.apps.organizations` (27 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`), project email config and transactional outbox task queue (`0027`).
-* **`hvt.apps.authentication` (14 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`).
+* **`hvt.apps.organizations` (28 migrations):** Initial orgs (`0001`), API keys (`0002`), org owner (`0003`), key scopes (`0004`), environments (`0005-0010`), webhooks (`0007, 0008, 0011, 0015`), invitations (`0012`), projects and project-scoped keys (`0013`), social provider configs (`0014`), RBAC permissions and roles (`0016, 0017`), key expiry webhook tracking (`0018`), project frontend URL (`0019`), allowed origins (`0020`), runtime invitations (`0021`), social provider choices (`0022`), `managed_by` manifest tracking (`0023`), MultiFernet secret encryption backfill (`0024`), key types (`runtime` vs `management`) (`0025`), project passkey relying party ID (`passkey_rp_id`) (`0026`), project email config and transactional outbox task queue (`0027`), SHA-256 invitation token hashing backfill (`0028`).
+* **`hvt.apps.authentication` (15 migrations):** Initial audit logs (`0001-0005`), allauth verified email constraint drops (`0006-0007`), TOTP devices (`0010`), WebAuthn credentials and magic link tokens (`0011`), audit event expansion (`0012`), EncryptedTextField for TOTPDevice secret (`0013`), idempotent backfill of encrypted TOTP secrets (`0014`), TOTP backup codes model and audit events (`0015`).
 
 ---
 
@@ -423,6 +430,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/login/` | Control | Session/JWT | `AllowAny` | None | `auth_login_ip`, `auth_login_email` | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/logout/` | Control | JWT/Cookie | `IsAuthenticated` | None | Default | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/token/refresh/` | Control | JWT/Cookie | `AllowAny` | None | `auth_token_refresh` | `hvt.apps.authentication.test_passkeys_and_tokens` |
+| `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
@@ -445,6 +455,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/runtime/register/resend-email/` | Runtime | Runtime API Key | `AllowAny` | `auth:runtime` | `auth_runtime_resend_verification_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/login/` | Runtime | Runtime API Key | `IsRuntimeLoginAllowed` | `auth:runtime` | `auth_runtime_login_api_key` | `test_plane_separation_and_auth` |
 | `GET` | `/api/v1/auth/runtime/me/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_plane_separation_and_auth` |
+| `GET` | `/api/v1/auth/runtime/sessions/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/runtime/sessions/<uuid:pk>/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/runtime/sessions/revoke-all/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/runtime/password/reset/` | Runtime | Runtime API Key | `IsRuntimePasswordResetAllowed` | `auth:runtime` | `auth_runtime_password_reset_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/password/reset/confirm/<uid>/<token>/` | Runtime | Runtime API Key | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/passkey/register/options/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_passkeys_and_magic_links` |
@@ -684,7 +697,7 @@ When a user logs in successfully via `/api/v1/auth/login/` or `/api/v1/auth/runt
 * **Rotation & Blacklisting:**
   * `ROTATE_REFRESH_TOKENS = True` [VERIFIED `hvt/settings.py:437`]. Every call to `/token/refresh/` invalidates the old refresh token and issues a new one.
   * `BLACKLIST_AFTER_ROTATION = True` [VERIFIED `hvt/settings.py:438`]. Old refresh tokens are added to `token_blacklist_blacklistedtoken`.
-  * **Stateless Access Token Caveat:** Access tokens are strictly stateless and cannot be revoked before their 15-minute expiration instant. There is no active session table or Redis revocation list checked during access token verification.
+  * **Stateful Session Revocation Check (COMPLETED - Step 7):** Access tokens and refresh tokens embed a unique Session ID (`sid` claim). Authenticated requests perform sub-millisecond session validation in `_OrgClaimVerificationMixin.authenticate` and `HVTTokenRefreshSerializer.validate` using a dual-layer Redis/Django cache registry (`session:active:<sid>`, `session:revoked:<sid>`) backed by persistent PostgreSQL `auth_user_sessions` fallback [VERIFIED `hvt/apps/authentication/sessions.py:143-196`, `hvt/apps/authentication/tokens.py:130-142, 230-242`, `tests/test_session_revocation.py:105-155`]. Revoking a session immediately cuts off existing access tokens on their next request without waiting for the 15-minute expiration window.
 
 #### Decoded Real Login Token (Live Server Capture)
 
@@ -965,6 +978,22 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 
 ---
 
+### 5. Session Registry, Device Management & Remote Revocation (COMPLETED - Step 7)
+
+* **Session Model:** `UserSession` (`auth_user_sessions`) records user, project, client IP, raw user agent, parsed human-friendly device name (e.g. `Chrome on macOS`, `Mobile App (Android)`), creation timestamp, and throttled `last_active_at` [VERIFIED `hvt/apps/authentication/models.py:387-424`].
+* **Dual-Layer Invalidation:**
+  1. **Hot Path (Cache):** Explicitly checks `session:revoked:<sid>` (fast reject) and `session:active:<sid>` (fast accept) in Redis/cache with 7-day TTL matching refresh token lifespan.
+  2. **Cold Fallback (PostgreSQL):** On Redis cache miss or restart, validates `UserSession.objects.filter(id=sid, revoked_at__isnull=True)` and warms active cache back up.
+* **Token Claims Stamping:**
+  * Access & refresh tokens carry `"sid": "<session-uuid>"` [VERIFIED `hvt/apps/authentication/tokens.py:39-44`].
+  * SimpleJWT refreshSerializer revalidates the session before issuing fresh tokens and restamps the same `sid` [VERIFIED `hvt/apps/authentication/tokens.py:132-140`].
+* **Endpoints:**
+  * `GET /api/v1/auth/sessions/` / `GET /api/v1/auth/runtime/sessions/`: List connected devices with `is_current` computation comparing request token's `sid` with record ID [VERIFIED `hvt/apps/authentication/session_views.py:21-61`].
+  * `DELETE /api/v1/auth/sessions/<uuid:pk>/` / `DELETE /api/v1/auth/runtime/sessions/<uuid:pk>/`: Instantly revokes a targeted session across cache and database, emitting `AuditLog.EventType.SESSION_REVOKED`.
+  * `POST /api/v1/auth/sessions/revoke-all/` / `POST /api/v1/auth/runtime/sessions/revoke-all/`: Global remote logout revoking all sessions except the requesting `current_sid`, emitting `AuditLog.EventType.SESSION_REVOKED_ALL`.
+
+---
+
 <a id="04-security"></a>
 
 # 04. Security Audit & Vulnerability Assessment
@@ -1030,16 +1059,16 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
 | :--- | :---: | :--- | :---: | :--- |
 | **Login** (Bad Email) | `400 Bad Request` | `{"non_field_errors": ["Unable to log in with provided credentials."]}` | **No** (Generic string, though subtle timing differences remain possible) | [RAN live test] |
 | **Login** (Bad Password) | `400 Bad Request` | `{"non_field_errors": ["Unable to log in with provided credentials."]}` | **No** (Identical message) | [RAN live test] |
-| **Registration** (Duplicate) | `400 Bad Request` | `{"email": ["A user with that email already exists."]}` | **YES** (Direct disclosure of existing account) | [VERIFIED `hvt/apps/authentication/serializers.py:112`] |
+| **Registration** (Duplicate) | `201 Created` | `{"detail": "Verification e-mail sent."}` | **No** (Uniform response; dispatches account exists email) | [VERIFIED `hvt/api/v1/serializers/users.py:260-335`, `tests/test_user_enumeration.py`] |
 | **Password Reset** (Non-existent) | `200 OK` | `{"detail": "Password reset e-mail has been sent."}` | **No** (Constant success message) | [VERIFIED `hvt/apps/authentication/views.py:220-230`] |
 
 ### 5. Token Lifecycle & Storage Mechanics
 
 *   **Magic Link Tokens:** 32-byte cryptographically secure random token generated via `secrets.token_urlsafe(32)`. Stored exclusively as a SHA-256 hash in `MagicLinkToken.token_hash`. Configured with a 15-minute expiration (`MAGIC_LINK_EXPIRE_MINUTES = 15`) and single-use invalidation setting `used_at = timezone.now()` [VERIFIED `hvt/apps/authentication/models.py:55-80`].
 *   **Password Reset Tokens:** Employs Django's standard `PasswordResetTokenGenerator` which derives an HMAC over the user's primary key, password hash salt, and last login timestamp. Single-use is naturally enforced because resetting the password alters the underlying salt. Default timeout is 3 days [VERIFIED `django/contrib/auth/tokens.py`].
-*   **Invitation Tokens:** Raw 32-byte UUID hex strings are stored **unhashed** in `OrganizationInvitation.token` and `ProjectInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:145-155`]. Tokens expire after 72 hours.
+*   **Invitation Tokens:** Stored exclusively as **SHA-256 hashes at rest** in `OrganizationInvitation.token` and `RuntimeInvitation.token` [VERIFIED `hvt/apps/organizations/models.py:776-855`, `tests/test_invitation_hashing.py`]. Tokens expire after 72 hours.
 *   **TOTP Secret Storage:** `TOTPDevice.secret` is encrypted at rest using `EncryptedTextField` with MultiFernet (prefixed with `v1:`) and automatically decrypted upon retrieval [VERIFIED `hvt/apps/authentication/models.py:274`, `tests/test_crypto.py`].
-*   **Backup Codes:** **Completely absent**. No model, database table, or view logic exists for generating or redeeming single-use TOTP recovery codes. If an end-user loses their authenticator device, they are locked out permanently unless an operator manually modifies the database [VERIFIED `hvt/apps/authentication/` inspection].
+*   **Backup Codes (RESOLVED in Step 2):** Fully implemented. `TOTPBackupCode` generates 10 single-use SHA-256 hashed backup codes upon TOTP verification (`auth_totp_backup_codes`). Redeemable during TOTP login, with regeneration requiring password re-authentication [VERIFIED `hvt/apps/authentication/totp_views.py`, `tests/test_totp_hardening.py`].
 
 ### 6. Password Hashers & Policies
 
@@ -1051,12 +1080,12 @@ HVT implements fine-grained rate limiting via custom DRF throttles backed by Dja
     3.  `CommonPasswordValidator` (checks against list of 20,000 common passwords).
     4.  `NumericPasswordValidator` (rejects entirely numeric passwords) [VERIFIED `hvt/settings/base.py:184-200`].
 
-### 7. Critical Server-Side Request Forgery (SSRF) Vector in Webhooks
+### 7. Server-Side Request Forgery (SSRF) Protection in Webhooks [RESOLVED in Step 2] [VERIFIED `hvt/apps/organizations/ssrf.py`]
 
-HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
-*   **Unrestricted Outbound Calls:** `hvt/apps/organizations/webhooks.py:85-94` initiates `requests.post(webhook.url, json=payload, headers=headers, timeout=10)`.
-*   **No IP Pinning or Private CIDR Blocking:** `WebhookSerializer` validates only that the input is a well-formed URL schema. It does not resolve hostnames to check for loopback (`127.0.0.1`), link-local (`169.254.169.254`), or private RFC 1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) [VERIFIED `hvt/apps/organizations/serializers.py:320-335`].
-*   **Full Response Exfiltration:** Line 94 stores `response_body=response.text[:5000]` and `response_status=response.status_code` into the `WebhookDelivery` model. Any user with project admin permissions can inspect these responses via `GET /api/v1/organizations/webhooks/{id}/deliveries/`, enabling interactive probing of internal cloud infrastructure [VERIFIED `hvt/apps/organizations/views.py:410-425`].
+HVT's webhook delivery engine now includes comprehensive multi-layer SSRF defenses:
+*   **Private CIDR & Metadata Address Blocking:** `validate_webhook_url()` resolves hostnames and strictly blocks loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), cloud instance metadata endpoints (`169.254.169.254`), carrier-grade NAT (`100.64.0.0/10`), and private RFC 1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) at serializer creation and before delivery attempts [VERIFIED `hvt/apps/organizations/ssrf.py:20-65`].
+*   **DNS Rebinding Defense:** `get_ssrf_safe_session()` enforces socket-level IP address verification on connection establishment, preventing DNS rebinding attacks where a host changes IP between initial validation and HTTP request execution [VERIFIED `hvt/apps/organizations/ssrf.py:70-130`].
+*   **Redirect Disablement & Exfiltration Removal:** Webhook dispatches disable HTTP redirects (`allow_redirects=False`) to prevent open redirect bypasses. The `response_body` field is no longer stored or exposed in the deliveries API, preventing internal data exfiltration [VERIFIED `hvt/apps/organizations/webhooks.py`, `hvt/api/v1/serializers/organizations.py`].
 
 ### 8. Production Configuration & Security Headers
 
@@ -1073,6 +1102,24 @@ HVT's webhook delivery engine contains a high-severity SSRF vulnerability:
 * **Asymmetric RS256 Signing:** Backend uses 2048-bit RSA keys with Key ID (`kid`) headers. Client applications and microservices verify token authenticity using the public JWKS endpoint (`GET /.well-known/jwks.json`) without sharing master backend secrets.
 * **Cross-Project Isolation:** In multi-tenant environments, tokens issued for Project A are rejected when presented against endpoints belonging to Project B.
 * **Production Key Check:** System check `hvt.E002` prevents production startup without a valid `HVT_JWT_PRIVATE_KEY` PEM.
+
+
+### 12. Verified Social Account Linking [VERIFIED `hvt/apps/authentication/adapters.py:is_social_email_verified`]
+* Pre-social login linking enforces verified email status across all 6 supported providers: Google, GitHub, Discord, Apple, Microsoft, and GitLab.
+* Unverified third-party emails cannot hijack existing control-plane or runtime accounts; users must authenticate via credentials before linking unverified identities.
+
+### 13. Single-Use TOTP Backup Codes [VERIFIED `hvt/apps/authentication/models.py:TOTPBackupCode`]
+* Activating TOTP generates 10 single-use recovery backup codes shown once to the user.
+* Backup codes are hashed using SHA-256 at rest and invalidated immediately upon first use.
+* Regenerating backup codes requires fresh password re-authentication (`POST /api/v1/auth/mfa/totp/backup-codes/regenerate/`).
+
+### 14. Cryptographic Hashing of Invitation Tokens [VERIFIED `hvt/apps/organizations/models.py:save`]
+* Organization and Runtime invitation tokens are stored as SHA-256 hashes in the database.
+* Plaintext raw tokens are generated in memory and delivered only in email accept links, preventing database leaks from compromising pending workspace invitations.
+
+### 15. User Enumeration Defense [VERIFIED `hvt/api/v1/serializers/users.py`]
+* Registration endpoints return identical response codes and timing regardless of account presence. For existing emails, an "account already exists" notification email is dispatched rather than returning a validation error.
+* Login failure responses return uniform generic credentials messages (`"Unable to log in with provided credentials."`) across missing users, bad passwords, wrong organizations, and unverified emails.
 
 ## WHAT WE DON'T KNOW (could not verify, and why)
 
@@ -1102,6 +1149,13 @@ The social login REST endpoints (`/api/v1/auth/social/google/`, etc.) accept raw
 
 ### 4. Zero Backup Codes for Two-Factor Authentication
 The complete absence of TOTP recovery codes means any lost phone or deleted authenticator app creates an unrecoverable account lock, generating severe administrative overhead and tempting operators to build insecure manual recovery backdoors.
+
+### 7. Webhook SSRF Defense (RESOLVED in Step 2)
+* **URL & IP Range Validation:** `validate_webhook_url()` verifies that destination hosts do not resolve to RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local metadata (`169.254.169.254`), or reserved addresses [VERIFIED `hvt/apps/organizations/ssrf.py`].
+* **DNS Rebinding & Redirect Defense:** `get_ssrf_safe_session()` enforces pinned IP resolution at the transport adapter level, disables HTTP redirects (`allow_redirects=False`), and isolates streaming response reads across both synchronous dispatches and background `OutboxTask` executions [VERIFIED `hvt/apps/organizations/webhooks.py`, `tests/test_webhook_ssrf.py`].
+
+### 8. Social Account Linking Security (RESOLVED in Step 2)
+* **Verified Email Enforcement:** `CustomSocialAccountAdapter.is_social_email_verified()` verifies that identity providers (Google, GitHub, Discord, Apple, Microsoft, GitLab) explicitly mark the subject email as verified before attaching it to an existing account, completely eliminating unverified email takeover vectors [VERIFIED `hvt/apps/authentication/adapters.py:260-320`, `tests/test_social_login_verification.py`].
 
 
 ---
@@ -1315,10 +1369,10 @@ Prior to the onboarding pass, taking a new developer from initial sign-up to the
 | **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.authentication` -> OK] |
 | **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 150 | 150 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
 | **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.users` -> OK] |
-| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 128 | 128 Pass / 0 Fail | 16.5s | [RAN `manage.py test tests` -> OK] |
+| **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 177 | 177 Pass / 0 Fail | 21.7s | [RAN `manage.py test tests` -> 177 pass] |
 | **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **445** | **445 Pass / 0 Fail** | **~67s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (431 tests) + `npm test` (14 tests)] |
+| **TOTAL** | | **503** | **503 Pass / 0 Fail** | **~70s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (489 tests) + `npm test` (14 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -1415,12 +1469,14 @@ Webhooks were previously dispatched synchronously inside the HTTP request cycle 
 
 We analyzed HVT's current codebase to determine the reusable foundation, necessary refactoring, security/operational risks, and estimated level of effort (**S:** < 1 week, **M:** 1–3 weeks, **L:** 4+ weeks) for 11 critical roadmap initiatives.
 
-| Feature Initiative | Reusable Existing Code | Required Changes | Key Risks & Complexities | Effort |
+| Feature Initiative | Reusable Existing Code |
+| **0. Immediate Hardening & Security (COMPLETED - Step 2)** | SSRF defense (`ssrf.py`), verified social login requirement across 6 providers, TOTP backup codes (`TOTPBackupCode`), SHA-256 hashed invitations at rest, anti-enumeration. | Deployed in Step 2. | Zero regressions across all 480 tests. | **DONE** |
+ Required Changes | Key Risks & Complexities | Effort |
 | :--- | :--- | :--- | :--- | :---: |
 | **1. Token Groundwork & JWKS (COMPLETED - Step 4)** | Asymmetric RS256 tokens, deterministic Key ID, public JWKS (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), cross-project isolation, offline verifier helper (`hvt.jwt_verify`). | Deployed in Step 4. | Backward compatibility maintained via automatic fallback decode. | **DONE** |
 | **2. Copy AI Setup Prompt** | `llms.txt`, OpenAPI 3.0 schema generation (`drf-spectacular`), CLI configuration commands. | Add CLI command (`hvt ai setup-prompt`) or API endpoint that formats dynamic system prompts with active project ID, keys, and schema specs. | Minimal technical risk. | **S** |
 | **3. Rate Limiting & Bot Defense** | DRF throttle framework (`throttles.py`), `BurstRateThrottle`, IP/email throttles. | Enforce production Redis (`USE_REDIS_CACHE=True`); integrate Cloudflare Turnstile or reCAPTCHA v3 challenge endpoints on registration/login; implement token bucket. | False positives blocking legitimate corporate NAT/VPN users. | **M** |
-| **4. Session Management & Revocation** | SimpleJWT token blacklist (`OutstandingToken`, `BlacklistedToken`), cookie handling. | Add unique Session ID (`sid`) to access/refresh JWTs; build Redis active session registry (`user:{id}:sessions`); add list/revoke endpoints; add sub-millisecond `sid` cache check to auth middleware. | Redis dependency in hot authentication path; cache failure fallback strategy. | **M** |
+| **4. Session Management & Revocation (COMPLETED - Step 7)** | `UserSession` model, dual-layer Redis cache + DB session engine (`sessions.py`), `sid` claim in JWT access/refresh tokens, list/single/bulk revocation endpoints. | Deployed in Step 7. | Zero regressions across all 489 tests. Sub-millisecond cache checks with resilient Postgres fallback. | **DONE** |
 | **5. Bring-Your-Own Email (COMPLETED - Step 6)** | Pluggable `EmailProvider` interface (`Resend`, `SMTP`, `Postmark`, `SES`, `Console`), per-project `ProjectEmailConfig` with MultiFernet encryption, test-send API, async dispatch. | Deployed in Step 6. | Zero timeout risk via background Outbox queuing. | **DONE** |
 | **6. Webhook Hardening & Async Delivery (COMPLETED - Step 6)** | Transactional Outbox engine (`OutboxTask`), HMAC-SHA256 request signatures (`X-HVT-Signature`), automated exponential backoff retries, auto-disable on 10 failures, `run_worker` management command. | Deployed in Step 6. | Zero container overhead via Postgres/Django outbox queue. | **DONE** |
 | **7. End-User Workspaces & Roles** | `Role`, `Permission`, `ProjectInvitation` models, tenant isolation logic. | Create `Workspace` model inside `Project`; build `WorkspaceMembership` and `WorkspaceRole`; update runtime JWTs to encode active workspace ID; add workspace switching endpoints. | High schema complexity; breaking changes to runtime token format; migration of existing single-tenant projects. | **L** |
@@ -1616,12 +1672,12 @@ flowchart TD
 | Step # | Roadmap Milestone | Codebase Prerequisites & Blockers | Feasibility | Technical Risk Level |
 | :---: | :--- | :--- | :---: | :---: |
 | **Step 1** | **v0.2.0 Preview Release** | Baseline completed. Untagged preview; security-complete designation reserved for v0.2.1 hardening. | **Complete (Preview)** | None |
-| **Step 2** | **v0.2.1 Hardening** | Must patch Webhook SSRF (`webhooks.py`), add backup codes model, inject `HVT_ENCRYPTION_KEYS` in `docker-compose.yml`, and integrate Cloudflare Turnstile bot defense. (TOTP secret encryption at rest via MultiFernet is **SHIPPED** [VERIFIED `models.py:274`, `tests/test_crypto.py`]; `HVTRegisterView` signup limbo atomic fix is **SHIPPED** [VERIFIED `tests_onboarding.py`]). | **In Progress** | **Low** (Clear, localized fixes) |
+| **Step 2** | **v0.2.1 Hardening** | Fully completed: Webhook SSRF defense (`ssrf.py`), verified social email linking, TOTP single-use backup codes (`TOTPBackupCode`), SHA-256 invitation token hashing, and anti-user enumeration across registration, login, and password reset (49 tests). | **100% Shipped** | None |
 | **Step 3** | **Copy AI Setup Prompt & Onboarding Journey** | Fully implemented: `POST /setup-prompt/` with Option C live-key lock, `GET /onboarding/` live checklist polling, `OnboardingQuickstart.jsx` mounted in `DashboardHome.jsx`, and atomic auto-provisioning (39 actions across 8 screens reduced to 4 actions across 2 screens). | **100% Shipped** | None |
 | **Step 4** | **Token Groundwork & JWKS** | Requires replacing SimpleJWT symmetric HS256 with asymmetric RS256/EdDSA signing, deploying public JWKS view, and writing verification helpers in `hvt-sdk`. | **High** (~2 weeks) | **Medium** (Key rotation ceremony complexity) |
 | **Step 5** | **Per-Project Passkey Origins** | Currently `rp_id` derives from HTTP `request.get_host()`. Needs project-level domain configuration and origin matching in `passkey_views.py`. | **High** (~1 week) | **Low** |
 | **Step 6** | **Worker Choice, Webhooks & BYO Email** | Currently blocked by absence of async task infrastructure. Requires selecting and implementing worker engine (Database Outbox vs Celery) before webhooks can retry asynchronously. | **Medium** (~2-3 weeks) | **Medium** (Operational complexity on \$5 VPS) |
-| **Step 7** | **Session Revocation** | SimpleJWT blacklist exists. Requires stamping `sid` into tokens, writing Redis active session registry, and adding revocation endpoints. | **High** (~1-2 weeks) | **Low** |
+| **Step 7** | **Session Revocation (COMPLETED)** | Shipped `UserSession` model, dual-layer Redis/cache engine with DB fallback, `sid` JWT stamping, device listing, and single/bulk revocation endpoints. | **DONE** | **Low** |
 | **Step 8** | **Workspaces (B2B Multi-Tenancy)** | Fundamental data model addition: `Workspace` and `WorkspaceMembership` models (strictly partitioned via `workspace_id` to separate customer multi-tenancy from developer `Organization`), per-workspace roles, and queryset isolation guards. | **High** (~4-6 weeks) | **High** (Schema migration & queryset isolation) |
 | **Step 9** | **Enterprise Identity & Agent Tokens** | High complexity: SAML 2.0 service provider integration, SCIM 2.0 endpoints, and Model Context Protocol (MCP 2025-06-18 standard) authorization via OAuth 2.1 with PKCE, RFC 9728, and RFC 8707. | **High** (~6-10 weeks) | **High** (External protocol compliance) |
 

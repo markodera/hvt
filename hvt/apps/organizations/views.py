@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from rest_framework import generics, permissions, status, filters, serializers, parsers
 from rest_framework.response import Response
 from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
@@ -155,7 +157,8 @@ def _set_bootstrap_auth_tokens(response, user) -> None:
 
 
 def _build_invitation_accept_url(invitation: OrganizationInvitation) -> str:
-    return f"{settings.FRONTEND_URL.rstrip('/')}/invite?token={invitation.token}"
+    token_val = getattr(invitation, "raw_token", None) or invitation.token
+    return f"{settings.FRONTEND_URL.rstrip('/')}/invite?token={token_val}"
 
 
 def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
@@ -209,10 +212,11 @@ def _send_invitation_email(invitation: OrganizationInvitation) -> bool:
 
 
 def _build_runtime_invitation_accept_url(invitation: RuntimeInvitation) -> str:
+    token_val = getattr(invitation, "raw_token", None) or invitation.token
     return build_frontend_url(
         "/invite/accept",
         project=invitation.project,
-        query={"token": invitation.token},
+        query={"token": token_val},
     )
 
 
@@ -1472,6 +1476,10 @@ class OrganizationInvitationResendView(generics.GenericAPIView):
                 {"detail": "Expired invitations cannot be resent."}
             )
 
+        raw_token = secrets.token_hex(32)
+        invitation.raw_token = raw_token
+        invitation.token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        invitation.save(update_fields=["token", "updated_at"])
         email_sent = _send_invitation_email(invitation)
 
         AuditLog.log(
@@ -1595,10 +1603,18 @@ class OrganizationInvitationLookupView(APIView):
         if not token:
             raise serializers.ValidationError({"token": ["This field is required."]})
 
-        invitation = get_object_or_404(
-            OrganizationInvitation.objects.select_related("organization", "project").prefetch_related("app_roles"),
-            token=token,
+        hashed_token = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        invitation = (
+            OrganizationInvitation.objects.select_related("organization", "project")
+            .prefetch_related("app_roles")
+            .filter(token=hashed_token)
+            .first()
         )
+        if not invitation:
+            invitation = get_object_or_404(
+                OrganizationInvitation.objects.select_related("organization", "project").prefetch_related("app_roles"),
+                token=token,
+            )
 
         return Response(
             OrganizationInvitationPublicSerializer(invitation).data,
@@ -1622,10 +1638,19 @@ class OrganizationInvitationAcceptView(APIView):
         serializer = OrganizationInvitationAcceptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        invitation = get_object_or_404(
-            OrganizationInvitation.objects.select_related("organization", "project", "invited_by").prefetch_related("app_roles"),
-            token=serializer.validated_data["token"],
+        raw_token = serializer.validated_data["token"].strip()
+        hashed_token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        invitation = (
+            OrganizationInvitation.objects.select_related("organization", "project", "invited_by")
+            .prefetch_related("app_roles")
+            .filter(token=hashed_token)
+            .first()
         )
+        if not invitation:
+            invitation = get_object_or_404(
+                OrganizationInvitation.objects.select_related("organization", "project", "invited_by").prefetch_related("app_roles"),
+                token=raw_token,
+            )
 
         if invitation.accepted_at:
             raise serializers.ValidationError(
@@ -1899,14 +1924,26 @@ class RuntimeInvitationAcceptView(APIView):
         serializer = RuntimeInvitationAcceptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        invitation = get_object_or_404(
+        raw_token = serializer.validated_data["token"].strip()
+        hashed_token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        invitation = (
             RuntimeInvitation.objects.select_related(
                 "project",
                 "project__organization",
                 "invited_by",
-            ),
-            token=serializer.validated_data["token"],
+            )
+            .filter(token=hashed_token)
+            .first()
         )
+        if not invitation:
+            invitation = get_object_or_404(
+                RuntimeInvitation.objects.select_related(
+                    "project",
+                    "project__organization",
+                    "invited_by",
+                ),
+                token=raw_token,
+            )
 
         if invitation.status != RuntimeInvitation.Status.PENDING:
             raise serializers.ValidationError(
@@ -1977,6 +2014,7 @@ class RuntimeInvitationAcceptView(APIView):
         access_token, refresh_token = build_hvt_token_pair(
             user,
             project=invitation.project,
+            request=request,
         )
         access_value = str(access_token)
         refresh_value = str(refresh_token)
