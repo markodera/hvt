@@ -163,6 +163,24 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 
 ---
 
+### 6. Personal Access Tokens (PATs) Mechanics [VERIFIED `hvt/apps/authentication/models.py:433-540`, `hvt/apps/authentication/backends.py:230-291`]
+
+1. **Format & Prefixing:**
+   * Token format: `hvt_pat_<environment>_<64-hex>` (e.g. `hvt_pat_live_0123...`).
+   * Prefix: First 8 hex characters: `hvt_pat_<environment>_<8-hex>`.
+   * Stored at rest as a SHA-256 cryptographic hash (`hashed_token`); raw token is returned once upon issuance and never stored in the database.
+2. **Authentication Flow (`PersonalAccessTokenAuthentication`):**
+   * Registered in DRF `DEFAULT_AUTHENTICATION_CLASSES` ahead of JWT authentication.
+   * Extracts credentials from `Authorization: Bearer hvt_pat_...`, `Authorization: Token hvt_pat_...`, or `X-PAT: hvt_pat_...`.
+   * Non-PAT tokens cleanly return `None`, passing evaluation to SimpleJWT without interference.
+   * Enforces token expiration, revocation timestamp (`revoked_at`), user active status, and optional project active status.
+   * Throttled `last_used_at` touch timestamp (cached in Redis / LocMem for 60 seconds).
+   * Supports fine-grained scopes (`scopes = ["projects:read", ...]`, with `*` or `admin` wildcard support).
+   * **Scope enforcement before granting user-level permissions (`check_pat_scope_access`):** A PAT with narrowed scopes (e.g. `users:read`) is restricted strictly to endpoints matching its permitted scopes and methods. Write requests (POST/PUT/PATCH/DELETE) and unauthorized resources raise `PermissionDenied` (HTTP 403 Forbidden) before user-role checks execute, preventing role-based privilege escalation. Child PAT creation is also bounded so an issuing PAT cannot grant scopes exceeding its own permissions [VERIFIED `hvt/apps/authentication/backends.py:231-330`, `hvt/apps/authentication/pat_views.py:155-165, 290-300`, `tests/test_personal_access_tokens.py:290-380`].
+   * Duck-types dictionary access (`.get("project_id")`, `["project_id"]`) allowing seamless interop with runtime user permission checks (`IsRuntimeUser`).
+
+---
+
 ## WHAT WE DON'T KNOW
 
 1. **Token Revocation in Distributed Clusters:** We do not know how token rotation behaves across multi-region database clusters where database write replication lag might allow a blacklisted refresh token to be reused within the replication window.

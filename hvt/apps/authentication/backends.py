@@ -225,3 +225,190 @@ class HVTJWTAuthentication(_OrgClaimVerificationMixin, JWTAuthentication):
 
 class HVTJWTCookieAuthentication(_OrgClaimVerificationMixin, JWTCookieAuthentication):
     """Cookie-based JWT auth with the same org claim verification."""
+
+
+
+def check_pat_scope_access(pat, request) -> bool:
+    """
+    Enforce that a Personal Access Token with narrowed scopes only accesses endpoints
+    matching its permitted scopes.
+    Returns True if permitted, False otherwise.
+    """
+    scopes = pat.scopes or []
+    if not scopes:
+        # Unrestricted PAT (inherits full user role permissions)
+        return True
+
+    # Wildcard and admin scopes allow full access within user permissions
+    if "*" in scopes or "admin" in scopes:
+        return True
+
+    method = request.method.upper() if getattr(request, "method", None) else "GET"
+    is_safe = method in ("GET", "HEAD", "OPTIONS")
+
+    path = getattr(request, "path", "") or ""
+
+    # Check for view-level explicit scope declarations if view is resolved
+    resolver_match = getattr(request, "resolver_match", None) or getattr(
+        getattr(request, "_request", None), "resolver_match", None
+    )
+    view_class = None
+    if resolver_match and hasattr(resolver_match, "func"):
+        view_class = getattr(resolver_match.func, "view_class", None)
+
+    explicit_scopes = None
+    if view_class:
+        scope_map = getattr(view_class, "pat_scope_map", None) or getattr(view_class, "api_key_scope_map", None)
+        if scope_map and method in scope_map:
+            val = scope_map[method]
+            explicit_scopes = (val,) if isinstance(val, str) else tuple(val)
+        elif is_safe:
+            val = getattr(view_class, "pat_read_scopes", None) or getattr(view_class, "api_key_read_scopes", None)
+            if val:
+                explicit_scopes = (val,) if isinstance(val, str) else tuple(val)
+        else:
+            val = getattr(view_class, "pat_write_scopes", None) or getattr(view_class, "api_key_write_scopes", None)
+            if val:
+                explicit_scopes = (val,) if isinstance(val, str) else tuple(val)
+
+    # Determine acceptable scopes for this request
+    acceptable_scopes = set()
+    acceptable_scopes.add("*")
+    acceptable_scopes.add("admin")
+    if is_safe:
+        acceptable_scopes.add("read")
+        acceptable_scopes.add("write")
+    else:
+        acceptable_scopes.add("write")
+
+    if explicit_scopes:
+        for s in explicit_scopes:
+            acceptable_scopes.add(s)
+            if ":" in s:
+                res, act = s.split(":", 1)
+                acceptable_scopes.add(f"{res}:*")
+                if act == "read":
+                    acceptable_scopes.add(f"{res}:write")
+
+    # Map standard route segments to resources
+    resources = []
+    if "/auth/pats" in path:
+        resources.extend(["pats", "auth"])
+    elif "/auth/sessions" in path:
+        resources.extend(["sessions", "auth"])
+    elif "/auth/passkey" in path:
+        resources.extend(["passkeys", "auth"])
+    elif "/auth/me" in path or "/auth/user" in path:
+        resources.extend(["users", "auth", "user"])
+    elif "/users" in path or "/members" in path:
+        resources.extend(["users"])
+    elif "/keys" in path:
+        resources.extend(["api_keys"])
+    elif "/webhooks" in path:
+        resources.extend(["webhooks"])
+    elif "/audit-logs" in path:
+        resources.extend(["audit_logs"])
+    elif "/invitations" in path:
+        resources.extend(["invitations", "users", "org"])
+    elif "/permissions" in path:
+        resources.extend(["permissions"])
+    elif "/roles" in path:
+        resources.extend(["roles"])
+    elif "/sync" in path:
+        resources.extend(["schema"])
+    elif "/projects" in path:
+        resources.extend(["projects", "org"])
+    elif "/organizations" in path:
+        resources.extend(["organization", "org"])
+
+    for res in resources:
+        acceptable_scopes.add(f"{res}:*")
+        if is_safe:
+            acceptable_scopes.add(f"{res}:read")
+            acceptable_scopes.add(f"{res}:write")
+        else:
+            acceptable_scopes.add(f"{res}:write")
+            if res == "schema":
+                acceptable_scopes.add("schema:sync")
+                query_str = getattr(request, "META", {}).get("QUERY_STRING", "") if hasattr(request, "META") else ""
+                if "dry_run=true" in query_str:
+                    acceptable_scopes.add("schema:plan")
+
+    granted_scopes = set(scopes)
+    return bool(granted_scopes.intersection(acceptable_scopes))
+
+
+class PersonalAccessTokenAuthentication(authentication.BaseAuthentication):
+    """
+    Personal Access Token (PAT) authentication backend.
+    Accepts:
+      - Authorization: Bearer hvt_pat_<env>_<hex>
+      - Authorization: Token hvt_pat_<env>_<hex>
+      - X-PAT: hvt_pat_<env>_<hex>
+
+    Returns (user, pat) on success.
+    Returns None if no PAT header is present (allowing fallback to JWT/APIKey).
+    Raises AuthenticationFailed if a PAT is present but invalid/expired/revoked.
+    Raises PermissionDenied if a narrowed PAT lacks scopes for the requested action.
+    """
+
+    def authenticate_header(self, request):
+        return 'Bearer realm="api"'
+
+    def get_raw_token(self, request) -> str | None:
+        auth_header = request.headers.get("Authorization") or request.META.get("HTTP_AUTHORIZATION")
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() in ("bearer", "token") and parts[1].startswith("hvt_pat_"):
+                return parts[1].strip()
+
+        x_pat = request.headers.get("X-PAT") or request.META.get("HTTP_X_PAT")
+        if x_pat and x_pat.strip().startswith("hvt_pat_"):
+            return x_pat.strip()
+
+        return None
+
+    def authenticate(self, request):
+        raw_token = self.get_raw_token(request)
+        if not raw_token:
+            return None
+
+        import hashlib
+        from django.utils import timezone
+        from hvt.apps.authentication.models import PersonalAccessToken
+
+        hashed_token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+        try:
+            pat = PersonalAccessToken.objects.select_related("user", "project").get(
+                hashed_token=hashed_token
+            )
+        except PersonalAccessToken.DoesNotExist:
+            raise exceptions.AuthenticationFailed("Invalid personal access token.")
+
+        if pat.revoked_at is not None:
+            raise exceptions.AuthenticationFailed("Personal access token has been revoked.")
+
+        if pat.expires_at is not None and pat.expires_at <= timezone.now():
+            raise exceptions.AuthenticationFailed("Personal access token has expired.")
+
+        if not pat.user or not pat.user.is_active:
+            raise exceptions.AuthenticationFailed("User account is inactive or disabled.")
+
+        if pat.project and not pat.project.is_active:
+            raise exceptions.AuthenticationFailed("Associated project is inactive.")
+
+        if not check_pat_scope_access(pat, request):
+            logger.warning(
+                "[PersonalAccessTokenAuthentication] PAT %s denied for %s %s: granted_scopes=%s",
+                pat.prefix,
+                getattr(request, "method", "UNKNOWN"),
+                getattr(request, "path", ""),
+                pat.scopes,
+            )
+            raise exceptions.PermissionDenied(
+                "Personal access token does not have permission to perform this action."
+            )
+
+        pat.update_last_used()
+        return (pat.user, pat)

@@ -41,6 +41,13 @@ The following comprehensive table inventories the primary endpoint families acro
 | `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `GET` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/pats/<uuid:pk>/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `GET` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/runtime/pats/<uuid:pk>/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
@@ -221,3 +228,19 @@ The following comprehensive table inventories the primary endpoint families acro
 1. **Complete Absence of TOTP Backup Codes:** The documentation states full MFA support, but there are zero models, fields, or endpoints for backup codes. A lost authenticator results in irreversible lockout.
 2. **Missing SDK Code in Repository:** The `sdk/` directory has no code, only a 12-line markdown stub pointing to an external repo.
 3. **Inconsistent Token Hashing Across Features:** Magic link tokens are cryptographically hashed using SHA-256, but both organization invitations and runtime invitations store their raw tokens in plaintext in the database.
+
+#### 18. Multi-Page Architecture, Purple ASCII Hero Schematic & Anti-Zombie UI Redesign
+* **Status:** `WORKING` [VERIFIED `hvt-fr/src/App.jsx`, `hvt-fr/src/pages/landing/Landing.jsx`].
+* **Mechanics:**
+  * **Anti-Zombie UI Hero Schematic:** Embedded an authentic, glowing purple monospace ASCII architectural schematic into the landing hero (`hvt-fr/src/pages/landing/Landing.jsx`), visually mapping the entire HVT cryptographic flow: Control Plane (`hvt_mgmt_...`) schema sync -> RS256 Private Key Sign -> Runtime Engine (`hvt_live_...`) -> 0.1ms In-Memory Verification at Edge without database lookups.
+  * **Multi-Page Deep-Dive Architecture:** Disaggregated monolithic feature descriptions from the landing page into 5 dedicated, high-depth technical feature pages:
+    1. `/features/engine`: Cryptographic In-Memory Engine, JWT claims anatomy, sub-millisecond benchmarks, and language SDK snippets (`hvt-fr/src/pages/features/FeatureEnginePage.jsx`).
+    2. `/features/dual-plane`: Dual-Plane Architecture, isolation of administrative management keys (`hvt_mgmt_`) from public runtime keys (`hvt_live_`), and blast radius containment (`hvt-fr/src/pages/features/FeatureDualPlanePage.jsx`).
+    3. `/features/passkeys`: Passkeys, FIDO2 WebAuthn biometric challenge-response ceremony, RFC 6238 TOTP fallback, and 10 single-use emergency backup recovery codes (`hvt-fr/src/pages/features/FeaturePasskeysPage.jsx`).
+    4. `/features/sessions`: Active Device Registry, IP/user-agent profiling, single-session revocation, and global remote logout (`hvt-fr/src/pages/features/FeatureSessionsPage.jsx`).
+    5. `/features/byo-email`: Bring-Your-Own Email Transports (Resend, AWS SES, Postmark, Custom SMTP), SPF/DKIM alignment, and delivery test sandbox (`hvt-fr/src/pages/features/FeatureByoEmailPage.jsx`).
+  * **Rich Developer Sitemaps Footer:** Mounted `<Footer />` (`hvt-fr/src/components/layout/Footer.jsx`) across all public marketing and feature routes with Product, Developers, Standards & Legal, Apache 2.0 open-source badge, and live operational status pill.
+  * **Collapsible Project Creation:** Refactored `ProjectsTab.jsx` to make project creation responsive and collapsible with an interactive `+ New project` / `Collapse` toggle and purple primary actions.
+* **Verified Evidence:**
+  * Clean lint and production build: `npm run lint` (0 errors), `npm run build` (built in 34.06s) [RAN `npm run build` -> exit code 0].
+  * 10 high-resolution Playwright screenshots captured in `docs/audit/screens/anti_zombie/`: `01_landing_hero_ascii.png`, `01_landing_full.png`, `02_features_engine.png`, `03_features_dual_plane.png`, `04_features_passkeys.png`, `05_features_sessions.png`, `06_features_byo_email.png`, `07_settings_projects_collapsed.png`, `09_dashboard_overview.png`, `10_api_keys.png` [RAN Playwright -> all verified].

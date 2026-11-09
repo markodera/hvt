@@ -347,6 +347,7 @@ else:
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "hvt.apps.authentication.backends.PersonalAccessTokenAuthentication",
         "hvt.apps.authentication.backends.HVTJWTCookieAuthentication",
         "hvt.apps.authentication.backends.HVTJWTAuthentication",
         "hvt.apps.authentication.backends.APIKeyAuthentication",
