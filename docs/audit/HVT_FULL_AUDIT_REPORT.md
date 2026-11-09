@@ -1,9 +1,9 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `0c82f777e74bc562a2e60edd38b6d03473b60ead`  
-> **Last Synchronized:** `2026-11-09 05:50:04 UTC`  
+> **Latest Commit:** `7ee3bda12242e80f6f498436ce42e29068cbf9c2`  
+> **Last Synchronized:** `2026-11-09 06:45:30 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 20,106 words (170,893 characters)  
+> **Total Volume:** 20,462 words (174,264 characters)  
 
 ## Table of Contents
 
@@ -14,12 +14,12 @@
 | 03 | 02 Features And Endpoints | 2,954 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 3,139 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
-| 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
+| 06 | 05 Live Behavior | 1,989 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,311 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **20,106 words** | |
+| | **TOTAL** | **20,462 words** | |
 
 ---
 
@@ -1337,6 +1337,45 @@ Prior to the onboarding pass, taking a new developer from initial sign-up to the
 * **Before:** 39 actions across 8 screens.
 * **After:** 4 human actions across 2 screens.
 * **Friction Eliminated:** 89.7% reduction in developer friction; zero manual workspace/project scaffolding forms. [VERIFIED `tests_onboarding.py`, `OnboardingQuickstart.jsx`]
+
+
+---
+
+### 4. Frontend & Marketing UI/UX Redesign (Slice 1 + Landing Page)
+
+#### A. Core Design System Alignment (design-taste-frontend & Zinc Dark Theme)
+The frontend underwent a complete visual overhaul away from muddy violet-washed cards to a crisp, high-contrast, professional neutral dark palette conforming to modern developer standards (Vercel/Linear/Stripe benchmark):
+*   **Palette:** Background `#0a0a0a`, Card/Surface `#18181b`, Nested Containers `#111111`, Borders `#27272a`, Hover Borders `#3f3f46`, Text Primary `#ffffff`, Text Secondary `#a1a1aa`, Text Muted `#71717a`.
+*   **Brand Accent:** Controlled `#7c3aed` / `#6d28d9` vibrant violet applied exclusively for primary CTAs, active indicator rails, and cryptographic verification badges.
+*   **Anti-AI Polish:** Zero pulsing animation dots (`animate-pulse` purged), zero tracked-out uppercase micro-headers, and zero generic sparkle icons.
+
+#### B. Redesigned Components & Workflows Verified
+1.  **Dual-Plane API Keys Interface (`ApiKeysPage.jsx`):**
+    *   Distinct segmented tabs for **Runtime Client Keys** (`hvt_live_*`, `hvt_test_*`) vs **Management CI Keys** (`hvt_mgmt_*`).
+    *   Elevated privilege warning on management plane tabs.
+    *   Show-once in-memory secret display dialog with one-click copy and pre-formatted `.env` integration snippets.
+    *   One-click copyable Developer Triad header (`BASE_URL`, `PROJECT_ID`).
+2.  **Global App Shell (`GlobalHeader.jsx` & `ProjectSidebar.jsx`):**
+    *   Subtle, non-intrusive Test Mode status strip replacing jarring yellow banners.
+    *   Interactive project selector dropdown synchronized with URL state (`?project=:slug`).
+    *   One-click copyable Project ID pill in the top header.
+3.  **Marketing Landing Page (`Landing.jsx`):**
+    *   Rebuilt following `design-taste-frontend` anti-slop guidelines.
+    *   **Live Interactive Claims Simulator:** Interactive role selector (`Buyer`, `Merchant`, `Admin`) showing real-time decoded RS256 JWT claims and sub-millisecond in-memory route authorization decisions (`200 OK` vs `403 Forbidden`).
+    *   **Dual-Plane Architecture Matrix:** Visual separation of control plane and runtime plane workflows.
+    *   **Multi-Language Integration:** Tabbed code implementations for TypeScript, Python/FastAPI, and cURL.
+    *   **Commercial Freedom Guarantee:** Clear comparison matrix proving zero MAU tax and self-hostable Apache 2.0 architecture over closed SaaS vendors.
+    *   **Zero Pricing Section:** Strictly omitting pricing tables per user direction.
+
+#### C. Verification Screenshots Captured
+*   `docs/audit/screens/slice1/00_dashboard_home.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/slice1/01_api_keys_runtime_tab.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/slice1/02_api_keys_management_tab.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/slice1/03_api_keys_create_management_modal.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/slice1/04_api_keys_create_runtime_modal.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/slice1/05_mobile_api_keys.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/landing/01_landing_hero.png` [VERIFIED Playwright headless capture]
+*   `docs/audit/screens/landing/02_landing_full.png` [VERIFIED Playwright headless capture]
 
 
 ---
