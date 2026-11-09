@@ -225,3 +225,67 @@ class HVTJWTAuthentication(_OrgClaimVerificationMixin, JWTAuthentication):
 
 class HVTJWTCookieAuthentication(_OrgClaimVerificationMixin, JWTCookieAuthentication):
     """Cookie-based JWT auth with the same org claim verification."""
+
+
+
+class PersonalAccessTokenAuthentication(authentication.BaseAuthentication):
+    """
+    Personal Access Token (PAT) authentication backend.
+    Accepts:
+      - Authorization: Bearer hvt_pat_<env>_<hex>
+      - Authorization: Token hvt_pat_<env>_<hex>
+      - X-PAT: hvt_pat_<env>_<hex>
+
+    Returns (user, pat) on success.
+    Returns None if no PAT header is present (allowing fallback to JWT/APIKey).
+    Raises AuthenticationFailed if a PAT is present but invalid/expired/revoked.
+    """
+
+    def authenticate_header(self, request):
+        return 'Bearer realm="api"'
+
+    def get_raw_token(self, request) -> str | None:
+        auth_header = request.headers.get("Authorization") or request.META.get("HTTP_AUTHORIZATION")
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() in ("bearer", "token") and parts[1].startswith("hvt_pat_"):
+                return parts[1].strip()
+
+        x_pat = request.headers.get("X-PAT") or request.META.get("HTTP_X_PAT")
+        if x_pat and x_pat.strip().startswith("hvt_pat_"):
+            return x_pat.strip()
+
+        return None
+
+    def authenticate(self, request):
+        raw_token = self.get_raw_token(request)
+        if not raw_token:
+            return None
+
+        import hashlib
+        from django.utils import timezone
+        from hvt.apps.authentication.models import PersonalAccessToken
+
+        hashed_token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+        try:
+            pat = PersonalAccessToken.objects.select_related("user", "project").get(
+                hashed_token=hashed_token
+            )
+        except PersonalAccessToken.DoesNotExist:
+            raise exceptions.AuthenticationFailed("Invalid personal access token.")
+
+        if pat.revoked_at is not None:
+            raise exceptions.AuthenticationFailed("Personal access token has been revoked.")
+
+        if pat.expires_at is not None and pat.expires_at <= timezone.now():
+            raise exceptions.AuthenticationFailed("Personal access token has expired.")
+
+        if not pat.user or not pat.user.is_active:
+            raise exceptions.AuthenticationFailed("User account is inactive or disabled.")
+
+        if pat.project and not pat.project.is_active:
+            raise exceptions.AuthenticationFailed("Associated project is inactive.")
+
+        pat.update_last_used()
+        return (pat.user, pat)

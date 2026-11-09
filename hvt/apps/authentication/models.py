@@ -94,6 +94,11 @@ class AuditLog(models.Model):
         SESSION_REVOKED = "session.revoked", "Session Revoked"
         SESSION_REVOKED_ALL = "session.revoked_all", "All Sessions Revoked"
 
+        # Personal Access Token (PAT) events
+        PAT_CREATED = "pat.created", "Personal Access Token Created"
+        PAT_REVOKED = "pat.revoked", "Personal Access Token Revoked"
+        PAT_DELETED = "pat.deleted", "Personal Access Token Deleted"
+
         # Passkey events
         PASSKEY_REGISTER_INITIATED = (
             "passkey.register.initiated",
@@ -422,3 +427,120 @@ class UserSession(models.Model):
     def __str__(self):
         status_str = "revoked" if self.revoked_at else "active"
         return f"Session ({status_str}) for {self.user.email} on {self.device_name or 'Unknown Device'}"
+
+
+
+class PersonalAccessToken(models.Model):
+    """
+    Personal Access Token (PAT) for developer automation, CLI tools, and API scripting.
+    Bound to a specific user (and optionally scoped to a Project for runtime users).
+    """
+
+    class Environment(models.TextChoices):
+        TEST = "test", "Test"
+        LIVE = "live", "Live"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="personal_access_tokens",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="personal_access_tokens",
+    )
+    name = models.CharField(max_length=120)
+    environment = models.CharField(
+        max_length=10,
+        choices=Environment.choices,
+        default=Environment.LIVE,
+    )
+    prefix = models.CharField(max_length=32, db_index=True)
+    hashed_token = models.CharField(max_length=64, db_index=True)
+    scopes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    revoked_reason = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        db_table = "auth_personal_access_tokens"
+        ordering = ["-created_at"]
+
+    @property
+    def is_active(self) -> bool:
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return False
+        return True
+
+    def get(self, key: str, default=None):
+        """Duck-type dict access for JWT-like token payload inspection."""
+        if key == "project_id":
+            return str(self.project_id) if self.project_id else default
+        if key == "user_id":
+            return str(self.user_id) if self.user_id else default
+        if key == "scopes":
+            return self.scopes
+        return default
+
+    def __getitem__(self, key: str):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def has_scope(self, scope: str) -> bool:
+        if not self.scopes:
+            return True
+        if "*" in self.scopes or "admin" in self.scopes:
+            return True
+        return scope in self.scopes
+
+    def has_any_scope(self, *scopes: str) -> bool:
+        if not self.scopes or not scopes:
+            return True
+        if "*" in self.scopes or "admin" in self.scopes:
+            return True
+        return any(s in self.scopes for s in scopes)
+
+    @classmethod
+    def generate_token(cls, environment: str = "live") -> tuple[str, str, str]:
+        """
+        Generate a cryptographically secure PAT.
+        Token format: hvt_pat_<environment>_<64-hex>
+        Returns: (prefix, raw_token, sha256_hash)
+        """
+        import secrets
+        import hashlib
+
+        env = environment.lower() if environment in ("test", "live") else "live"
+        random_hex = secrets.token_hex(32)  # 64 hex chars
+        raw_token = f"hvt_pat_{env}_{random_hex}"
+        prefix = f"hvt_pat_{env}_{random_hex[:8]}"
+        hashed_token = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        return prefix, raw_token, hashed_token
+
+    def update_last_used(self) -> None:
+        """Update last_used_at timestamp with throttling."""
+        from django.core.cache import cache
+        throttle_key = f"pat:touch:{str(self.id)}"
+        try:
+            if cache.get(throttle_key):
+                return
+            cache.set(throttle_key, True, timeout=60)
+        except Exception:
+            pass
+
+        now = timezone.now()
+        PersonalAccessToken.objects.filter(id=self.id).update(last_used_at=now)
+
+    def __str__(self):
+        status_str = "revoked" if self.revoked_at else ("expired" if not self.is_active else "active")
+        return f"PAT {self.prefix}... ({status_str}) for {self.user.email}"

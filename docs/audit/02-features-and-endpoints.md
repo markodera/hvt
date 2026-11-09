@@ -41,6 +41,13 @@ The following comprehensive table inventories the primary endpoint families acro
 | `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `GET` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/pats/<uuid:pk>/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `GET` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/runtime/pats/<uuid:pk>/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |

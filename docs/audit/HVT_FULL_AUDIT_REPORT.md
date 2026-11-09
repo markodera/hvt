@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `7ee3bda12242e80f6f498436ce42e29068cbf9c2`  
-> **Last Synchronized:** `2026-11-09 06:45:30 UTC`  
+> **Latest Commit:** `1b090b09e87f1d3d3f04ca5d1a6cbf305f7b6943`  
+> **Last Synchronized:** `2026-11-09 10:07:50 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 20,462 words (174,264 characters)  
+> **Total Volume:** 20,827 words (177,937 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
 | 01 | 00 Summary | 1,919 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 3,108 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,954 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
-| 04 | 03 Tokens Sessions Passkeys | 3,139 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 02 | 01 Architecture And Data | 3,213 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 3,059 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 3,285 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,989 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
-| 08 | 07 Roadmap Readiness | 1,311 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
+| 08 | 07 Roadmap Readiness | 1,320 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **20,462 words** | |
+| | **TOTAL** | **20,827 words** | |
 
 ---
 
@@ -264,6 +264,9 @@ HVT declares 20 models across its three internal domain applications.
 ##### 20. `UserSession` (`db_table = "auth_user_sessions"`) [VERIFIED `hvt/apps/authentication/models.py:387-424`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="sessions")`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True, blank=True, related_name="sessions")`), `ip_address` (GenericIPAddressField, null=True), `user_agent` (TextField), `device_name` (CharField 255), `created_at` (DateTimeField, auto_now_add=True), `last_active_at` (DateTimeField, default=timezone.now, indexed), `revoked_at` (DateTimeField, null=True, indexed), `revoked_reason` (CharField 64).
 * **Mechanics:** Corresponds directly to the `sid` claim stamped into JWT access and refresh tokens. Real-time Redis / cache lookups with resilient PostgreSQL database fallback [VERIFIED `hvt/apps/authentication/sessions.py:25-291`, `hvt/apps/authentication/migrations/0016_usersession.py:1-43`].
+##### 21. `PersonalAccessToken` (`db_table = "auth_personal_access_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:433-540`, `hvt/apps/authentication/migrations/0017_personalaccesstoken.py:1-45`]
+* **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="personal_access_tokens")`), `project` (`ForeignKey("organizations.Project", on_delete=CASCADE, null=True, blank=True, related_name="personal_access_tokens")`), `name` (CharField 120), `environment` (CharField 10, choices: `test`, `live`), `prefix` (CharField 32, indexed), `hashed_token` (CharField 64, indexed), `scopes` (JSONField default=list), `created_at` (DateTimeField auto_now_add=True), `expires_at` (DateTimeField null=True, indexed), `last_used_at` (DateTimeField null=True), `revoked_at` (DateTimeField null=True, indexed), `revoked_reason` (CharField 64).
+* **Mechanics:** Raw token string formatted as `hvt_pat_<env>_<64-hex>`. Plaintext secret is shown once upon creation and hashed via SHA-256 before storage. Authenticated via `PersonalAccessTokenAuthentication` with Bearer, Token, or X-PAT headers. Duck-types JWT claims dictionary via `.get()` and `__getitem__` for runtime permission checking [VERIFIED `tests/test_personal_access_tokens.py:1-285`].
 ---
 
 ### 3. Multi-Tenancy Isolation & Queryset Scoping Analysis
@@ -433,6 +436,13 @@ The following comprehensive table inventories the primary endpoint families acro
 | `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `GET` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/pats/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/pats/<uuid:pk>/` | Control | JWT/Cookie/PAT | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_personal_access_tokens` |
+| `GET` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `POST` | `/api/v1/auth/runtime/pats/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+| `DELETE` | `/api/v1/auth/runtime/pats/<uuid:pk>/` | Runtime | JWT/Cookie/PAT | `IsAuthenticated` | None | Default | `tests.test_personal_access_tokens` |
+
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
@@ -781,6 +791,23 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 5. **Passwordless Magic Links: Token Consumption Atomicity [VERIFIED `hvt/apps/authentication/magic_link_views.py:125-140, 250-275`]:**
    * Tokens are 32-byte cryptographically random URL-safe strings hashed via SHA-256 before storage in `MagicLinkToken`.
    * Verification and consumption in `MagicLinkVerifyView` (control plane) and `RuntimeMagicLinkVerifyView` (runtime plane) are executed within `transaction.atomic()` using `MagicLinkToken.objects.select_for_update()`, guaranteeing atomic single-use redemption and preventing concurrent double-spend race conditions.
+
+---
+
+### 6. Personal Access Tokens (PATs) Mechanics [VERIFIED `hvt/apps/authentication/models.py:433-540`, `hvt/apps/authentication/backends.py:230-291`]
+
+1. **Format & Prefixing:**
+   * Token format: `hvt_pat_<environment>_<64-hex>` (e.g. `hvt_pat_live_0123...`).
+   * Prefix: First 8 hex characters: `hvt_pat_<environment>_<8-hex>`.
+   * Stored at rest as a SHA-256 cryptographic hash (`hashed_token`); raw token is returned once upon issuance and never stored in the database.
+2. **Authentication Flow (`PersonalAccessTokenAuthentication`):**
+   * Registered in DRF `DEFAULT_AUTHENTICATION_CLASSES` ahead of JWT authentication.
+   * Extracts credentials from `Authorization: Bearer hvt_pat_...`, `Authorization: Token hvt_pat_...`, or `X-PAT: hvt_pat_...`.
+   * Non-PAT tokens cleanly return `None`, passing evaluation to SimpleJWT without interference.
+   * Enforces token expiration, revocation timestamp (`revoked_at`), user active status, and optional project active status.
+   * Throttled `last_used_at` touch timestamp (cached in Redis / LocMem for 60 seconds).
+   * Supports fine-grained scopes (`scopes = ["projects:read", ...]`, with `*` or `admin` wildcard support).
+   * Duck-types dictionary access (`.get("project_id")`, `["project_id"]`) allowing seamless interop with runtime user permission checks (`IsRuntimeUser`).
 
 ---
 
@@ -1519,7 +1546,7 @@ We analyzed HVT's current codebase to determine the reusable foundation, necessa
 | **5. Bring-Your-Own Email (COMPLETED - Step 6)** | Pluggable `EmailProvider` interface (`Resend`, `SMTP`, `Postmark`, `SES`, `Console`), per-project `ProjectEmailConfig` with MultiFernet encryption, test-send API, async dispatch. | Deployed in Step 6. | Zero timeout risk via background Outbox queuing. | **DONE** |
 | **6. Webhook Hardening & Async Delivery (COMPLETED - Step 6)** | Transactional Outbox engine (`OutboxTask`), HMAC-SHA256 request signatures (`X-HVT-Signature`), automated exponential backoff retries, auto-disable on 10 failures, `run_worker` management command. | Deployed in Step 6. | Zero container overhead via Postgres/Django outbox queue. | **DONE** |
 | **7. End-User Workspaces & Roles** | `Role`, `Permission`, `ProjectInvitation` models, tenant isolation logic. | Create `Workspace` model inside `Project`; build `WorkspaceMembership` and `WorkspaceRole`; update runtime JWTs to encode active workspace ID; add workspace switching endpoints. | High schema complexity; breaking changes to runtime token format; migration of existing single-tenant projects. | **L** |
-| **8. Personal Access Tokens (PATs)** | `APIKey` hashing, verification logic, and prefix parsing. | Create `PersonalAccessToken` model bound to runtime users; build token generation and revocation views; add scope validation middleware. | End-user token leakage; requires fine-grained permission evaluation. | **S** |
+| **8. Personal Access Tokens (PATs) (COMPLETED)** | `APIKey` hashing and prefix parsing; `PersonalAccessToken` model (`auth_personal_access_tokens`), SHA-256 storage, `PersonalAccessTokenAuthentication` backend supporting Bearer/Token/X-PAT, control-plane and runtime endpoints (`/api/v1/auth/pats/`, `/api/v1/auth/runtime/pats/`). | Deployed in Step 8. | Zero regressions across all 496 tests. Raw secrets shown once upon creation and never persisted. | **DONE** |
 | **9. Agent Tokens (AI Agents)** | `APIKey` infrastructure, granular permission scoping. | Create `AgentToken` model with strict TTLs, maximum action budgets, parent user binding, and audit trail annotations. | Rogue AI agents exhausting customer API budgets. | **S / M** |
 | **10. Custom Branded Domains** | Runtime CORS origin resolution, WebAuthn RP ID resolution. | Add `CustomDomain` model; automate TLS certificate generation via Caddy or Cloudflare for Platforms; implement host header routing middleware. | DNS verification delays; SSL certificate renewal failures; WebAuthn domain-binding restrictions. | **L** |
 | **11. Enterprise SSO & SCIM** | `CustomSocialAccountAdapter`, OAuth flow integration. | Integrate SAML 2.0 service provider (e.g. `pysaml2`); implement SCIM 2.0 endpoints (`/scim/v2/Users`, `/scim/v2/Groups`); add tenant SSO configuration models. | SAML XML signature vulnerabilities; IdP directory sync conflicts. | **L** |

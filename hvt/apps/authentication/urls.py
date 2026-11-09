@@ -8,6 +8,7 @@ from . import passkey_views
 from . import magic_link_views
 from . import jwks_views
 from . import session_views
+from . import pat_views
 
 
 urlpatterns = [
@@ -53,6 +54,14 @@ urlpatterns = [
     path("runtime/sessions/", session_views.RuntimeSessionListView.as_view(), name="runtime_session_list"),
     path("runtime/sessions/<uuid:pk>/", session_views.RuntimeSessionRevokeView.as_view(), name="runtime_session_revoke"),
     path("runtime/sessions/revoke-all/", session_views.RuntimeSessionRevokeAllView.as_view(), name="runtime_session_revoke_all"),
+
+    # Personal Access Tokens (PATs) - Control Plane
+    path("pats/", pat_views.ControlPlanePATListCreateView.as_view(), name="pat_list_create"),
+    path("pats/<uuid:pk>/", pat_views.ControlPlanePATRevokeView.as_view(), name="pat_revoke"),
+
+    # Personal Access Tokens (PATs) - Runtime Plane
+    path("runtime/pats/", pat_views.RuntimePATListCreateView.as_view(), name="runtime_pat_list_create"),
+    path("runtime/pats/<uuid:pk>/", pat_views.RuntimePATRevokeView.as_view(), name="runtime_pat_revoke"),
 
     # dj-rest-auth endpoints (explicit to avoid schema collisions)
     path("runtime/register/", views.HVTRuntimeRegisterView.as_view(), name="runtime_register"),
