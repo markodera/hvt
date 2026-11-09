@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `dd075e8357bd250f7ed82400dceb92caec80029f`  
-> **Last Synchronized:** `2026-11-08 09:01:26 UTC`  
+> **Latest Commit:** `0c82f777e74bc562a2e60edd38b6d03473b60ead`  
+> **Last Synchronized:** `2026-11-09 05:50:04 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 19,716 words (166,808 characters)  
+> **Total Volume:** 20,106 words (170,893 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
 | 01 | 00 Summary | 1,919 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 3,035 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 2,849 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
-| 04 | 03 Tokens Sessions Passkeys | 2,925 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
+| 02 | 01 Architecture And Data | 3,108 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 2,954 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 04 | 03 Tokens Sessions Passkeys | 3,139 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 1,633 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
-| 08 | 07 Roadmap Readiness | 1,313 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
+| 08 | 07 Roadmap Readiness | 1,311 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **19,716 words** | |
+| | **TOTAL** | **20,106 words** | |
 
 ---
 
@@ -260,6 +260,10 @@ HVT declares 20 models across its three internal domain applications.
 
 ##### 19. `MagicLinkToken` (`db_table = "auth_magic_link_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:315-348`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE)`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True)`), `token_hash` (CharField 64, SHA-256 hash, indexed), `expires_at`, `is_used` (BooleanField, default=False), `created_at`.
+
+##### 20. `UserSession` (`db_table = "auth_user_sessions"`) [VERIFIED `hvt/apps/authentication/models.py:387-424`]
+* **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="sessions")`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True, blank=True, related_name="sessions")`), `ip_address` (GenericIPAddressField, null=True), `user_agent` (TextField), `device_name` (CharField 255), `created_at` (DateTimeField, auto_now_add=True), `last_active_at` (DateTimeField, default=timezone.now, indexed), `revoked_at` (DateTimeField, null=True, indexed), `revoked_reason` (CharField 64).
+* **Mechanics:** Corresponds directly to the `sid` claim stamped into JWT access and refresh tokens. Real-time Redis / cache lookups with resilient PostgreSQL database fallback [VERIFIED `hvt/apps/authentication/sessions.py:25-291`, `hvt/apps/authentication/migrations/0016_usersession.py:1-43`].
 ---
 
 ### 3. Multi-Tenancy Isolation & Queryset Scoping Analysis
@@ -426,6 +430,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/login/` | Control | Session/JWT | `AllowAny` | None | `auth_login_ip`, `auth_login_email` | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/logout/` | Control | JWT/Cookie | `IsAuthenticated` | None | Default | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/token/refresh/` | Control | JWT/Cookie | `AllowAny` | None | `auth_token_refresh` | `hvt.apps.authentication.test_passkeys_and_tokens` |
+| `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
@@ -448,6 +455,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/runtime/register/resend-email/` | Runtime | Runtime API Key | `AllowAny` | `auth:runtime` | `auth_runtime_resend_verification_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/login/` | Runtime | Runtime API Key | `IsRuntimeLoginAllowed` | `auth:runtime` | `auth_runtime_login_api_key` | `test_plane_separation_and_auth` |
 | `GET` | `/api/v1/auth/runtime/me/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_plane_separation_and_auth` |
+| `GET` | `/api/v1/auth/runtime/sessions/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/runtime/sessions/<uuid:pk>/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/runtime/sessions/revoke-all/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/runtime/password/reset/` | Runtime | Runtime API Key | `IsRuntimePasswordResetAllowed` | `auth:runtime` | `auth_runtime_password_reset_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/password/reset/confirm/<uid>/<token>/` | Runtime | Runtime API Key | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/passkey/register/options/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_passkeys_and_magic_links` |
@@ -687,7 +697,7 @@ When a user logs in successfully via `/api/v1/auth/login/` or `/api/v1/auth/runt
 * **Rotation & Blacklisting:**
   * `ROTATE_REFRESH_TOKENS = True` [VERIFIED `hvt/settings.py:437`]. Every call to `/token/refresh/` invalidates the old refresh token and issues a new one.
   * `BLACKLIST_AFTER_ROTATION = True` [VERIFIED `hvt/settings.py:438`]. Old refresh tokens are added to `token_blacklist_blacklistedtoken`.
-  * **Stateless Access Token Caveat:** Access tokens are strictly stateless and cannot be revoked before their 15-minute expiration instant. There is no active session table or Redis revocation list checked during access token verification.
+  * **Stateful Session Revocation Check (COMPLETED - Step 7):** Access tokens and refresh tokens embed a unique Session ID (`sid` claim). Authenticated requests perform sub-millisecond session validation in `_OrgClaimVerificationMixin.authenticate` and `HVTTokenRefreshSerializer.validate` using a dual-layer Redis/Django cache registry (`session:active:<sid>`, `session:revoked:<sid>`) backed by persistent PostgreSQL `auth_user_sessions` fallback [VERIFIED `hvt/apps/authentication/sessions.py:143-196`, `hvt/apps/authentication/tokens.py:130-142, 230-242`, `tests/test_session_revocation.py:105-155`]. Revoking a session immediately cuts off existing access tokens on their next request without waiting for the 15-minute expiration window.
 
 #### Decoded Real Login Token (Live Server Capture)
 
@@ -965,6 +975,22 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 2. **Standard OIDC Claims & Cross-Project Isolation (RESOLVED in Step 4):** Tokens now stamp standard iss, ud, sub, jti, and iat claims, and enforce tenant project matching to eliminate cross-project token replay [VERIFIED hvt/apps/authentication/tokens.py:20-38, 192-218].
 3. **Multi-Domain Passkey Origin Blindspot (RESOLVED in Step 5):** Previously, while Project included an llowed_origins field specifically for CORS on multiple customer domains, the WebAuthn passkey origin resolver completely ignored it, creating an unexpected failure for multi-domain applications. Resolved in Step 5 by updating _resolve_rp_id and _resolve_expected_origin to validate WebAuthn credentials against all domains registered in project.allowed_origins and project.frontend_url [VERIFIED hvt/apps/authentication/passkey_views.py:43-118, 	ests/test_passkey_origins.py].
 
+
+---
+
+### 5. Session Registry, Device Management & Remote Revocation (COMPLETED - Step 7)
+
+* **Session Model:** `UserSession` (`auth_user_sessions`) records user, project, client IP, raw user agent, parsed human-friendly device name (e.g. `Chrome on macOS`, `Mobile App (Android)`), creation timestamp, and throttled `last_active_at` [VERIFIED `hvt/apps/authentication/models.py:387-424`].
+* **Dual-Layer Invalidation:**
+  1. **Hot Path (Cache):** Explicitly checks `session:revoked:<sid>` (fast reject) and `session:active:<sid>` (fast accept) in Redis/cache with 7-day TTL matching refresh token lifespan.
+  2. **Cold Fallback (PostgreSQL):** On Redis cache miss or restart, validates `UserSession.objects.filter(id=sid, revoked_at__isnull=True)` and warms active cache back up.
+* **Token Claims Stamping:**
+  * Access & refresh tokens carry `"sid": "<session-uuid>"` [VERIFIED `hvt/apps/authentication/tokens.py:39-44`].
+  * SimpleJWT refreshSerializer revalidates the session before issuing fresh tokens and restamps the same `sid` [VERIFIED `hvt/apps/authentication/tokens.py:132-140`].
+* **Endpoints:**
+  * `GET /api/v1/auth/sessions/` / `GET /api/v1/auth/runtime/sessions/`: List connected devices with `is_current` computation comparing request token's `sid` with record ID [VERIFIED `hvt/apps/authentication/session_views.py:21-61`].
+  * `DELETE /api/v1/auth/sessions/<uuid:pk>/` / `DELETE /api/v1/auth/runtime/sessions/<uuid:pk>/`: Instantly revokes a targeted session across cache and database, emitting `AuditLog.EventType.SESSION_REVOKED`.
+  * `POST /api/v1/auth/sessions/revoke-all/` / `POST /api/v1/auth/runtime/sessions/revoke-all/`: Global remote logout revoking all sessions except the requesting `current_sid`, emitting `AuditLog.EventType.SESSION_REVOKED_ALL`.
 
 ---
 
@@ -1346,7 +1372,7 @@ Prior to the onboarding pass, taking a new developer from initial sign-up to the
 | **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 177 | 177 Pass / 0 Fail | 21.7s | [RAN `manage.py test tests` -> 177 pass] |
 | **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **494** | **494 Pass / 0 Fail** | **~72s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (480 tests) + `npm test` (14 tests)] |
+| **TOTAL** | | **503** | **503 Pass / 0 Fail** | **~70s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (489 tests) + `npm test` (14 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -1450,7 +1476,7 @@ We analyzed HVT's current codebase to determine the reusable foundation, necessa
 | **1. Token Groundwork & JWKS (COMPLETED - Step 4)** | Asymmetric RS256 tokens, deterministic Key ID, public JWKS (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), cross-project isolation, offline verifier helper (`hvt.jwt_verify`). | Deployed in Step 4. | Backward compatibility maintained via automatic fallback decode. | **DONE** |
 | **2. Copy AI Setup Prompt** | `llms.txt`, OpenAPI 3.0 schema generation (`drf-spectacular`), CLI configuration commands. | Add CLI command (`hvt ai setup-prompt`) or API endpoint that formats dynamic system prompts with active project ID, keys, and schema specs. | Minimal technical risk. | **S** |
 | **3. Rate Limiting & Bot Defense** | DRF throttle framework (`throttles.py`), `BurstRateThrottle`, IP/email throttles. | Enforce production Redis (`USE_REDIS_CACHE=True`); integrate Cloudflare Turnstile or reCAPTCHA v3 challenge endpoints on registration/login; implement token bucket. | False positives blocking legitimate corporate NAT/VPN users. | **M** |
-| **4. Session Management & Revocation** | SimpleJWT token blacklist (`OutstandingToken`, `BlacklistedToken`), cookie handling. | Add unique Session ID (`sid`) to access/refresh JWTs; build Redis active session registry (`user:{id}:sessions`); add list/revoke endpoints; add sub-millisecond `sid` cache check to auth middleware. | Redis dependency in hot authentication path; cache failure fallback strategy. | **M** |
+| **4. Session Management & Revocation (COMPLETED - Step 7)** | `UserSession` model, dual-layer Redis cache + DB session engine (`sessions.py`), `sid` claim in JWT access/refresh tokens, list/single/bulk revocation endpoints. | Deployed in Step 7. | Zero regressions across all 489 tests. Sub-millisecond cache checks with resilient Postgres fallback. | **DONE** |
 | **5. Bring-Your-Own Email (COMPLETED - Step 6)** | Pluggable `EmailProvider` interface (`Resend`, `SMTP`, `Postmark`, `SES`, `Console`), per-project `ProjectEmailConfig` with MultiFernet encryption, test-send API, async dispatch. | Deployed in Step 6. | Zero timeout risk via background Outbox queuing. | **DONE** |
 | **6. Webhook Hardening & Async Delivery (COMPLETED - Step 6)** | Transactional Outbox engine (`OutboxTask`), HMAC-SHA256 request signatures (`X-HVT-Signature`), automated exponential backoff retries, auto-disable on 10 failures, `run_worker` management command. | Deployed in Step 6. | Zero container overhead via Postgres/Django outbox queue. | **DONE** |
 | **7. End-User Workspaces & Roles** | `Role`, `Permission`, `ProjectInvitation` models, tenant isolation logic. | Create `Workspace` model inside `Project`; build `WorkspaceMembership` and `WorkspaceRole`; update runtime JWTs to encode active workspace ID; add workspace switching endpoints. | High schema complexity; breaking changes to runtime token format; migration of existing single-tenant projects. | **L** |
@@ -1651,7 +1677,7 @@ flowchart TD
 | **Step 4** | **Token Groundwork & JWKS** | Requires replacing SimpleJWT symmetric HS256 with asymmetric RS256/EdDSA signing, deploying public JWKS view, and writing verification helpers in `hvt-sdk`. | **High** (~2 weeks) | **Medium** (Key rotation ceremony complexity) |
 | **Step 5** | **Per-Project Passkey Origins** | Currently `rp_id` derives from HTTP `request.get_host()`. Needs project-level domain configuration and origin matching in `passkey_views.py`. | **High** (~1 week) | **Low** |
 | **Step 6** | **Worker Choice, Webhooks & BYO Email** | Currently blocked by absence of async task infrastructure. Requires selecting and implementing worker engine (Database Outbox vs Celery) before webhooks can retry asynchronously. | **Medium** (~2-3 weeks) | **Medium** (Operational complexity on \$5 VPS) |
-| **Step 7** | **Session Revocation** | SimpleJWT blacklist exists. Requires stamping `sid` into tokens, writing Redis active session registry, and adding revocation endpoints. | **High** (~1-2 weeks) | **Low** |
+| **Step 7** | **Session Revocation (COMPLETED)** | Shipped `UserSession` model, dual-layer Redis/cache engine with DB fallback, `sid` JWT stamping, device listing, and single/bulk revocation endpoints. | **DONE** | **Low** |
 | **Step 8** | **Workspaces (B2B Multi-Tenancy)** | Fundamental data model addition: `Workspace` and `WorkspaceMembership` models (strictly partitioned via `workspace_id` to separate customer multi-tenancy from developer `Organization`), per-workspace roles, and queryset isolation guards. | **High** (~4-6 weeks) | **High** (Schema migration & queryset isolation) |
 | **Step 9** | **Enterprise Identity & Agent Tokens** | High complexity: SAML 2.0 service provider integration, SCIM 2.0 endpoints, and Model Context Protocol (MCP 2025-06-18 standard) authorization via OAuth 2.1 with PKCE, RFC 9728, and RFC 8707. | **High** (~6-10 weeks) | **High** (External protocol compliance) |
 

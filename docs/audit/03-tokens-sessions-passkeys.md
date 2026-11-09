@@ -76,7 +76,7 @@ When a user logs in successfully via `/api/v1/auth/login/` or `/api/v1/auth/runt
 * **Rotation & Blacklisting:**
   * `ROTATE_REFRESH_TOKENS = True` [VERIFIED `hvt/settings.py:437`]. Every call to `/token/refresh/` invalidates the old refresh token and issues a new one.
   * `BLACKLIST_AFTER_ROTATION = True` [VERIFIED `hvt/settings.py:438`]. Old refresh tokens are added to `token_blacklist_blacklistedtoken`.
-  * **Stateless Access Token Caveat:** Access tokens are strictly stateless and cannot be revoked before their 15-minute expiration instant. There is no active session table or Redis revocation list checked during access token verification.
+  * **Stateful Session Revocation Check (COMPLETED - Step 7):** Access tokens and refresh tokens embed a unique Session ID (`sid` claim). Authenticated requests perform sub-millisecond session validation in `_OrgClaimVerificationMixin.authenticate` and `HVTTokenRefreshSerializer.validate` using a dual-layer Redis/Django cache registry (`session:active:<sid>`, `session:revoked:<sid>`) backed by persistent PostgreSQL `auth_user_sessions` fallback [VERIFIED `hvt/apps/authentication/sessions.py:143-196`, `hvt/apps/authentication/tokens.py:130-142, 230-242`, `tests/test_session_revocation.py:105-155`]. Revoking a session immediately cuts off existing access tokens on their next request without waiting for the 15-minute expiration window.
 
 #### Decoded Real Login Token (Live Server Capture)
 
@@ -353,3 +353,20 @@ WebAuthn binds biometric credentials to an `rp_id` (domain) and `expected_origin
 1. **Asymmetric Signing & JWKS (RESOLVED in Step 4):** Replaced legacy symmetric HS256 signing with asymmetric RS256 signing, public JWKS endpoint (/.well-known/jwks.json), OIDC discovery (/.well-known/openid-configuration), Key ID stamping, and offline verification helpers [VERIFIED hvt/apps/authentication/jwt_backend.py:23-150].
 2. **Standard OIDC Claims & Cross-Project Isolation (RESOLVED in Step 4):** Tokens now stamp standard iss, ud, sub, jti, and iat claims, and enforce tenant project matching to eliminate cross-project token replay [VERIFIED hvt/apps/authentication/tokens.py:20-38, 192-218].
 3. **Multi-Domain Passkey Origin Blindspot (RESOLVED in Step 5):** Previously, while Project included an llowed_origins field specifically for CORS on multiple customer domains, the WebAuthn passkey origin resolver completely ignored it, creating an unexpected failure for multi-domain applications. Resolved in Step 5 by updating _resolve_rp_id and _resolve_expected_origin to validate WebAuthn credentials against all domains registered in project.allowed_origins and project.frontend_url [VERIFIED hvt/apps/authentication/passkey_views.py:43-118, 	ests/test_passkey_origins.py].
+
+
+---
+
+### 5. Session Registry, Device Management & Remote Revocation (COMPLETED - Step 7)
+
+* **Session Model:** `UserSession` (`auth_user_sessions`) records user, project, client IP, raw user agent, parsed human-friendly device name (e.g. `Chrome on macOS`, `Mobile App (Android)`), creation timestamp, and throttled `last_active_at` [VERIFIED `hvt/apps/authentication/models.py:387-424`].
+* **Dual-Layer Invalidation:**
+  1. **Hot Path (Cache):** Explicitly checks `session:revoked:<sid>` (fast reject) and `session:active:<sid>` (fast accept) in Redis/cache with 7-day TTL matching refresh token lifespan.
+  2. **Cold Fallback (PostgreSQL):** On Redis cache miss or restart, validates `UserSession.objects.filter(id=sid, revoked_at__isnull=True)` and warms active cache back up.
+* **Token Claims Stamping:**
+  * Access & refresh tokens carry `"sid": "<session-uuid>"` [VERIFIED `hvt/apps/authentication/tokens.py:39-44`].
+  * SimpleJWT refreshSerializer revalidates the session before issuing fresh tokens and restamps the same `sid` [VERIFIED `hvt/apps/authentication/tokens.py:132-140`].
+* **Endpoints:**
+  * `GET /api/v1/auth/sessions/` / `GET /api/v1/auth/runtime/sessions/`: List connected devices with `is_current` computation comparing request token's `sid` with record ID [VERIFIED `hvt/apps/authentication/session_views.py:21-61`].
+  * `DELETE /api/v1/auth/sessions/<uuid:pk>/` / `DELETE /api/v1/auth/runtime/sessions/<uuid:pk>/`: Instantly revokes a targeted session across cache and database, emitting `AuditLog.EventType.SESSION_REVOKED`.
+  * `POST /api/v1/auth/sessions/revoke-all/` / `POST /api/v1/auth/runtime/sessions/revoke-all/`: Global remote logout revoking all sessions except the requesting `current_sid`, emitting `AuditLog.EventType.SESSION_REVOKED_ALL`.

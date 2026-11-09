@@ -365,7 +365,7 @@ class PasskeyAuthVerifyView(views.APIView):
             cred_record.save(update_fields=["sign_count", "last_used_at"])
 
             user = cred_record.user
-            access_token, refresh_token = build_hvt_token_pair(user)
+            access_token, refresh_token = build_hvt_token_pair(user, request=request)
 
             AuditLog.log(
                 event_type=AuditLog.EventType.PASSKEY_LOGIN,
@@ -678,7 +678,7 @@ class RuntimePasskeyAuthVerifyView(views.APIView):
             cred_record.save(update_fields=["sign_count", "last_used_at"])
 
             user = cred_record.user
-            access_token, refresh_token = build_hvt_token_pair(user, project=project)
+            access_token, refresh_token = build_hvt_token_pair(user, project=project, request=request)
 
             AuditLog.log(
                 event_type=AuditLog.EventType.PASSKEY_LOGIN,

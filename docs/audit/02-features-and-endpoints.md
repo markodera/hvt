@@ -38,6 +38,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/login/` | Control | Session/JWT | `AllowAny` | None | `auth_login_ip`, `auth_login_email` | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/logout/` | Control | JWT/Cookie | `IsAuthenticated` | None | Default | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/token/refresh/` | Control | JWT/Cookie | `AllowAny` | None | `auth_token_refresh` | `hvt.apps.authentication.test_passkeys_and_tokens` |
+| `GET` | `/api/v1/auth/sessions/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/sessions/<uuid:pk>/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/sessions/revoke-all/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `tests.test_session_revocation` |
 | `GET, PUT, PATCH` | `/api/v1/auth/me/` | Control | JWT/Cookie | `IsAuthenticated`, `IsPlatformUser` | None | Default | `test_plane_separation_and_auth` |
 | `POST` | `/api/v1/auth/password/reset/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_ip/email` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/password/reset/confirm/<uid>/<token>/` | Control | Session/JWT | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
@@ -60,6 +63,9 @@ The following comprehensive table inventories the primary endpoint families acro
 | `POST` | `/api/v1/auth/runtime/register/resend-email/` | Runtime | Runtime API Key | `AllowAny` | `auth:runtime` | `auth_runtime_resend_verification_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/login/` | Runtime | Runtime API Key | `IsRuntimeLoginAllowed` | `auth:runtime` | `auth_runtime_login_api_key` | `test_plane_separation_and_auth` |
 | `GET` | `/api/v1/auth/runtime/me/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_plane_separation_and_auth` |
+| `GET` | `/api/v1/auth/runtime/sessions/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `DELETE` | `/api/v1/auth/runtime/sessions/<uuid:pk>/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
+| `POST` | `/api/v1/auth/runtime/sessions/revoke-all/` | Runtime | JWT/Cookie | `IsAuthenticated` | None | Default | `tests.test_session_revocation` |
 | `POST` | `/api/v1/auth/runtime/password/reset/` | Runtime | Runtime API Key | `IsRuntimePasswordResetAllowed` | `auth:runtime` | `auth_runtime_password_reset_api_key` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/password/reset/confirm/<uid>/<token>/` | Runtime | Runtime API Key | `AllowAny` | None | `auth_password_reset_confirm_ip` | `hvt.apps.authentication.tests` |
 | `POST` | `/api/v1/auth/runtime/passkey/register/options/` | Runtime | JWT/Cookie | `IsAuthenticated`, `IsRuntimeUser` | None | Default | `test_passkeys_and_magic_links` |

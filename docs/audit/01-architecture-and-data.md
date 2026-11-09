@@ -147,6 +147,10 @@ HVT declares 20 models across its three internal domain applications.
 
 ##### 19. `MagicLinkToken` (`db_table = "auth_magic_link_tokens"`) [VERIFIED `hvt/apps/authentication/models.py:315-348`]
 * **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE)`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True)`), `token_hash` (CharField 64, SHA-256 hash, indexed), `expires_at`, `is_used` (BooleanField, default=False), `created_at`.
+
+##### 20. `UserSession` (`db_table = "auth_user_sessions"`) [VERIFIED `hvt/apps/authentication/models.py:387-424`]
+* **Fields:** `id` (UUID PK), `user` (`ForeignKey("users.User", on_delete=CASCADE, related_name="sessions")`), `project` (`ForeignKey(Project, on_delete=CASCADE, null=True, blank=True, related_name="sessions")`), `ip_address` (GenericIPAddressField, null=True), `user_agent` (TextField), `device_name` (CharField 255), `created_at` (DateTimeField, auto_now_add=True), `last_active_at` (DateTimeField, default=timezone.now, indexed), `revoked_at` (DateTimeField, null=True, indexed), `revoked_reason` (CharField 64).
+* **Mechanics:** Corresponds directly to the `sid` claim stamped into JWT access and refresh tokens. Real-time Redis / cache lookups with resilient PostgreSQL database fallback [VERIFIED `hvt/apps/authentication/sessions.py:25-291`, `hvt/apps/authentication/migrations/0016_usersession.py:1-43`].
 ---
 
 ### 3. Multi-Tenancy Isolation & Queryset Scoping Analysis

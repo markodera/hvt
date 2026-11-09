@@ -2014,6 +2014,7 @@ class RuntimeInvitationAcceptView(APIView):
         access_token, refresh_token = build_hvt_token_pair(
             user,
             project=invitation.project,
+            request=request,
         )
         access_value = str(access_token)
         refresh_value = str(refresh_token)

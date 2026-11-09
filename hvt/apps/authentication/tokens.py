@@ -16,7 +16,7 @@ from hvt.apps.authentication.identity import is_project_scoped_user
 logger = logging.getLogger(__name__)
 
 
-def _stamp_org_claims(token, user, project=None) -> None:
+def _stamp_org_claims(token, user, project=None, sid=None) -> None:
     """Embed HVT-specific claims into a SimpleJWT token."""
     from hvt.apps.organizations.access import (
         get_user_project_permission_slugs,
@@ -39,6 +39,8 @@ def _stamp_org_claims(token, user, project=None) -> None:
     token["app_permissions"] = (
         get_user_project_permission_slugs(user, project) if project else []
     )
+    if sid:
+        token["sid"] = str(sid)
 
 
 def _validate_refresh_context(refresh_token: RefreshToken):
@@ -97,9 +99,16 @@ def _validate_refresh_context(refresh_token: RefreshToken):
     return user, project
 
 
-def build_hvt_token_pair(user, project=None):
-    """Issue an HVT token pair with optional project context."""
-    refresh = HVTTokenObtainPairSerializer.get_token(user, project=project)
+def build_hvt_token_pair(user, project=None, request=None, sid=None):
+    """Issue an HVT token pair with optional project context and session tracking."""
+    if not sid:
+        from hvt.apps.authentication.sessions import create_user_session
+        session = create_user_session(user, request=request, project=project)
+        sid = str(session.id)
+
+    refresh = HVTTokenObtainPairSerializer.get_token(user, project=project, sid=sid)
+    # Stamp sid on access token as well
+    _stamp_org_claims(refresh.access_token, user, project=project, sid=sid)
     return refresh.access_token, refresh
 
 
@@ -107,10 +116,26 @@ class HVTTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Token pair serializer that stamps org context into both tokens."""
 
     @classmethod
-    def get_token(cls, user, project=None) -> RefreshToken:
+    def get_token(cls, user, project=None, sid=None) -> RefreshToken:
+        if not sid:
+            from hvt.apps.authentication.sessions import create_user_session
+            session = create_user_session(user, project=project)
+            sid = str(session.id)
         token = super().get_token(user)
-        _stamp_org_claims(token, user, project=project)
+        _stamp_org_claims(token, user, project=project, sid=sid)
         return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        access = AccessToken(data["access"])
+        refresh = RefreshToken(data["refresh"])
+        sid = refresh.get("sid")
+        request = self.context.get("request")
+        project = getattr(request, "auth", None)
+        project = getattr(project, "project", None) if project else None
+        _stamp_org_claims(access, self.user, project=project, sid=sid)
+        data["access"] = str(access)
+        return data
 
 
 class HVTTokenRefreshSerializer(TokenRefreshSerializer):
@@ -120,15 +145,23 @@ class HVTTokenRefreshSerializer(TokenRefreshSerializer):
         refresh_token = RefreshToken(attrs["refresh"])
         user, project = _validate_refresh_context(refresh_token)
 
+        sid = refresh_token.get("sid")
+        if sid:
+            from hvt.apps.authentication.sessions import is_session_active, touch_session
+            if not is_session_active(sid):
+                raise InvalidToken("Session has been revoked.")
+            request = self.context.get("request")
+            touch_session(sid, request=request)
+
         data = super().validate(attrs)
 
         access_token = AccessToken(data["access"])
-        _stamp_org_claims(access_token, user, project=project)
+        _stamp_org_claims(access_token, user, project=project, sid=sid)
         data["access"] = str(access_token)
 
         if "refresh" in data:
             refreshed_refresh = RefreshToken(data["refresh"])
-            _stamp_org_claims(refreshed_refresh, user, project=project)
+            _stamp_org_claims(refreshed_refresh, user, project=project, sid=sid)
             data["refresh"] = str(refreshed_refresh)
 
         logger.debug(
@@ -213,6 +246,14 @@ class _OrgClaimVerificationMixin:
             token_proj = validated_token.get("project_id")
             if token_proj and str(token_proj) != str(api_key.project_id):
                 raise InvalidToken("Token was not issued for this project.")
+
+        # Real-time session revocation verification
+        sid = validated_token.get("sid")
+        if sid:
+            from hvt.apps.authentication.sessions import is_session_active, touch_session
+            if not is_session_active(sid):
+                raise InvalidToken("Session has been revoked.")
+            touch_session(sid, request=request)
 
         return user, validated_token
 

@@ -309,7 +309,7 @@ class TOTPLoginView(APIView):
             from hvt.apps.organizations.models import Project
             project = Project.objects.filter(id=project_id).first()
 
-        access_token, refresh_token = build_hvt_token_pair(user, project=project)
+        access_token, refresh_token = build_hvt_token_pair(user, project=project, request=request)
 
         AuditLog.log(
             event_type=AuditLog.EventType.MFA_VERIFIED,

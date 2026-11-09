@@ -14,6 +14,7 @@ from dj_rest_auth.app_settings import api_settings as dj_rest_auth_settings
 from dj_rest_auth.jwt_auth import set_jwt_cookies
 from dj_rest_auth.views import (
     LoginView,
+    LogoutView,
     PasswordChangeView,
     PasswordResetConfirmView,
     PasswordResetView,
@@ -347,6 +348,38 @@ class HVTUserDetailsView(UserDetailsView):
     permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
 
 
+class HVTLogoutView(LogoutView):
+    """
+    Control-plane logout view that terminates the active UserSession
+    in Redis and Postgres, clearing refresh tokens and auth cookies.
+    """
+    def logout(self, request):
+        auth = getattr(request, "auth", None)
+        sid = getattr(auth, "get", lambda k: None)("sid") if auth else None
+        if not sid and hasattr(request, "data"):
+            refresh_raw = request.data.get("refresh")
+            if refresh_raw:
+                try:
+                    from rest_framework_simplejwt.tokens import RefreshToken
+                    rt = RefreshToken(refresh_raw)
+                    sid = rt.get("sid")
+                except Exception:
+                    pass
+
+        if sid:
+            from hvt.apps.authentication.sessions import revoke_session
+            revoke_session(sid, reason="logout")
+
+        return super().logout(request)
+
+
+class RuntimeLogoutView(HVTLogoutView):
+    """
+    Runtime user logout view that terminates the active UserSession.
+    """
+    permission_classes = [permissions.AllowAny]
+
+
 class PlatformUserOnlyMixin:
     """Reject runtime users on control-plane auth endpoints without leaking identity details."""
 
@@ -480,6 +513,15 @@ class HVTLoginView(PlatformUserOnlyMixin, LoginView):
         )
         return self.get_response()
 
+    def login(self):
+        self.user = self.serializer.validated_data["user"]
+        self.access_token, self.refresh_token = build_hvt_token_pair(
+            self.user,
+            request=self.request,
+        )
+        if dj_rest_auth_settings.SESSION_LOGIN:
+            self.process_login()
+
 
 @extend_schema_view(
     post=extend_schema(
@@ -583,57 +625,55 @@ class RuntimeLoginView(LoginView):
         self.access_token, self.refresh_token = build_hvt_token_pair(
             self.user,
             project=project,
+            request=self.request,
         )
         if dj_rest_auth_settings.SESSION_LOGIN:
             self.process_login()
 
 
-class GoogleLogin(PlatformUserOnlyMixin, SocialLoginView):
+class ControlPlaneSocialLoginView(PlatformUserOnlyMixin, SocialLoginView):
+    client_class = HVTCompatibilityOAuth2Client
+    serializer_class = CustomSocialLoginSerializer
+    throttle_classes = SOCIAL_LOGIN_THROTTLES
+
+    def login(self):
+        self.user = self.serializer.validated_data["user"]
+        self.access_token, self.refresh_token = build_hvt_token_pair(
+            self.user,
+            request=self.request,
+        )
+        if dj_rest_auth_settings.SESSION_LOGIN:
+            self.process_login()
+
+
+class GoogleLogin(ControlPlaneSocialLoginView):
     adapter_class = GoogleOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/google/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class GithubLogin(PlatformUserOnlyMixin, SocialLoginView):
+class GithubLogin(ControlPlaneSocialLoginView):
     adapter_class = GitHubOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/github/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class DiscordLogin(PlatformUserOnlyMixin, SocialLoginView):
+class DiscordLogin(ControlPlaneSocialLoginView):
     adapter_class = DiscordOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/discord/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class AppleLogin(PlatformUserOnlyMixin, SocialLoginView):
+class AppleLogin(ControlPlaneSocialLoginView):
     adapter_class = AppleOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/apple/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class MicrosoftLogin(PlatformUserOnlyMixin, SocialLoginView):
+class MicrosoftLogin(ControlPlaneSocialLoginView):
     adapter_class = MicrosoftGraphOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/microsoft/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
-class GitlabLogin(PlatformUserOnlyMixin, SocialLoginView):
+class GitlabLogin(ControlPlaneSocialLoginView):
     adapter_class = GitLabOAuth2Adapter
     callback_url = _frontend_callback_url("/auth/gitlab/callback")
-    client_class = HVTCompatibilityOAuth2Client
-    serializer_class = CustomSocialLoginSerializer
-    throttle_classes = SOCIAL_LOGIN_THROTTLES
 
 
 class RuntimeSocialLoginView(SocialLoginView):
@@ -650,6 +690,7 @@ class RuntimeSocialLoginView(SocialLoginView):
         self.access_token, self.refresh_token = build_hvt_token_pair(
             self.user,
             project=project,
+            request=self.request,
         )
         if dj_rest_auth_settings.SESSION_LOGIN:
             self.process_login()

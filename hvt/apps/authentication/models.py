@@ -1,3 +1,4 @@
+from django.utils import timezone
 import uuid
 from django.db import models
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -87,6 +88,11 @@ class AuditLog(models.Model):
         MFA_VERIFIED = "mfa.verified", "MFA Verified"
         TOTP_BACKUP_CODE_USED = "totp.backup_code_used", "TOTP Backup Code Used"
         TOTP_BACKUP_CODES_REGENERATED = "totp.backup_codes_regenerated", "TOTP Backup Codes Regenerated"
+
+        # Session events
+        SESSION_CREATED = "session.created", "Session Created"
+        SESSION_REVOKED = "session.revoked", "Session Revoked"
+        SESSION_REVOKED_ALL = "session.revoked_all", "All Sessions Revoked"
 
         # Passkey events
         PASSKEY_REGISTER_INITIATED = (
@@ -376,3 +382,43 @@ class MagicLinkToken(models.Model):
         return not self.is_used and self.expires_at > timezone.now()
 
 
+
+
+class UserSession(models.Model):
+    """
+    Tracks an authenticated client session across devices.
+    The primary key `id` corresponds directly to the `sid` claim in JWT access and refresh tokens.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    project = models.ForeignKey(
+        "organizations.Project",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="sessions",
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    device_name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_active_at = models.DateTimeField(default=timezone.now, db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    revoked_reason = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        db_table = "auth_user_sessions"
+        ordering = ["-last_active_at"]
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+    def __str__(self):
+        status_str = "revoked" if self.revoked_at else "active"
+        return f"Session ({status_str}) for {self.user.email} on {self.device_name or 'Unknown Device'}"

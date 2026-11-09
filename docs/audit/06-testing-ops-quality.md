@@ -27,7 +27,7 @@
 | **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 177 | 177 Pass / 0 Fail | 21.7s | [RAN `manage.py test tests` -> 177 pass] |
 | **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **494** | **494 Pass / 0 Fail** | **~72s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (480 tests) + `npm test` (14 tests)] |
+| **TOTAL** | | **503** | **503 Pass / 0 Fail** | **~70s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (489 tests) + `npm test` (14 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
