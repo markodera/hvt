@@ -5,6 +5,7 @@ import { initCommand } from "./commands/init.js";
 import { planCommand } from "./commands/plan.js";
 import { syncCommand } from "./commands/sync.js";
 import { whoamiCommand } from "./commands/whoami.js";
+import { aiSetupPromptCommand } from "./commands/ai.js";
 
 const program = new Command();
 
@@ -136,6 +137,52 @@ program
         projectId: globalOpts.project || globalOpts.projectId,
         key: globalOpts.key,
         json: globalOpts.json,
+      });
+    } catch (err: unknown) {
+      handleCliError(err, program.opts().verbose);
+    }
+  });
+
+// AI group
+const aiGroup = program.command("ai").description("AI agent integration and prompt generation");
+
+aiGroup
+  .command("setup-prompt")
+  .description("Generate structured setup prompt for AI coding agents (Cursor, Claude, Antigravity, etc.)")
+  .option("--copy", "Copy prompt to system clipboard")
+  .option("--file <path>", "Save prompt to specified file path")
+  .action(async (cmdOpts) => {
+    try {
+      const globalOpts = program.opts();
+      await aiSetupPromptCommand({
+        apiUrl: globalOpts.apiUrl,
+        projectId: globalOpts.project || globalOpts.projectId,
+        key: globalOpts.key,
+        json: globalOpts.json,
+        copy: cmdOpts.copy,
+        file: cmdOpts.file,
+      });
+    } catch (err: unknown) {
+      handleCliError(err, program.opts().verbose);
+    }
+  });
+
+// Shortcut: `hvt setup-prompt`
+program
+  .command("setup-prompt")
+  .description("Generate structured setup prompt for AI coding agents (alias for 'hvt ai setup-prompt')")
+  .option("--copy", "Copy prompt to system clipboard")
+  .option("--file <path>", "Save prompt to specified file path")
+  .action(async (cmdOpts) => {
+    try {
+      const globalOpts = program.opts();
+      await aiSetupPromptCommand({
+        apiUrl: globalOpts.apiUrl,
+        projectId: globalOpts.project || globalOpts.projectId,
+        key: globalOpts.key,
+        json: globalOpts.json,
+        copy: cmdOpts.copy,
+        file: cmdOpts.file,
       });
     } catch (err: unknown) {
       handleCliError(err, program.opts().verbose);

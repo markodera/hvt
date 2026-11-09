@@ -33,7 +33,7 @@ def _load_pem_string(val: Optional[str]) -> Optional[str]:
             if "\\n" in content:
                 content = content.replace("\\n", "\n")
             return content
-    return val
+    return None
 
 
 def _generate_in_memory_dev_key() -> tuple[str, str]:

@@ -231,3 +231,49 @@ class OnboardingFlowBackendTest(TestCase):
         res_locked = self.client.post(url)
         self.assertEqual(res_locked.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Option C plane isolation", res_locked.data["detail"])
+
+
+    def test_setup_prompt_via_management_key(self):
+        """Management API key with schema:sync can generate setup prompt via X-API-Key."""
+        owner = User.objects.create_user(
+            email="api-owner@example.com",
+            password="StrongPass123!",
+            role=User.Role.OWNER,
+        )
+        org = Organization.objects.create(name="Delta Labs", slug="delta-labs", owner=owner)
+        owner.organization = org
+        owner.save(update_fields=["organization"])
+        project = org.ensure_default_project()
+
+        prefix, full_mgmt, hashed_mgmt = APIKey.generate_key(
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.MANAGEMENT,
+        )
+        APIKey.objects.create(
+            name="CI Management Key",
+            prefix=prefix,
+            hashed_key=hashed_mgmt,
+            environment=APIKey.Environment.TEST,
+            key_type=APIKey.KeyType.MANAGEMENT,
+            organization=org,
+            project=project,
+            created_by=owner,
+            scopes=["schema:plan", "schema:sync"],
+            is_active=True,
+            expires_at=timezone.now() + timedelta(days=7),
+        )
+
+        url = f"/api/v1/organizations/current/projects/{project.id}/setup-prompt/"
+
+        # Unauthenticated client calling with X-API-Key
+        anon_client = APIClient()
+        res = anon_client.post(url, HTTP_X_API_KEY=full_mgmt)
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res.data["key"].startswith("hvt_mgmt_test_"))
+        self.assertIn(str(project.id), res.data["prompt"])
+
+        # Mismatched project key should be denied
+        other_project = Project.objects.create(name="Other", slug="other", organization=org)
+        other_url = f"/api/v1/organizations/current/projects/{other_project.id}/setup-prompt/"
+        res_mismatch = anon_client.post(other_url, HTTP_X_API_KEY=full_mgmt)
+        self.assertEqual(res_mismatch.status_code, status.HTTP_403_FORBIDDEN)

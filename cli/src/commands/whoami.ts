@@ -16,6 +16,7 @@ export async function whoamiCommand(options: WhoamiCommandOptions): Promise<void
     apiUrl: options.apiUrl,
     projectId: options.projectId,
     key: options.key,
+    requireSchema: false,
   });
 
   const client = new HVTAPIClient(config.apiUrl, config.managementKey);

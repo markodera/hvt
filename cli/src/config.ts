@@ -105,6 +105,7 @@ export function resolveConfig(options: {
   key?: string;
   schema?: string;
   cwd?: string;
+  requireSchema?: boolean;
 }): ResolvedConfig {
   const cwd = options.cwd || process.cwd();
   loadEnvFiles(cwd);
@@ -135,10 +136,30 @@ export function resolveConfig(options: {
     );
   }
 
-  const { path: schemaPath, format: schemaFormat } = findSchemaFile(cwd, options.schema);
-  const rawContent = fs.readFileSync(schemaPath, "utf-8");
-  const rawManifest = parseManifestContent(rawContent, schemaFormat);
-  const interpolatedManifest = interpolateSchema(rawManifest, process.env);
+  let schemaPath = "";
+  let schemaFormat: "json" | "yaml" = "json";
+  let rawManifest: HVTManifest = { schema_version: 1 };
+  let interpolatedManifest: HVTManifest = { schema_version: 1 };
+
+  if (options.requireSchema !== false) {
+    const found = findSchemaFile(cwd, options.schema);
+    schemaPath = found.path;
+    schemaFormat = found.format;
+    const rawContent = fs.readFileSync(schemaPath, "utf-8");
+    rawManifest = parseManifestContent(rawContent, schemaFormat);
+    interpolatedManifest = interpolateSchema(rawManifest, process.env);
+  } else {
+    try {
+      const found = findSchemaFile(cwd, options.schema);
+      schemaPath = found.path;
+      schemaFormat = found.format;
+      const rawContent = fs.readFileSync(schemaPath, "utf-8");
+      rawManifest = parseManifestContent(rawContent, schemaFormat);
+      interpolatedManifest = interpolateSchema(rawManifest, process.env);
+    } catch {
+      // Schema file optional when requireSchema is false
+    }
+  }
 
   return {
     apiUrl,

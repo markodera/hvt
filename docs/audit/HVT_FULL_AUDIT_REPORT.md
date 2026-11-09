@@ -1,9 +1,9 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `5598a4b97bf56d5d2cebb976091c1cf2b4e362b8`  
-> **Last Synchronized:** `2026-11-09 13:48:35 UTC`  
+> **Latest Commit:** `17ec672e82d4aad91c5afbc2c07b78af59a3bf8f`  
+> **Last Synchronized:** `2026-11-09 14:38:55 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 21,477 words (184,397 characters)  
+> **Total Volume:** 21,556 words (185,183 characters)  
 
 ## Table of Contents
 
@@ -11,15 +11,15 @@
 |---|---|---|---|
 | 01 | 00 Summary | 1,919 words | [00-summary.md](#00-summary) |
 | 02 | 01 Architecture And Data | 3,213 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 3,342 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 03 | 02 Features And Endpoints | 3,390 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 3,352 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
 | 06 | 05 Live Behavior | 2,289 words | [05-live-behavior.md](#05-live-behavior) |
 | 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
-| 08 | 07 Roadmap Readiness | 1,320 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
+| 08 | 07 Roadmap Readiness | 1,351 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **21,477 words** | |
+| | **TOTAL** | **21,556 words** | |
 
 ---
 
@@ -585,13 +585,14 @@ The following comprehensive table inventories the primary endpoint families acro
   * `hvt schema plan`: Sends `?dry_run=true` request to API to preview changes.
   * `hvt schema sync`: Sends live apply request, supports `--prune` with interactive confirmation, and auto-saves minted client key to `.env.local`.
   * `hvt whoami`: Inspects active management key and target project.
+  * `hvt ai setup-prompt` (alias `hvt setup-prompt`): Generates structured setup prompts for AI coding agents (Claude Code, Cursor, Copilot, Antigravity) with options `--copy`, `--file <path>`, and `--json` [VERIFIED `cli/src/commands/ai.ts`].
 * **Storage:** Operates locally on disk, mutating `hvt.schema.json` and `.env.local`.
 
 #### 16. Onboarding Quickstart & AI Setup Prompt
 * **Status:** `WORKING` [VERIFIED `hvt.apps.organizations.tests_onboarding`].
 * **Mechanics:**
   * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`), counting both standard and passwordless/social/invite logins (`USER_LOGIN`, `MAGIC_LINK_VERIFIED`, `PASSKEY_LOGIN`, `SOCIAL_LOGIN`, `RUNTIME_USER_INVITE_ACCEPTED`), and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
-  * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity).
+  * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity). Accepts session JWT, Personal Access Tokens (PATs), or existing Management API Keys (`X-API-Key`) with `schema:sync` scope [VERIFIED `hvt/apps/organizations/views.py:2591-2675`, `hvt.apps.organizations.tests_onboarding`].
   * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
 * **Storage:** Temporary rows in `api_keys` (`expires_at = now + 15m`).
@@ -1474,12 +1475,12 @@ To eliminate the generic, homogenized "AI average" aesthetic:
 | Test Suite | Framework / Runner | Test Count | Pass / Fail / Skip | Duration | Evidence |
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.authentication` -> OK] |
-| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 150 | 150 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
+| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 151 | 151 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
 | **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.users` -> OK] |
 | **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 177 | 177 Pass / 0 Fail | 21.7s | [RAN `manage.py test tests` -> 177 pass] |
-| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
+| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 17 | 17 Pass / 0 Fail | 2.4s | [RAN `npm test` in `cli/` -> 17 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **503** | **503 Pass / 0 Fail** | **~70s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (489 tests) + `npm test` (14 tests)] |
+| **TOTAL** | | **517** | **517 Pass / 0 Fail** | **~151s (Backend) + 2.4s (CLI)** | [RAN `manage.py test` (500 tests) + `npm test` (17 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
@@ -1581,7 +1582,7 @@ We analyzed HVT's current codebase to determine the reusable foundation, necessa
  Required Changes | Key Risks & Complexities | Effort |
 | :--- | :--- | :--- | :--- | :---: |
 | **1. Token Groundwork & JWKS (COMPLETED - Step 4)** | Asymmetric RS256 tokens, deterministic Key ID, public JWKS (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), cross-project isolation, offline verifier helper (`hvt.jwt_verify`). | Deployed in Step 4. | Backward compatibility maintained via automatic fallback decode. | **DONE** |
-| **2. Copy AI Setup Prompt** | `llms.txt`, OpenAPI 3.0 schema generation (`drf-spectacular`), CLI configuration commands. | Add CLI command (`hvt ai setup-prompt`) or API endpoint that formats dynamic system prompts with active project ID, keys, and schema specs. | Minimal technical risk. | **S** |
+| **2. Copy AI Setup Prompt (COMPLETED - Step 2)** | `llms.txt`, OpenAPI 3.0 schema generation (`drf-spectacular`), CLI configuration commands (`hvt ai setup-prompt`, `hvt setup-prompt`). | Deployed in Step 2: Added `hvt ai setup-prompt` CLI command with `--copy`, `--file`, `--json` options and updated backend `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` to support Management API Keys (`schema:sync`) alongside PATs and session JWTs. Verified in `cli/src/ai.test.ts` (3 tests) and `hvt.apps.organizations.tests_onboarding` (6 tests). | Zero regressions across backend and CLI suites. | **DONE** |
 | **3. Rate Limiting & Bot Defense** | DRF throttle framework (`throttles.py`), `BurstRateThrottle`, IP/email throttles. | Enforce production Redis (`USE_REDIS_CACHE=True`); integrate Cloudflare Turnstile or reCAPTCHA v3 challenge endpoints on registration/login; implement token bucket. | False positives blocking legitimate corporate NAT/VPN users. | **M** |
 | **4. Session Management & Revocation (COMPLETED - Step 7)** | `UserSession` model, dual-layer Redis cache + DB session engine (`sessions.py`), `sid` claim in JWT access/refresh tokens, list/single/bulk revocation endpoints. | Deployed in Step 7. | Zero regressions across all 489 tests. Sub-millisecond cache checks with resilient Postgres fallback. | **DONE** |
 | **5. Bring-Your-Own Email (COMPLETED - Step 6)** | Pluggable `EmailProvider` interface (`Resend`, `SMTP`, `Postmark`, `SES`, `Console`), per-project `ProjectEmailConfig` with MultiFernet encryption, test-send API, async dispatch. | Deployed in Step 6. | Zero timeout risk via background Outbox queuing. | **DONE** |

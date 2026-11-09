@@ -190,13 +190,14 @@ The following comprehensive table inventories the primary endpoint families acro
   * `hvt schema plan`: Sends `?dry_run=true` request to API to preview changes.
   * `hvt schema sync`: Sends live apply request, supports `--prune` with interactive confirmation, and auto-saves minted client key to `.env.local`.
   * `hvt whoami`: Inspects active management key and target project.
+  * `hvt ai setup-prompt` (alias `hvt setup-prompt`): Generates structured setup prompts for AI coding agents (Claude Code, Cursor, Copilot, Antigravity) with options `--copy`, `--file <path>`, and `--json` [VERIFIED `cli/src/commands/ai.ts`].
 * **Storage:** Operates locally on disk, mutating `hvt.schema.json` and `.env.local`.
 
 #### 16. Onboarding Quickstart & AI Setup Prompt
 * **Status:** `WORKING` [VERIFIED `hvt.apps.organizations.tests_onboarding`].
 * **Mechanics:**
   * Status Polling: `GET /api/v1/organizations/current/projects/<id>/onboarding/` tracks the 4 live milestone steps (`project_created`, `schema_synced`, `first_signup`, `first_login`), counting both standard and passwordless/social/invite logins (`USER_LOGIN`, `MAGIC_LINK_VERIFIED`, `PASSKEY_LOGIN`, `SOCIAL_LOGIN`, `RUNTIME_USER_INVITE_ACCEPTED`), and evaluates whether the project can issue an AI setup prompt (`can_use_setup_prompt`).
-  * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity).
+  * AI Setup Prompt: `POST /api/v1/organizations/current/projects/<id>/setup-prompt/` provisions an ephemeral 15-minute test management key (`hvt_mgmt_test_*`) with scopes `['schema:plan', 'schema:sync', 'roles:write', 'permissions:write', 'providers:write']` and returns a formatted prompt designed for AI coding agents (Claude Code, Cursor, Copilot, Antigravity). Accepts session JWT, Personal Access Tokens (PATs), or existing Management API Keys (`X-API-Key`) with `schema:sync` scope [VERIFIED `hvt/apps/organizations/views.py:2591-2675`, `hvt.apps.organizations.tests_onboarding`].
   * Option C Lockout Safety: If a project has active `live` API keys, prompt generation is rejected with HTTP 400 (`Option C live project safety active`).
   * UI Integration: Rendered directly on the dashboard home (`OnboardingQuickstart.jsx`), polling every 3 seconds while active, with masked key preview, 15-minute countdown timer, zero persistent storage in localStorage or logs, and copyable CLI instructions.
 * **Storage:** Temporary rows in `api_keys` (`expires_at = now + 15m`).

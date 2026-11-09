@@ -32,6 +32,7 @@ from .models import (
 from hvt.apps.authentication.backends import (
     APIKeyAuthentication,
     ManagementAPIKeyAuthentication,
+    PersonalAccessTokenAuthentication,
     HVTJWTCookieAuthentication,
     HVTJWTAuthentication,
 )
@@ -2594,21 +2595,39 @@ class ProjectSetupPromptView(APIView):
     Mints a temporary 15-minute test management key and returns a formatted prompt.
     Enforces Option C plane isolation: blocked if project has active live keys.
     """
-    permission_classes = [permissions.IsAuthenticated, IsPlatformUser]
+    authentication_classes = [
+        ManagementAPIKeyAuthentication,
+        PersonalAccessTokenAuthentication,
+        HVTJWTCookieAuthentication,
+        HVTJWTAuthentication,
+    ]
+    permission_classes = [IsOrgOwnerOrAPIKey]
+    api_key_write_scopes = ("schema:plan", "schema:sync")
 
     def post(self, request, project_pk):
-        user = request.user
-        if not user.organization_id:
-            raise PermissionDenied("You must belong to an organization.")
-        if not user.is_org_owner():
-            raise PermissionDenied("You must be an organization owner or admin to generate setup prompts.")
+        if isinstance(request.auth, APIKey):
+            api_key = request.auth
+            if api_key.key_type != APIKey.KeyType.MANAGEMENT:
+                raise PermissionDenied("Only management keys can generate setup prompts.")
+            project = api_key.project
+            if not project or str(project.id) != str(project_pk):
+                raise PermissionDenied("Management key does not match the requested project.")
+            user = api_key.created_by
+        else:
+            user = request.user
+            if not user or not user.is_authenticated:
+                raise PermissionDenied("Authentication required.")
+            if not user.organization_id:
+                raise PermissionDenied("You must belong to an organization.")
+            if not user.is_org_owner():
+                raise PermissionDenied("You must be an organization owner or admin to generate setup prompts.")
 
-        project = get_object_or_404(
-            Project.objects.select_related("organization"),
-            id=project_pk,
-            organization_id=user.organization_id,
-            is_active=True,
-        )
+            project = get_object_or_404(
+                Project.objects.select_related("organization"),
+                id=project_pk,
+                organization_id=user.organization_id,
+                is_active=True,
+            )
 
         proj_serializer = ProjectSerializer(project)
         if not proj_serializer.get_can_use_setup_prompt(project):

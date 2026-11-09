@@ -105,6 +105,55 @@ export class HVTAPIClient {
     };
   }
 
+  /**
+   * Fetches an AI setup prompt and temporary test management key from HVT Cloud.
+   */
+  async getSetupPrompt(projectId: string): Promise<{
+    prompt: string;
+    key?: string;
+    maskedKey?: string;
+    expiresAt?: string;
+    expiresInSeconds?: number;
+  }> {
+    const url = `${this.apiUrl}/api/v1/organizations/current/projects/${projectId}/setup-prompt/`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.managementKey,
+          "User-Agent": "@hvt/cli/0.1.0",
+        },
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to connect to HVT API at ${this.apiUrl}: ${msg}`);
+    }
+
+    const rawText = await response.text();
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `Unexpected non-JSON response from server (HTTP ${response.status}):\n${rawText.slice(0, 300)}`
+      );
+    }
+
+    if (!response.ok) {
+      this.handleErrorResponse(response.status, data);
+    }
+
+    return {
+      prompt: data.prompt as string,
+      key: data.key as string,
+      maskedKey: data.masked_key as string,
+      expiresAt: data.expires_at as string,
+      expiresInSeconds: data.expires_in_seconds as number,
+    };
+  }
+
   private handleErrorResponse(status: number, data: Record<string, unknown>): never {
     const detail = (data.detail || data.error || data.message || JSON.stringify(data)) as string;
 

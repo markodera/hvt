@@ -22,12 +22,12 @@
 | Test Suite | Framework / Runner | Test Count | Pass / Fail / Skip | Duration | Evidence |
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | **Backend: Authentication** (`hvt.apps.authentication`) | Django `DiscoverRunner` | 119 | 119 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.authentication` -> OK] |
-| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 150 | 150 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
+| **Backend: Organizations** (`hvt.apps.organizations`) | Django `DiscoverRunner` | 151 | 151 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.organizations` -> OK] |
 | **Backend: Users** (`hvt.apps.users`) | Django `DiscoverRunner` | 34 | 34 Pass / 0 Fail | Part of full suite | [RAN `manage.py test hvt.apps.users` -> OK] |
 | **Backend: Integration Tests** (`tests/`) | Django `DiscoverRunner` | 177 | 177 Pass / 0 Fail | 21.7s | [RAN `manage.py test tests` -> 177 pass] |
-| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 14 | 14 Pass / 0 Fail | 1.6s | [RAN `npm test` in `cli/` -> 14 pass] |
+| **CLI Suite** (`cli/tests/`) | Node.js Test Runner (`node --test`) | 17 | 17 Pass / 0 Fail | 2.4s | [RAN `npm test` in `cli/` -> 17 pass] |
 | **Frontend / SDK** (`sdk/`) | N/A | 0 | Stub package only | N/A | [VERIFIED `sdk/` contains only stub] |
-| **TOTAL** | | **503** | **503 Pass / 0 Fail** | **~70s (Backend) + 1.6s (CLI)** | [RAN `manage.py test` (489 tests) + `npm test` (14 tests)] |
+| **TOTAL** | | **517** | **517 Pass / 0 Fail** | **~151s (Backend) + 2.4s (CLI)** | [RAN `manage.py test` (500 tests) + `npm test` (17 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
 
