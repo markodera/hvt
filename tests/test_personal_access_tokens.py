@@ -43,6 +43,8 @@ class PersonalAccessTokenTests(APITestCase):
         )
 
         self.org = Organization.objects.create(name="PAT Org", slug="pat-org")
+        self.user.organization = self.org
+        self.user.save()
         self.project = Project.objects.create(
             organization=self.org,
             name="PAT App",
@@ -283,3 +285,110 @@ class PersonalAccessTokenTests(APITestCase):
         )
         del_resp = self.client.delete(f"/api/v1/auth/runtime/pats/{pat_id}/")
         self.assertEqual(del_resp.status_code, status.HTTP_200_OK)
+
+    # -------------------------------------------------------------------------
+    # 8. Scoped PAT Enforces Scopes and Blocks Privilege Escalation
+    # -------------------------------------------------------------------------
+    def test_scoped_pat_enforces_permissions_and_prevents_privilege_escalation(self):
+        # Create an owner PAT restricted only to 'users:read'
+        prefix, raw_token, hashed_token = PersonalAccessToken.generate_token(environment="live")
+        PersonalAccessToken.objects.create(
+            user=self.user,
+            name="Read-Only Users PAT",
+            environment="live",
+            prefix=prefix,
+            hashed_token=hashed_token,
+            scopes=["users:read"],
+        )
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_token}")
+
+        # GET /api/v1/auth/me/ permitted (reading user profile)
+        me_resp = self.client.get("/api/v1/auth/me/")
+        self.assertEqual(me_resp.status_code, status.HTTP_200_OK)
+
+        # GET /api/v1/users/ permitted (users:read)
+        users_resp = self.client.get("/api/v1/users/")
+        self.assertEqual(users_resp.status_code, status.HTTP_200_OK)
+
+        # POST /api/v1/users/ must be FORBIDDEN (lacks users:write)
+        create_user_resp = self.client.post(
+            "/api/v1/users/",
+            {"email": "subordinate@example.com", "role": "member"},
+        )
+        self.assertEqual(create_user_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("permission", str(create_user_resp.data))
+
+        # POST /api/v1/auth/pats/ must be FORBIDDEN (lacks pats:write)
+        create_pat_resp = self.client.post(
+            "/api/v1/auth/pats/",
+            {"name": "Escalated Token", "environment": "live", "scopes": ["*"]},
+        )
+        self.assertEqual(create_pat_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("permission", str(create_pat_resp.data))
+
+    # -------------------------------------------------------------------------
+    # 9. PAT with pats:read Cannot Mutate PATs or Access Other Resources
+    # -------------------------------------------------------------------------
+    def test_pat_with_pats_read_cannot_create_or_mutate_pats(self):
+        prefix, raw_token, hashed_token = PersonalAccessToken.generate_token(environment="live")
+        pat = PersonalAccessToken.objects.create(
+            user=self.user,
+            name="PAT Reader",
+            environment="live",
+            prefix=prefix,
+            hashed_token=hashed_token,
+            scopes=["pats:read"],
+        )
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_token}")
+
+        # GET /api/v1/auth/pats/ permitted
+        list_resp = self.client.get("/api/v1/auth/pats/")
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+
+        # POST /api/v1/auth/pats/ forbidden (requires pats:write)
+        create_resp = self.client.post(
+            "/api/v1/auth/pats/",
+            {"name": "New PAT", "environment": "live"},
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        # DELETE /api/v1/auth/pats/<id>/ forbidden (requires pats:write)
+        del_resp = self.client.delete(f"/api/v1/auth/pats/{pat.id}/")
+        self.assertEqual(del_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        # GET /api/v1/users/ forbidden (requires users:read)
+        users_resp = self.client.get("/api/v1/users/")
+        self.assertEqual(users_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    # -------------------------------------------------------------------------
+    # 10. PAT with pats:write Cannot Escalate to Wildcard Scopes
+    # -------------------------------------------------------------------------
+    def test_pat_with_pats_write_cannot_escalate_scopes_to_wildcard(self):
+        prefix, raw_token, hashed_token = PersonalAccessToken.generate_token(environment="live")
+        PersonalAccessToken.objects.create(
+            user=self.user,
+            name="PAT Writer",
+            environment="live",
+            prefix=prefix,
+            hashed_token=hashed_token,
+            scopes=["pats:write"],
+        )
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_token}")
+
+        # Attempting to create child PAT with scopes exceeding authorizing token fails
+        escalate_resp = self.client.post(
+            "/api/v1/auth/pats/",
+            {"name": "Attempted Escalation", "environment": "live", "scopes": ["*", "users:write"]},
+        )
+        self.assertEqual(escalate_resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("exceeding", str(escalate_resp.data))
+
+        # Creating child PAT with subset of scopes succeeds
+        valid_resp = self.client.post(
+            "/api/v1/auth/pats/",
+            {"name": "Valid Child PAT", "environment": "live", "scopes": ["pats:write"]},
+        )
+        self.assertEqual(valid_resp.status_code, status.HTTP_201_CREATED)

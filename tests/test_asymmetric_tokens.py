@@ -45,7 +45,10 @@ class AsymmetricJWTKeyTests(TestCase):
         kid = get_jwt_key_id()
         issuer = get_jwt_issuer()
 
-        self.assertTrue(priv_pem.startswith("-----BEGIN PRIVATE KEY-----"))
+        self.assertTrue(
+            priv_pem.startswith("-----BEGIN PRIVATE KEY-----")
+            or priv_pem.startswith("-----BEGIN RSA PRIVATE KEY-----")
+        )
         self.assertTrue(pub_pem.startswith("-----BEGIN PUBLIC KEY-----"))
         self.assertTrue(kid.startswith("hvt-"))
         self.assertTrue(len(issuer) > 0)

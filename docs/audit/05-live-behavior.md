@@ -212,3 +212,27 @@ The frontend underwent a complete visual overhaul away from muddy violet-washed 
 *   `docs/audit/screens/slice1/05_mobile_api_keys.png` [VERIFIED Playwright headless capture]
 *   `docs/audit/screens/landing/01_landing_hero.png` [VERIFIED Playwright headless capture]
 *   `docs/audit/screens/landing/02_landing_full.png` [VERIFIED Playwright headless capture]
+
+
+---
+
+### 5. Anti-Zombie UI Overhaul, Purple ASCII Hero Schematic & Multi-Page Deep Dives
+
+#### A. Purging "Zombie UI" (Stripe CDO Katie Dill Benchmark)
+To eliminate the generic, homogenized "AI average" aesthetic:
+* **Authentic Developer Architecture:** In place of interchangeable 6-card SaaS marketing templates, embedded an authentic terminal window with glowing purple monospace ASCII art displaying HVT's actual cryptographic pipeline: Control Plane (`hvt_mgmt_...`) -> Asymmetric RS256 Private Key Sign -> Runtime Engine (`hvt_live_...`) -> 0.1ms In-Memory Verification at Edge without database round-trips.
+* **De-cluttered Landing Page:** Replaced the cluttered single-page scroll with 5 dedicated architectural deep-dive pages (`/features/engine`, `/features/dual-plane`, `/features/passkeys`, `/features/sessions`, `/features/byo-email`), each featuring code samples, threat matrices, and RFC compliance details.
+* **Rich Multi-Column Footer (`Footer.jsx`):** Sitemaps spanning Product, Developers, Standards & Legal, Apache 2.0 open-source status, and live operational status pill (`All systems operational`).
+* **Collapsible Project Creation (`ProjectsTab.jsx`):** Converted inline creation form into a clean, collapsible interactive card with `+ New project` / `Collapse` toggle.
+
+#### B. Verification Screenshots Captured (Anti-Zombie Suite)
+* `docs/audit/screens/anti_zombie/01_landing_hero_ascii.png` [VERIFIED Playwright headless capture]: Hero with purple ASCII architecture diagram and terminal header.
+* `docs/audit/screens/anti_zombie/01_landing_full.png` [VERIFIED Playwright headless capture]: Complete landing page with de-cluttered pillars and `<Footer />`.
+* `docs/audit/screens/anti_zombie/02_features_engine.png` [VERIFIED Playwright headless capture]: In-Memory Engine technical deep dive with FastAPI/Next.js/Go snippets.
+* `docs/audit/screens/anti_zombie/03_features_dual_plane.png` [VERIFIED Playwright headless capture]: Dual-Plane Architecture with blast radius comparison table.
+* `docs/audit/screens/anti_zombie/04_features_passkeys.png` [VERIFIED Playwright headless capture]: WebAuthn biometric ceremony and RFC 6238 TOTP backup codes.
+* `docs/audit/screens/anti_zombie/05_features_sessions.png` [VERIFIED Playwright headless capture]: Active device fleet registry with remote session revocation.
+* `docs/audit/screens/anti_zombie/06_features_byo_email.png` [VERIFIED Playwright headless capture]: BYO Email transports (Resend, SES, Postmark, SMTP).
+* `docs/audit/screens/anti_zombie/07_settings_projects_collapsed.png` [VERIFIED Playwright headless capture]: Collapsible project boundary card (collapsed).
+* `docs/audit/screens/anti_zombie/09_dashboard_overview.png` [VERIFIED Playwright headless capture]: Clean dashboard with balanced quickstart buttons.
+* `docs/audit/screens/anti_zombie/10_api_keys.png` [VERIFIED Playwright headless capture]: Developer Integration Triad with equalized button sizing.

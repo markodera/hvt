@@ -154,6 +154,17 @@ class ControlPlanePATListCreateView(APIView):
         in_serializer.is_valid(raise_exception=True)
         data = in_serializer.validated_data
 
+        # Enforce that a PAT cannot create child PATs with scopes exceeding itself
+        if isinstance(getattr(request, "auth", None), PersonalAccessToken):
+            auth_pat = request.auth
+            auth_scopes = auth_pat.scopes or []
+            if auth_scopes and "*" not in auth_scopes and "admin" not in auth_scopes:
+                requested_scopes = set(data.get("scopes", []))
+                if not requested_scopes or "*" in requested_scopes or "admin" in requested_scopes or not requested_scopes.issubset(set(auth_scopes)):
+                    raise serializers.ValidationError(
+                        {"scopes": "Cannot create a personal access token with scopes exceeding the authorizing token."}
+                    )
+
         env = data.get("environment", PersonalAccessToken.Environment.LIVE)
         prefix, raw_token, hashed_token = PersonalAccessToken.generate_token(environment=env)
 
@@ -280,6 +291,17 @@ class RuntimePATListCreateView(APIView):
         in_serializer = PersonalAccessTokenCreateSerializer(data=request.data)
         in_serializer.is_valid(raise_exception=True)
         data = in_serializer.validated_data
+
+        # Enforce that a PAT cannot create child PATs with scopes exceeding itself
+        if isinstance(getattr(request, "auth", None), PersonalAccessToken):
+            auth_pat = request.auth
+            auth_scopes = auth_pat.scopes or []
+            if auth_scopes and "*" not in auth_scopes and "admin" not in auth_scopes:
+                requested_scopes = set(data.get("scopes", []))
+                if not requested_scopes or "*" in requested_scopes or "admin" in requested_scopes or not requested_scopes.issubset(set(auth_scopes)):
+                    raise serializers.ValidationError(
+                        {"scopes": "Cannot create a personal access token with scopes exceeding the authorizing token."}
+                    )
 
         env = data.get("environment", PersonalAccessToken.Environment.LIVE)
         prefix, raw_token, hashed_token = PersonalAccessToken.generate_token(environment=env)
