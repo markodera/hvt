@@ -250,15 +250,16 @@ The following environment variables are recognized across `hvt/settings.py` and 
   * Builds dependencies in `deps` stage with `build-essential` and `libpq-dev`, then copies clean Python packages to `production` stage containing only `libpq5` [VERIFIED `Dockerfile:14-49`].
   * Runs under dedicated unprivileged system user `hvt` (`useradd --create-home --shell /bin/bash hvt`) [VERIFIED `Dockerfile:52, 64`].
 * **Compose Orchestration (`docker-compose.yml`):**
-  * Declares three services: `db` (`postgres:16-alpine`), `redis` (`redis:7-alpine`), and `web` (HVT Gunicorn app).
-  * Uses Docker healthchecks with `depends_on: { condition: service_healthy }` to ensure PostgreSQL and Redis are responsive before starting Gunicorn [VERIFIED `docker-compose.yml:52-56`].
+  * Declares four services: `db` (`postgres:16-alpine`), `redis` (`redis:7-alpine`), `web` (HVT Gunicorn app), and `worker` (transactional outbox background processor running `python manage.py run_worker`) [VERIFIED `docker-compose.yml:1-72`].
+  * Configures production environment bindings for `HVT_ENCRYPTION_KEYS` and `HVT_JWT_PRIVATE_KEY` required by non-debug boot [VERIFIED `docker-compose.yml:40-70`].
+  * Uses Docker healthchecks with `depends_on: { condition: service_healthy }` to ensure PostgreSQL and Redis are responsive before starting Gunicorn and worker [VERIFIED `docker-compose.yml:52-56`].
 * **CI Pipeline (`.github/workflows/ci.yml`):**
   * **Job 1: `gitleaks`:** Scans commit history for leaked credentials using `gitleaks/gitleaks-action@v2` [VERIFIED `ci.yml:10-21`].
-  * **Job 2: `backend`:** Boots PostgreSQL 16 container, checks out code, installs `requirements.txt`, runs `manage.py check`, runs `manage.py makemigrations --check`, and executes `manage.py test` [VERIFIED `ci.yml:23-81`].
-  * **Job 3: `cli`:** Sets up Node.js 20, installs dependencies via `npm ci`, builds TypeScript via `npm run build`, and executes `npm test` [VERIFIED `ci.yml:83-107`].
-* **CD Pipeline (`.github/workflows/deploy.yml`):**
-  * Automatically connects to a self-hosted Linux VPS via SSH (`appleboy/ssh-action@v1.0.3`) upon push to `main` [VERIFIED `deploy.yml:18-34`].
-  * Executes zero-downtime reload via `kill -HUP $(cat /tmp/hvt-gunicorn.pid)` [VERIFIED `deploy.yml:56`].
+  * **Job 2: `backend`:** Boots PostgreSQL 16 container, checks out code, installs `requirements.txt`, runs `manage.py check`, runs `manage.py makemigrations --check`, runs `manage.py collectstatic --noinput`, and executes full test suite `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests` [VERIFIED `ci.yml:23-84`].
+  * **Job 3: `cli`:** Sets up Node.js 20, installs dependencies via `npm ci`, builds TypeScript via `npm run build`, and executes `npm test` [VERIFIED `ci.yml:86-110`].
+* **CD Pipeline & Systemd Services (`.github/workflows/deploy.yml`, `deploy/`):**
+  * Declares systemd service definitions for both Gunicorn WSGI (`deploy/gunicorn.service`) and the outbox background worker (`deploy/hvt-worker.service`) [VERIFIED `deploy/gunicorn.service`, `deploy/hvt-worker.service`].
+  * Automated deploy script `deploy/deploy.sh` and CI action restart both `hvt` web service and `hvt-worker` on commit deployment [VERIFIED `deploy/deploy.sh`, `deploy.yml:51-55`].
 
 ---
 
@@ -271,6 +272,6 @@ The following environment variables are recognized across `hvt/settings.py` and 
 
 ## WHAT WE DIDN'T ANTICIPATE
 
-1. **Docker Compose Missing Encryption Keys:** `docker-compose.yml` explicitly sets `DEBUG=0` for the `web` container, but omits `HVT_ENCRYPTION_KEYS`. In non-debug mode, Django raises `ImproperlyConfigured` at startup if `HVT_ENCRYPTION_KEYS` is not provided. Running `docker compose up` without manually editing the file causes container crashloops [VERIFIED `hvt/crypto.py:48-50`].
+1. **Docker Compose Missing Encryption Keys (RESOLVED):** Resolved: Configured `HVT_ENCRYPTION_KEYS` and `HVT_JWT_PRIVATE_KEY` environment bindings in `docker-compose.yml` and added a dedicated `worker` container service running `python manage.py run_worker` for transactional outbox asynchronous task processing (emails and webhooks) [VERIFIED `docker-compose.yml:38-72`].
 2. **Zero Async Background Workers (RESOLVED in Step 6):** Initial implementation relied on ad-hoc detached Python threads (`threading.Thread`) for webhooks and emails. Step 6 implemented a resilient transactional database Outbox task engine (`OutboxTask` table) with `select_for_update(skip_locked=True)` worker concurrency, automated exponential backoff retries, stale lock reclamation, and management commands `process_outbox` and `run_worker` [VERIFIED `hvt/apps/organizations/tasks.py:193-249`].
 3. **Absence of User Workspace Join Table:** While the system allows users to belong to an organization and assigned to projects, there is no many-to-many model allowing a single runtime user to belong to multiple sub-workspaces or teams within a single project [VERIFIED `hvt/apps/users/models.py:49-63`].

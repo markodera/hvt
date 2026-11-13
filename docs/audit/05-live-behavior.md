@@ -236,3 +236,23 @@ To eliminate the generic, homogenized "AI average" aesthetic:
 * `docs/audit/screens/anti_zombie/07_settings_projects_collapsed.png` [VERIFIED Playwright headless capture]: Collapsible project boundary card (collapsed).
 * `docs/audit/screens/anti_zombie/09_dashboard_overview.png` [VERIFIED Playwright headless capture]: Clean dashboard with balanced quickstart buttons.
 * `docs/audit/screens/anti_zombie/10_api_keys.png` [VERIFIED Playwright headless capture]: Developer Integration Triad with equalized button sizing.
+
+
+---
+
+### 6. Strict Monochromatic Normalization & Design Discipline (November 9, 2026)
+
+#### A. Architecture & Visual Polish Summary
+* **Purple Strictly Restricted to Primary Action CTAs:** Purged all non-essential \#a78bfa\ and \#7c3aed\ accents from cards, card borders, card icons, code blocks, ASCII diagrams, table badges, and navigation bars. Purple is exclusively reserved for primary call-to-action buttons (\Start free project\, \Sign in with password\, \Issue new Runtime key\, \Verify and continue\).
+* **Zero Eyebrows Policy:** Stripped all uppercase micro-tags, redundant badges, and category labels from landing hero, feature deep dive pages (\/features/engine\, \/features/dual-plane\, etc.), and dashboard cards.
+* **Unconditional Social Auth & Metric Symmetry:** Restored Google and GitHub OAuth buttons on \Login.jsx\ and \Signup.jsx\ with identical \w-full h-10\ dimensions matched to Passkey biometrics.
+* **Muted Theme-Blending Test Mode Banner:** Replaced jarring high-contrast amber/yellow banners with sleek, theme-blended \#141416\ dark zinc banners with subtle \[TEST MODE]\ badges.
+* **Collapsible Project Management:** Defaulted \Create project\ form to a clean collapsed state with interactive responsive toggle.
+* **Monochromatic Live Claims Evaluator:** Replaced purple role buttons in the landing ASCII terminal with crisp, neutral zinc tabs (\order border-zinc-700 bg-zinc-800 text-white\).
+
+#### B. Verification Evidence
+* \hvt-fr/src/pages/auth/Login.jsx\ [VERIFIED file:255-285]: Google, GitHub, and Passkey buttons render symmetrically at \h-10\ with primary submit in purple.
+* \hvt-fr/src/pages/landing/Landing.jsx\ [VERIFIED file:286-318, 478-525]: Hero without eyebrows, monochromatic terminal, and clean zinc pillar cards.
+* \hvt-fr/src/components/layout/GlobalHeader.jsx\ [VERIFIED file:65-83]: Muted dark zinc test mode indicator.
+* \hvt-fr/src/pages/api-keys/ApiKeysPage.jsx\ [VERIFIED file:360-415, 520-670]: Clean zinc key types, white checkbox checks, and neutral privilege warnings.
+* Production build [RAN pm run build\ in \hvt-fr\ -> 0 errors, built in 31.51s].

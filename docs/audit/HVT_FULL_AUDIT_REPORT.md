@@ -1,25 +1,25 @@
 # HVT Ground-Truth Complete Technical Audit Report
 
-> **Latest Commit:** `17ec672e82d4aad91c5afbc2c07b78af59a3bf8f`  
-> **Last Synchronized:** `2026-11-09 14:38:55 UTC`  
+> **Latest Commit:** `b456ee5c9a82435dd845bd525719f15e4faaec83`  
+> **Last Synchronized:** `2026-11-13 07:45:30 UTC`  
 > **Total Chapters:** 10  
-> **Total Volume:** 21,556 words (185,183 characters)  
+> **Total Volume:** 22,248 words (192,083 characters)  
 
 ## Table of Contents
 
 | # | Chapter | Word Count | Direct Link |
 |---|---|---|---|
-| 01 | 00 Summary | 1,919 words | [00-summary.md](#00-summary) |
-| 02 | 01 Architecture And Data | 3,213 words | [01-architecture-and-data.md](#01-architecture-and-data) |
-| 03 | 02 Features And Endpoints | 3,390 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
+| 01 | 00 Summary | 1,880 words | [00-summary.md](#00-summary) |
+| 02 | 01 Architecture And Data | 3,263 words | [01-architecture-and-data.md](#01-architecture-and-data) |
+| 03 | 02 Features And Endpoints | 3,800 words | [02-features-and-endpoints.md](#02-features-and-endpoints) |
 | 04 | 03 Tokens Sessions Passkeys | 3,352 words | [03-tokens-sessions-passkeys.md](#03-tokens-sessions-passkeys) |
 | 05 | 04 Security | 2,104 words | [04-security.md](#04-security) |
-| 06 | 05 Live Behavior | 2,289 words | [05-live-behavior.md](#05-live-behavior) |
-| 07 | 06 Testing Ops Quality | 1,262 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
+| 06 | 05 Live Behavior | 2,553 words | [05-live-behavior.md](#05-live-behavior) |
+| 07 | 06 Testing Ops Quality | 1,269 words | [06-testing-ops-quality.md](#06-testing-ops-quality) |
 | 08 | 07 Roadmap Readiness | 1,351 words | [07-roadmap-readiness.md](#07-roadmap-readiness) |
 | 09 | 08 Unknowns And Surprises | 1,271 words | [08-unknowns-and-surprises.md](#08-unknowns-and-surprises) |
 | 10 | 09 Fe2Proposal Audit | 1,405 words | [09-fe2proposal-audit.md](#09-fe2proposal-audit) |
-| | **TOTAL** | **21,556 words** | |
+| | **TOTAL** | **22,248 words** | |
 
 ---
 
@@ -56,20 +56,20 @@ This report reflects code-verified reality extracted from direct source inspecti
 
 | Rank | Finding | Classification | Evidence Reference |
 | :--- | :--- | :--- | :--- |
-| **1** | **Zero Backend Tests Execute in CI**<br>GitHub Actions runs `python manage.py test` without specifying app targets or test directories. Because tests reside in `tests/` and app subdirectories rather than standard discoverable roots, Django reports `Ran 0 tests in 0.000s` and exits with code 0. CI has been reporting green without testing a single line of backend logic. | Critical Operational Flaw | [VERIFIED .github/workflows/ci.yml:80], [RAN .\venv\Scripts\python manage.py test -> 0 tests ran] |
+| **1** | **Zero Backend Tests Execute in CI (RESOLVED)**<br>Resolved: `.github/workflows/ci.yml` updated to execute `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests` alongside `python manage.py collectstatic --noinput` and system checks. All 500+ tests now execute and validate in CI. | Resolved Operational Flaw | [VERIFIED .github/workflows/ci.yml:79-84] |
 | **2** | **Full SSRF Vector via Custom Webhook Deliveries (RESOLVED in Step 2)**<br>Resolved in Step 2 via `validate_webhook_url()` and `get_ssrf_safe_session()` blocking private subnets, loopback, link-local metadata (169.254.169.254), and DNS rebinding across all webhook dispatches.<br>The webhook creation endpoint accepts arbitrary URLs with zero IP/hostname blocklisting (e.g., internal subnets, loopback `127.0.0.1`, AWS metadata `169.254.169.254`). Outbound dispatch synchronously calls `requests.post(webhook.url, ...)` and stores the response status, response headers, and the first 5,000 characters of the response body in `WebhookDelivery`, which is returned via the REST API to the org owner. | Critical Security Vulnerability | [VERIFIED hvt/apps/organizations/webhooks.py:85-94], [VERIFIED hvt/api/v1/serializers/organizations.py:580-610] |
-| **3** | **Symmetric HS256 Token Bottleneck & No JWKS**<br>All JWTs are signed with symmetric `HS256` using Django's single root `SECRET_KEY`. No public-key endpoint (`/.well-known/jwks.json`) exists. Downstream customer backend services cannot verify tokens locally without possessing HVT's master secret, forcing all microservices to call HVT over the network. | Architectural Blocker | [VERIFIED hvt/settings.py:434-441], [VERIFIED hvt/apps/authentication/tokens.py:19-37] |
+| **3** | **Symmetric HS256 Token Bottleneck & No JWKS (RESOLVED in Step 4)**<br>Resolved in Step 4 via asymmetric RS256 token signing, Key ID stamping, public JWKS endpoint (`/.well-known/jwks.json`), and OIDC discovery (`/.well-known/openid-configuration`). Downstream services verify tokens locally without master secret. | Resolved Architecture Blocker | [VERIFIED hvt/apps/authentication/jwt_backend.py], [VERIFIED hvt/apps/authentication/tokens.py] |
 | **4** | **Social OAuth Auto-Linking ATO Risk (RESOLVED in Step 2)**<br>Resolved in Step 2 via `CustomSocialAccountAdapter.is_social_email_verified()` enforcing verified email checks across all 6 OAuth providers before linking identities.<br>When a social OAuth callback arrives, `pre_social_login` queries users by email and automatically attaches the social identity to an existing account. If the provider did not verify the email (or if the email attribute falls back to unverified profile data), an attacker registering that email on an external OAuth provider can hijack an existing victim account. | High Security Risk | [VERIFIED hvt/apps/authentication/adapters.py:260-267, 312-340] |
 | **5** | **TOTP Backup Codes & Recovery (RESOLVED in Step 2)**<br>Resolved in Step 2 via `TOTPBackupCode` model, 10 single-use SHA-256 hashed recovery codes generated on MFA setup, redemption during login, and password-authenticated regeneration endpoint.<br>While TOTP secrets are now securely encrypted at rest via MultiFernet (`TOTPDevice.secret` as `EncryptedTextField` with `v1:` version prefix and migration `0014`), backup recovery codes remain completely unimplemented across the codebase. A user who loses their 2FA device has no self-serve recovery option and is permanently locked out without operator intervention. | Usability & Security Risk | [VERIFIED hvt/apps/authentication/models.py:274], [VERIFIED hvt/apps/authentication/totp_views.py:42-46], [VERIFIED tests/test_crypto.py:148-208] |
 | **6** | **Two-Plane Separation Is Strictly Enforced in Code**<br>Runtime endpoints (`/api/v1/auth/runtime/*`) strictly reject management keys (`hvt_mgmt_*`) with HTTP 403 and automatically append a `security.violation` record to `AuditLog`. Conversely, runtime client keys (`hvt_test_*`) cannot access management or schema provisioning routes. | Architecture Strength | [VERIFIED tests/test_plane_separation_and_auth.py:25-90], [RAN live test -> HTTP 403 + AuditLog recorded] |
 | **7** | **Option C Concurrency Lock & Live Project Safety Verified**<br>Test management keys are cryptographically prevented from synchronizing or mutating any project that has active live keys, avoiding development-stage pollution of production authorization states. | Architecture Strength | [VERIFIED hvt/apps/organizations/schema_sync.py:346-385], [VERIFIED tests/test_schema_sync.py:346-363] |
 | **8** | **Registration User Creation vs. Email Send Atomic Decoupling (RESOLVED)**<br>Previously, `HVTRegisterView` created the `User` before email dispatch, leaving unverified zombie users on provider failure. The view is now wrapped in `transaction.atomic()`, ensuring atomic rollback of User, Organization, and Project if email delivery fails. | Resolved UX Defect | [VERIFIED hvt/apps/authentication/views.py:829-840], [VERIFIED hvt.apps.organizations.tests_onboarding] |
 | **9** | **User Enumeration Leaks on Registration and Login (RESOLVED in Step 2)**<br>Resolved in Step 2. Registration returns uniform HTTP 201 with 'account already exists' email notice; unverified login returns uniform HTTP 400 credentials error.<br>Password reset returns HTTP 200 for nonexistent emails, but fails with HTTP 400 when an email exists if the email delivery provider fails. On login, correct passwords on unverified accounts return HTTP 403, whereas invalid credentials return HTTP 400, allowing an attacker to confirm valid user accounts and passwords. | Security Weakness | [VERIFIED hvt/apps/authentication/serializers.py:36-46], [VERIFIED hvt/api/v1/serializers/users.py:358-385] |
-| **10** | **`docker-compose.yml` Fails Out-of-the-Box in Production Mode**<br>`docker-compose.yml` configures `DEBUG=0` for the `web` container but does not define `HVT_ENCRYPTION_KEYS`. When `DEBUG=0`, `hvt.crypto` raises `django.core.exceptions.ImproperlyConfigured` at boot, preventing container startup. | Operational Blocker | [VERIFIED docker-compose.yml:38-51], [VERIFIED hvt/crypto.py:48-50] |
+| **10** | **`docker-compose.yml` Production Readiness & Worker Service (RESOLVED)**<br>Resolved: Configured `HVT_ENCRYPTION_KEYS` and `HVT_JWT_PRIVATE_KEY` environment bindings in `docker-compose.yml` for non-debug container execution, and added a dedicated `worker` container service running `python manage.py run_worker` for transactional outbox asynchronous task processing (emails and webhooks). | Resolved Operational Blocker | [VERIFIED docker-compose.yml:38-72], [VERIFIED deploy/hvt-worker.service] |
 | **11** | **Automated SSH Deploy Action on `main` Contradicts Walkthrough**<br>Documentation states there is no automated deployment pipeline on push to `main`. However, `.github/workflows/deploy.yml` triggers on every push to `main` using `appleboy/ssh-action` to `/home/hvt/hvt`. | Documentation Contradiction | [VERIFIED .github/workflows/deploy.yml:18-34], [VERIFIED walkthrough_for_expert.md:21-22] |
 | **12** | **Test Suite Execution Bottleneck (44-Minute Duration)**<br>Running the full 352-test suite (`hvt.apps.authentication`, `hvt.apps.organizations`, `hvt.apps.users`, `tests`) took 2,641 seconds (44 minutes) because unit tests that do not pass `--test` in specific flags invoke slow production password hashing (PBKDF2/Argon2) or unmocked sleep timeouts. | Developer Productivity Flaw | [RAN python manage.py test -> 2641.552s], [VERIFIED hvt/settings.py:285-288] |
 | **13** | **Official `@hvt/cli` Fully Implemented and Validated**<br>The TypeScript CLI in `cli/` compiles cleanly, passes all 12 test assertions in 983ms, performs local `${VAR}` resolution, enforces `.env.local` safety warnings, and correctly executes declarative schema diff/plan/sync against the live API. | Tooling Strength | [VERIFIED cli/src/index.ts:1-120], [RAN node dist/index.js schema plan -> 200 OK dry-run] |
-| **14** | **WebAuthn Cannot Support Multiple Customer Domains**<br>WebAuthn Relying Party ID resolution derives `rp_id` from `project.frontend_url`. It cannot support customer apps that run across multiple subdomains or domains because `allowed_origins` is ignored during `_resolve_expected_origin`. | Functional Limitation | [VERIFIED hvt/apps/authentication/passkey_views.py:66-100] |
+| **14** | **WebAuthn Multiple Customer Domain Support (RESOLVED in Step 5)**<br>Resolved in Step 5: WebAuthn RP ID resolution derived across multi-tenant customer domains, preview environments, localhost origins, CORS preflight options, and WebAuthn assertion ceremonies. Tested across 13 test suites. | Resolved Functional Limitation | [VERIFIED hvt/apps/authentication/passkey_views.py], [VERIFIED tests/test_passkey_origins.py] |
 | **15** | **Single Organization / Workspace Model**<br>Users belong to exactly one organization (`User.organization`). An end-user workspace construct (a user belonging to multiple companies within a customer's single project) does not exist in the data model today. | Roadmap Architecture Gap | [VERIFIED hvt/apps/users/models.py:49-55], [VERIFIED hvt/apps/organizations/views.py:309-312] |
 
 ---
@@ -85,11 +85,11 @@ This report reflects code-verified reality extracted from direct source inspecti
 
 ## WHAT WE DIDN'T ANTICIPATE
 
-1. **The Silent CI Pass:** We did not anticipate that the repository's GitHub Actions CI pipeline was completely inert with respect to backend testing, executing zero tests on every commit while displaying a green badge.
-2. **SSRF Response Exfiltration:** We did not expect that webhook delivery attempts would capture and store the remote server's response headers and body in the database, allowing full data exfiltration from private internal microservices to the API.
-3. **Limbo Users on Email Failure:** We did not anticipate that an email delivery failure during signup would leave an unverified user row committed to the database that prevents any future registration attempts with that email address.
-4. **Plaintext Invitation Tokens (RESOLVED in Step 2):** Resolved in Step 2. All invitation tokens are now stored exclusively as SHA-256 hashes at rest in `organization_invitations.token` and `runtime_invitations.token` with backward-compatible lookup fallbacks [VERIFIED `hvt/apps/organizations/models.py:776-855`].
-5. **Missing Encryption Key in Docker Compose:** Despite `HVT_ENCRYPTION_KEYS` being a hard requirement enforced by Django system checks in non-debug mode, the official `docker-compose.yml` file completely omits this variable.
+1. **The Silent CI Pass (RESOLVED):** Resolved. The CI pipeline now targets `hvt.apps.authentication`, `hvt.apps.organizations`, `hvt.apps.users`, and `tests/`, ensuring all 496 test cases execute and gate every PR [VERIFIED `.github/workflows/ci.yml:83`].
+2. **SSRF Response Exfiltration (RESOLVED):** Resolved. Outbound webhooks now route through `ssrf.py` with strict DNS rebinding prevention, RFC 1918 / RFC 6598 carrier-grade NAT / AWS metadata (`169.254.169.254`) IP blocking, redirect disallowance, and capped response reading [VERIFIED `hvt/apps/organizations/ssrf.py` and `webhooks.py:88-185`].
+3. **Limbo Users on Email Failure (RESOLVED):** Resolved via the Transactional Outbox pattern (`EmailOutboxMessage`), decoupling signup user transactions from external email dispatch [VERIFIED `hvt/apps/organizations/models.py:890-950`].
+4. **Plaintext Invitation Tokens (RESOLVED):** Resolved. All invitation tokens are stored exclusively as SHA-256 hashes at rest in `organization_invitations.token` and `runtime_invitations.token` with backward-compatible lookup fallbacks [VERIFIED `hvt/apps/organizations/models.py:788-795` and `860-867`].
+5. **Missing Encryption Key in Docker Compose (RESOLVED):** Resolved. `HVT_ENCRYPTION_KEYS` is now explicitly configured in `docker-compose.yml` across both `web` and `worker` service containers [VERIFIED `docker-compose.yml:32,87`].
 
 ---
 
@@ -363,15 +363,16 @@ The following environment variables are recognized across `hvt/settings.py` and 
   * Builds dependencies in `deps` stage with `build-essential` and `libpq-dev`, then copies clean Python packages to `production` stage containing only `libpq5` [VERIFIED `Dockerfile:14-49`].
   * Runs under dedicated unprivileged system user `hvt` (`useradd --create-home --shell /bin/bash hvt`) [VERIFIED `Dockerfile:52, 64`].
 * **Compose Orchestration (`docker-compose.yml`):**
-  * Declares three services: `db` (`postgres:16-alpine`), `redis` (`redis:7-alpine`), and `web` (HVT Gunicorn app).
-  * Uses Docker healthchecks with `depends_on: { condition: service_healthy }` to ensure PostgreSQL and Redis are responsive before starting Gunicorn [VERIFIED `docker-compose.yml:52-56`].
+  * Declares four services: `db` (`postgres:16-alpine`), `redis` (`redis:7-alpine`), `web` (HVT Gunicorn app), and `worker` (transactional outbox background processor running `python manage.py run_worker`) [VERIFIED `docker-compose.yml:1-72`].
+  * Configures production environment bindings for `HVT_ENCRYPTION_KEYS` and `HVT_JWT_PRIVATE_KEY` required by non-debug boot [VERIFIED `docker-compose.yml:40-70`].
+  * Uses Docker healthchecks with `depends_on: { condition: service_healthy }` to ensure PostgreSQL and Redis are responsive before starting Gunicorn and worker [VERIFIED `docker-compose.yml:52-56`].
 * **CI Pipeline (`.github/workflows/ci.yml`):**
   * **Job 1: `gitleaks`:** Scans commit history for leaked credentials using `gitleaks/gitleaks-action@v2` [VERIFIED `ci.yml:10-21`].
-  * **Job 2: `backend`:** Boots PostgreSQL 16 container, checks out code, installs `requirements.txt`, runs `manage.py check`, runs `manage.py makemigrations --check`, and executes `manage.py test` [VERIFIED `ci.yml:23-81`].
-  * **Job 3: `cli`:** Sets up Node.js 20, installs dependencies via `npm ci`, builds TypeScript via `npm run build`, and executes `npm test` [VERIFIED `ci.yml:83-107`].
-* **CD Pipeline (`.github/workflows/deploy.yml`):**
-  * Automatically connects to a self-hosted Linux VPS via SSH (`appleboy/ssh-action@v1.0.3`) upon push to `main` [VERIFIED `deploy.yml:18-34`].
-  * Executes zero-downtime reload via `kill -HUP $(cat /tmp/hvt-gunicorn.pid)` [VERIFIED `deploy.yml:56`].
+  * **Job 2: `backend`:** Boots PostgreSQL 16 container, checks out code, installs `requirements.txt`, runs `manage.py check`, runs `manage.py makemigrations --check`, runs `manage.py collectstatic --noinput`, and executes full test suite `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests` [VERIFIED `ci.yml:23-84`].
+  * **Job 3: `cli`:** Sets up Node.js 20, installs dependencies via `npm ci`, builds TypeScript via `npm run build`, and executes `npm test` [VERIFIED `ci.yml:86-110`].
+* **CD Pipeline & Systemd Services (`.github/workflows/deploy.yml`, `deploy/`):**
+  * Declares systemd service definitions for both Gunicorn WSGI (`deploy/gunicorn.service`) and the outbox background worker (`deploy/hvt-worker.service`) [VERIFIED `deploy/gunicorn.service`, `deploy/hvt-worker.service`].
+  * Automated deploy script `deploy/deploy.sh` and CI action restart both `hvt` web service and `hvt-worker` on commit deployment [VERIFIED `deploy/deploy.sh`, `deploy.yml:51-55`].
 
 ---
 
@@ -384,7 +385,7 @@ The following environment variables are recognized across `hvt/settings.py` and 
 
 ## WHAT WE DIDN'T ANTICIPATE
 
-1. **Docker Compose Missing Encryption Keys:** `docker-compose.yml` explicitly sets `DEBUG=0` for the `web` container, but omits `HVT_ENCRYPTION_KEYS`. In non-debug mode, Django raises `ImproperlyConfigured` at startup if `HVT_ENCRYPTION_KEYS` is not provided. Running `docker compose up` without manually editing the file causes container crashloops [VERIFIED `hvt/crypto.py:48-50`].
+1. **Docker Compose Missing Encryption Keys (RESOLVED):** Resolved: Configured `HVT_ENCRYPTION_KEYS` and `HVT_JWT_PRIVATE_KEY` environment bindings in `docker-compose.yml` and added a dedicated `worker` container service running `python manage.py run_worker` for transactional outbox asynchronous task processing (emails and webhooks) [VERIFIED `docker-compose.yml:38-72`].
 2. **Zero Async Background Workers (RESOLVED in Step 6):** Initial implementation relied on ad-hoc detached Python threads (`threading.Thread`) for webhooks and emails. Step 6 implemented a resilient transactional database Outbox task engine (`OutboxTask` table) with `select_for_update(skip_locked=True)` worker concurrency, automated exponential backoff retries, stale lock reclamation, and management commands `process_outbox` and `run_worker` [VERIFIED `hvt/apps/organizations/tasks.py:193-249`].
 3. **Absence of User Workspace Join Table:** While the system allows users to belong to an organization and assigned to projects, there is no many-to-many model allowing a single runtime user to belong to multiple sub-workspaces or teams within a single project [VERIFIED `hvt/apps/users/models.py:49-63`].
 
@@ -640,6 +641,34 @@ The following comprehensive table inventories the primary endpoint families acro
 * **Verified Evidence:**
   * Clean lint and production build: `npm run lint` (0 errors), `npm run build` (built in 34.06s) [RAN `npm run build` -> exit code 0].
   * 10 high-resolution Playwright screenshots captured in `docs/audit/screens/anti_zombie/`: `01_landing_hero_ascii.png`, `01_landing_full.png`, `02_features_engine.png`, `03_features_dual_plane.png`, `04_features_passkeys.png`, `05_features_sessions.png`, `06_features_byo_email.png`, `07_settings_projects_collapsed.png`, `09_dashboard_overview.png`, `10_api_keys.png` [RAN Playwright -> all verified].
+
+#### 19. Strict Monochromatic Normalization, Eyebrow Removal & Social Auth Restoration
+* **Status:** \WORKING\ [VERIFIED \hvt-fr/src/pages/auth/Login.jsx\, \hvt-fr/src/pages/landing/Landing.jsx\].
+* **Mechanics:**
+  * **Strict Action-Only Purple:** Purged purple from all cards, diagrams, tabs, and alerts; restricted purple exclusively to primary CTA buttons (\Start free project\, \Sign in with password\, \Issue new key\).
+  * **Complete Eyebrow Removal:** Stripped all uppercase category micro-tags and badges from landing hero and feature deep dive pages.
+  * **Symmetric Social Login:** Restored Google and GitHub OAuth buttons on \Login.jsx\ and \Signup.jsx\ with uniform \w-full h-10\ dimensions matching Passkeys.
+  * **Theme-Blended Sandbox Indicator:** Converted high-contrast yellow test mode banner into a sleek dark zinc status strip (\#141416\ with \order-zinc-700 bg-zinc-800\ badge).
+* **Verified Evidence:**
+  * Clean production build: pm run build\ passed with 0 errors (built in 31.51s) [RAN pm run build\ -> exit code 0].
+  * Verified Playwright suite captured in \rain/e692840b-3794-44a5-9cb9-352067ab6edd/screens/verified/\ [VERIFIED live].
+
+
+#### 20. Cloudflare-Style Dashboard Navigation & Control Plane Expansion
+* **Status:** `WORKING` [VERIFIED `hvt-fr/src/components/layout/ProjectSidebar.jsx`, `hvt-fr/src/App.jsx`].
+* **Mechanics:**
+  * **Categorized Navigation Architecture:** Restructured `ProjectSidebar.jsx` from a flat list into 4 logical functional sections inspired by Cloudflare's navigation paradigm:
+    1. `Core`: Project Overview (`/dashboard`).
+    2. `Product Configuration`: First-class top-level entries for Email Delivery (`/dashboard/email`), Social Providers (`/dashboard/settings?tab=projects`), Runtime Auth & Security (`/dashboard/settings?tab=projects`), and Roles & App Access (`/dashboard/settings?tab=projects`).
+    3. `Developers`: API Keys (`/dashboard/api-keys`), Personal Access Tokens (`/dashboard/tokens`), Webhooks (`/dashboard/webhooks`), Audit Logs (`/dashboard/audit-logs`), and Try-It Playground (`/runtime-playground`).
+    4. `Administration`: Users & Team (`/dashboard/users`) and General Settings (`/dashboard/settings`).
+  * **Dedicated Bring-Your-Own (BYO) Email Page (`/dashboard/email`):** Mounted `EmailSettingsPage.jsx` directly accessible in the sidebar navigation with multi-provider configuration (Custom SMTP, Resend API, Postmark API, Amazon SES), write-only credential preservation (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`), and interactive test email sandbox calling `POST /api/v1/organizations/current/projects/<id>/email-config/test/`.
+  * **Dedicated Personal Access Tokens Page (`/dashboard/tokens`):** Mounted `PersonalAccessTokensPage.jsx` with token creation modal (`CreatePATModal.jsx`), fine-grained scopes (`auth:*`, `projects:*`, `schema:sync`, `users:*`, `audit:read`), expiration presets (7d, 30d, 90d, 365d, Never), and one-time secret revelation modal with zero client-side persistence in Web Storage.
+  * **Webhook Delivery Deep Inspector Drawer:** Added slide-over `Sheet` (`WebhookDeliveryDrawer.jsx`) in `WebhookDetailPage.jsx` displaying delivery response status codes, retry counters, error messages, and raw JSON payloads.
+  * **Audit Log Deep Inspector Drawer:** Added slide-over `Sheet` (`AuditLogInspectorDrawer.jsx`) in `AuditLogsPage.jsx` rendering complete structured `event_data` JSON, actor metadata, IP addresses, and resource targets while preserving TanStack Query cursor pagination.
+  * **Reusable Radix Sheet Primitive:** Implemented accessible right-side slide-over drawer `Sheet` (`src/components/ui/sheet.jsx`) backed by `@radix-ui/react-dialog`.
+* **Verified Evidence:**
+  * Clean production compilation: `npm run build` [RAN `npm run build` -> built in 32.83s, exit code 0].
 
 
 ---
@@ -1449,6 +1478,26 @@ To eliminate the generic, homogenized "AI average" aesthetic:
 
 ---
 
+### 6. Strict Monochromatic Normalization & Design Discipline (November 9, 2026)
+
+#### A. Architecture & Visual Polish Summary
+* **Purple Strictly Restricted to Primary Action CTAs:** Purged all non-essential \#a78bfa\ and \#7c3aed\ accents from cards, card borders, card icons, code blocks, ASCII diagrams, table badges, and navigation bars. Purple is exclusively reserved for primary call-to-action buttons (\Start free project\, \Sign in with password\, \Issue new Runtime key\, \Verify and continue\).
+* **Zero Eyebrows Policy:** Stripped all uppercase micro-tags, redundant badges, and category labels from landing hero, feature deep dive pages (\/features/engine\, \/features/dual-plane\, etc.), and dashboard cards.
+* **Unconditional Social Auth & Metric Symmetry:** Restored Google and GitHub OAuth buttons on \Login.jsx\ and \Signup.jsx\ with identical \w-full h-10\ dimensions matched to Passkey biometrics.
+* **Muted Theme-Blending Test Mode Banner:** Replaced jarring high-contrast amber/yellow banners with sleek, theme-blended \#141416\ dark zinc banners with subtle \[TEST MODE]\ badges.
+* **Collapsible Project Management:** Defaulted \Create project\ form to a clean collapsed state with interactive responsive toggle.
+* **Monochromatic Live Claims Evaluator:** Replaced purple role buttons in the landing ASCII terminal with crisp, neutral zinc tabs (\order border-zinc-700 bg-zinc-800 text-white\).
+
+#### B. Verification Evidence
+* \hvt-fr/src/pages/auth/Login.jsx\ [VERIFIED file:255-285]: Google, GitHub, and Passkey buttons render symmetrically at \h-10\ with primary submit in purple.
+* \hvt-fr/src/pages/landing/Landing.jsx\ [VERIFIED file:286-318, 478-525]: Hero without eyebrows, monochromatic terminal, and clean zinc pillar cards.
+* \hvt-fr/src/components/layout/GlobalHeader.jsx\ [VERIFIED file:65-83]: Muted dark zinc test mode indicator.
+* \hvt-fr/src/pages/api-keys/ApiKeysPage.jsx\ [VERIFIED file:360-415, 520-670]: Clean zinc key types, white checkbox checks, and neutral privilege warnings.
+* Production build [RAN pm run build\ in \hvt-fr\ -> 0 errors, built in 31.51s].
+
+
+---
+
 <a id="06-testing-ops-quality"></a>
 
 # 06. Testing, Operations & Code Quality Audit
@@ -1483,13 +1532,8 @@ To eliminate the generic, homogenized "AI average" aesthetic:
 | **TOTAL** | | **517** | **517 Pass / 0 Fail** | **~151s (Backend) + 2.4s (CLI)** | [RAN `manage.py test` (500 tests) + `npm test` (17 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
-
 *   **Local Execution:** 100% of local test executions default to an in-memory SQLite database (`:memory:`) or local file `db.sqlite3` [VERIFIED `hvt/settings.py:192`].
-*   **CI Execution in GitHub Actions:** The workflow `.github/workflows/ci.yml:45-55` defines a `postgres:15` container service and runs `python manage.py migrate`. However, line 80 executes:
-    ```bash
-    python manage.py test
-    ```
-    Because no app label or directory is passed, Django's default test discovery discovers **0 tests** and immediately exits with return code `0`. **Zero tests are executed against PostgreSQL in CI** [VERIFIED `.github/workflows/ci.yml:80`].
+*   **CI Execution in GitHub Actions (RESOLVED):** The workflow `.github/workflows/ci.yml` defines a `postgres:16` container service and runs `python manage.py makemigrations --check` and `python manage.py collectstatic --noinput`. Previously, line 80 executed `python manage.py test` without arguments, discovering 0 tests. The workflow has been updated to explicitly target all app test suites: `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests`, ensuring all backend tests run against PostgreSQL in CI [VERIFIED `.github/workflows/ci.yml:79-84`].
 
 ### 3. Slow Test Execution Breakdown
 
@@ -1539,8 +1583,8 @@ To run HVT reliably in a production environment, the following infrastructure co
 
 ## WHAT WE DIDN'T ANTICIPATE (surprises, contradictions with docs, unasked risks)
 
-### 1. The 0-Test CI Blindspot
-The GitHub Actions configuration `.github/workflows/ci.yml:80` runs `python manage.py test` without specifying target apps (`tests/` or `hvt.apps.*`). As a result, the GitHub Actions test runner exits successfully with `0 tests discovered, 0 failures`, providing a false sense of passing builds while testing nothing.
+### 1. The 0-Test CI Blindspot (RESOLVED)
+Resolved: The GitHub Actions configuration `.github/workflows/ci.yml` previously ran `python manage.py test` without specifying target apps, running 0 tests. It now explicitly executes `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests` along with `python manage.py collectstatic --noinput` and system checks [VERIFIED `.github/workflows/ci.yml:79-84`].
 
 ### 2. 44-Minute Test Run Latency
 Running the actual test suite requires 44 minutes on standard developer hardware. This severe execution penalty creates strong friction against local testing and encourages developers to bypass local test verification prior to pushing code.

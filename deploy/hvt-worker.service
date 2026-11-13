@@ -1,0 +1,19 @@
+[Unit]
+Description=HVT Background Outbox Task Worker
+After=network.target postgresql.service redis.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=hvt
+Group=www-data
+WorkingDirectory=/home/hvt/hvt
+EnvironmentFile=/home/hvt/hvt/.env
+ExecStart=/home/hvt/hvt/venv/bin/python manage.py run_worker
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

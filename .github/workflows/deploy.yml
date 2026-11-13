@@ -48,8 +48,11 @@ jobs:
             # 6. Collect new static files for Nginx to serve
             python manage.py collectstatic --noinput
             
-            # 7. Restart HVT service via systemd
+            # 7. Restart HVT web service and outbox worker via systemd
             sudo systemctl restart hvt
+            if systemctl is-active --quiet hvt-worker 2>/dev/null; then
+              sudo systemctl restart hvt-worker
+            fi
             
             # 8. Verify service is active
             sudo systemctl is-active --quiet hvt && echo "HVT deployment successfully reloaded!" || exit 1

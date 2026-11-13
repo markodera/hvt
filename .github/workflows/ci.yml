@@ -76,8 +76,11 @@ jobs:
       - name: Django migration check
         run: python manage.py makemigrations --check
 
+      - name: Django collectstatic check
+        run: python manage.py collectstatic --noinput
+
       - name: Run Backend Test Suite
-        run: python manage.py test
+        run: python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests
 
   cli:
     name: CLI Tests (@hvt/cli)

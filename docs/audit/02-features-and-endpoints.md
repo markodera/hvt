@@ -245,3 +245,31 @@ The following comprehensive table inventories the primary endpoint families acro
 * **Verified Evidence:**
   * Clean lint and production build: `npm run lint` (0 errors), `npm run build` (built in 34.06s) [RAN `npm run build` -> exit code 0].
   * 10 high-resolution Playwright screenshots captured in `docs/audit/screens/anti_zombie/`: `01_landing_hero_ascii.png`, `01_landing_full.png`, `02_features_engine.png`, `03_features_dual_plane.png`, `04_features_passkeys.png`, `05_features_sessions.png`, `06_features_byo_email.png`, `07_settings_projects_collapsed.png`, `09_dashboard_overview.png`, `10_api_keys.png` [RAN Playwright -> all verified].
+
+#### 19. Strict Monochromatic Normalization, Eyebrow Removal & Social Auth Restoration
+* **Status:** \WORKING\ [VERIFIED \hvt-fr/src/pages/auth/Login.jsx\, \hvt-fr/src/pages/landing/Landing.jsx\].
+* **Mechanics:**
+  * **Strict Action-Only Purple:** Purged purple from all cards, diagrams, tabs, and alerts; restricted purple exclusively to primary CTA buttons (\Start free project\, \Sign in with password\, \Issue new key\).
+  * **Complete Eyebrow Removal:** Stripped all uppercase category micro-tags and badges from landing hero and feature deep dive pages.
+  * **Symmetric Social Login:** Restored Google and GitHub OAuth buttons on \Login.jsx\ and \Signup.jsx\ with uniform \w-full h-10\ dimensions matching Passkeys.
+  * **Theme-Blended Sandbox Indicator:** Converted high-contrast yellow test mode banner into a sleek dark zinc status strip (\#141416\ with \order-zinc-700 bg-zinc-800\ badge).
+* **Verified Evidence:**
+  * Clean production build: pm run build\ passed with 0 errors (built in 31.51s) [RAN pm run build\ -> exit code 0].
+  * Verified Playwright suite captured in \rain/e692840b-3794-44a5-9cb9-352067ab6edd/screens/verified/\ [VERIFIED live].
+
+
+#### 20. Cloudflare-Style Dashboard Navigation & Control Plane Expansion
+* **Status:** `WORKING` [VERIFIED `hvt-fr/src/components/layout/ProjectSidebar.jsx`, `hvt-fr/src/App.jsx`].
+* **Mechanics:**
+  * **Categorized Navigation Architecture:** Restructured `ProjectSidebar.jsx` from a flat list into 4 logical functional sections inspired by Cloudflare's navigation paradigm:
+    1. `Core`: Project Overview (`/dashboard`).
+    2. `Product Configuration`: First-class top-level entries for Email Delivery (`/dashboard/email`), Social Providers (`/dashboard/settings?tab=projects`), Runtime Auth & Security (`/dashboard/settings?tab=projects`), and Roles & App Access (`/dashboard/settings?tab=projects`).
+    3. `Developers`: API Keys (`/dashboard/api-keys`), Personal Access Tokens (`/dashboard/tokens`), Webhooks (`/dashboard/webhooks`), Audit Logs (`/dashboard/audit-logs`), and Try-It Playground (`/runtime-playground`).
+    4. `Administration`: Users & Team (`/dashboard/users`) and General Settings (`/dashboard/settings`).
+  * **Dedicated Bring-Your-Own (BYO) Email Page (`/dashboard/email`):** Mounted `EmailSettingsPage.jsx` directly accessible in the sidebar navigation with multi-provider configuration (Custom SMTP, Resend API, Postmark API, Amazon SES), write-only credential preservation (`has_smtp_password`, `has_api_key`, `has_aws_secret_access_key`), and interactive test email sandbox calling `POST /api/v1/organizations/current/projects/<id>/email-config/test/`.
+  * **Dedicated Personal Access Tokens Page (`/dashboard/tokens`):** Mounted `PersonalAccessTokensPage.jsx` with token creation modal (`CreatePATModal.jsx`), fine-grained scopes (`auth:*`, `projects:*`, `schema:sync`, `users:*`, `audit:read`), expiration presets (7d, 30d, 90d, 365d, Never), and one-time secret revelation modal with zero client-side persistence in Web Storage.
+  * **Webhook Delivery Deep Inspector Drawer:** Added slide-over `Sheet` (`WebhookDeliveryDrawer.jsx`) in `WebhookDetailPage.jsx` displaying delivery response status codes, retry counters, error messages, and raw JSON payloads.
+  * **Audit Log Deep Inspector Drawer:** Added slide-over `Sheet` (`AuditLogInspectorDrawer.jsx`) in `AuditLogsPage.jsx` rendering complete structured `event_data` JSON, actor metadata, IP addresses, and resource targets while preserving TanStack Query cursor pagination.
+  * **Reusable Radix Sheet Primitive:** Implemented accessible right-side slide-over drawer `Sheet` (`src/components/ui/sheet.jsx`) backed by `@radix-ui/react-dialog`.
+* **Verified Evidence:**
+  * Clean production compilation: `npm run build` [RAN `npm run build` -> built in 32.83s, exit code 0].

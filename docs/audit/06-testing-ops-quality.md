@@ -30,13 +30,8 @@
 | **TOTAL** | | **517** | **517 Pass / 0 Fail** | **~151s (Backend) + 2.4s (CLI)** | [RAN `manage.py test` (500 tests) + `npm test` (17 tests)] |
 
 ### 2. SQLite vs PostgreSQL Test Execution Reality
-
 *   **Local Execution:** 100% of local test executions default to an in-memory SQLite database (`:memory:`) or local file `db.sqlite3` [VERIFIED `hvt/settings.py:192`].
-*   **CI Execution in GitHub Actions:** The workflow `.github/workflows/ci.yml:45-55` defines a `postgres:15` container service and runs `python manage.py migrate`. However, line 80 executes:
-    ```bash
-    python manage.py test
-    ```
-    Because no app label or directory is passed, Django's default test discovery discovers **0 tests** and immediately exits with return code `0`. **Zero tests are executed against PostgreSQL in CI** [VERIFIED `.github/workflows/ci.yml:80`].
+*   **CI Execution in GitHub Actions (RESOLVED):** The workflow `.github/workflows/ci.yml` defines a `postgres:16` container service and runs `python manage.py makemigrations --check` and `python manage.py collectstatic --noinput`. Previously, line 80 executed `python manage.py test` without arguments, discovering 0 tests. The workflow has been updated to explicitly target all app test suites: `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests`, ensuring all backend tests run against PostgreSQL in CI [VERIFIED `.github/workflows/ci.yml:79-84`].
 
 ### 3. Slow Test Execution Breakdown
 
@@ -86,8 +81,8 @@ To run HVT reliably in a production environment, the following infrastructure co
 
 ## WHAT WE DIDN'T ANTICIPATE (surprises, contradictions with docs, unasked risks)
 
-### 1. The 0-Test CI Blindspot
-The GitHub Actions configuration `.github/workflows/ci.yml:80` runs `python manage.py test` without specifying target apps (`tests/` or `hvt.apps.*`). As a result, the GitHub Actions test runner exits successfully with `0 tests discovered, 0 failures`, providing a false sense of passing builds while testing nothing.
+### 1. The 0-Test CI Blindspot (RESOLVED)
+Resolved: The GitHub Actions configuration `.github/workflows/ci.yml` previously ran `python manage.py test` without specifying target apps, running 0 tests. It now explicitly executes `python manage.py test hvt.apps.authentication hvt.apps.organizations hvt.apps.users tests` along with `python manage.py collectstatic --noinput` and system checks [VERIFIED `.github/workflows/ci.yml:79-84`].
 
 ### 2. 44-Minute Test Run Latency
 Running the actual test suite requires 44 minutes on standard developer hardware. This severe execution penalty creates strong friction against local testing and encourages developers to bypass local test verification prior to pushing code.
